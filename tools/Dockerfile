@@ -48,7 +48,7 @@ RUN mkdir -p /opt/verible \
 
 RUN mkdir -p /opt/bender/bin \
     && curl -fsSL "https://github.com/pulp-platform/bender/releases/download/${BENDER_VERSION}/bender-x86_64-unknown-linux-gnu.tar.xz" \
-    | tar -xJ -C /opt/bender/bin
+    | tar -xJ -C /opt/bender/bin --strip-components=1
 
 RUN curl -fsSL "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh \
     && uv python install ${PYTHON_VERSION}
