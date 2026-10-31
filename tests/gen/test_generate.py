@@ -104,6 +104,7 @@ def test_package_tables(tmp_path: Path) -> None:
     assert "localparam logic [1:0][31:0] AonApbRuleBase = '{32'h5000_1000, 32'h5000_0000};" in pkg
     assert "localparam logic [1:0] AonApbRuleSecure = 2'b01;" in pkg
     assert "localparam logic [63:0] Wdt0RegsBase = 64'h0000_0000_5000_0000;" in pkg
+    assert "localparam logic [63:0] Wdt0RegsSize = 64'h0000_0000_0000_1000;" in pkg
     assert max(len(line) for line in pkg.splitlines()) <= 100
 
 

@@ -245,14 +245,28 @@ def test_priority_and_default_slave() -> None:
     assert set(t.alias_enables) == {"1", "pin_i"}
 
 
+def test_region_access_polarity() -> None:
+    apb = _fabric(_spec(), "aon_apb")
+    ro_wo = (apb.addr_rules[0].model_copy(update={"access": "RO"}),
+             apb.addr_rules[1].model_copy(update={"access": "WO"}))  # fmt: skip
+    t = decode_tables(apb.model_copy(update={"addr_rules": ro_wo}))
+    assert [(r.no_read, r.no_write) for r in t.rules] == [(False, True), (True, False)]
+
+
 def test_pass_through_n_decodes_window_offsets() -> None:
     spec = _spec()
     br = spec.bridges[0].model_copy(update={"pass_through": False})
-    spec = spec.model_copy(update={"bridges": (br,)})
     apb = _fabric(spec, "aon_apb")
+    alias = Alias(base=0x5000_8000, size=0x1000, to=0x5000_1000, enable="always")
+    apb = apb.model_copy(
+        update={"decode": (apb.decode[0].model_copy(update={"aliases": (alias,)}),)}
+    )
+    fabrics = tuple(apb if f.name == "aon_apb" else f for f in spec.fabrics)
+    spec = spec.model_copy(update={"bridges": (br,), "fabrics": fabrics})
     assert fabric_offset(spec, apb) == 0x5000_0000
     t = decode_tables(apb, fabric_offset(spec, apb))
     assert [r.base for r in t.rules] == [0x0000_0000, 0x0000_1000]
+    assert [(a.base, a.to) for a in t.aliases] == [(0x8000, 0x1000)]
 
 
 def test_mixed_translation_is_rejected() -> None:
