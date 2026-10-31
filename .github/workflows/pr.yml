@@ -32,3 +32,31 @@ jobs:
         shell: bash
         run: uv run python scripts/check_spdx.py $(git ls-files '*.py') tools/Dockerfile
       - run: uv run pytest
+
+  golden:
+    # Regenerates the demo_ss sample, recalculates it with LibreOffice and checks it
+    # against tests/golden/demo_ss.xlsx. The recalculated file is uploaded so a schema
+    # change can refresh the committed golden.
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: uv sync --locked
+      - run: uv run bag template --sample -o out/demo_ss.xlsx
+      - run: uv run --no-project python scripts/recalc.py out/demo_ss.xlsx out/demo_ss.recalc.xlsx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-demo_ss
+          path: out/demo_ss.recalc.xlsx
+          if-no-files-found: error
+      - run: uv run pytest tests/golden
+        env:
+          BAG_RECALC_WORKBOOK: out/demo_ss.recalc.xlsx
