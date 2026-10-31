@@ -1,0 +1,1224 @@
+schema: '0.3'
+project:
+  name: demo_ss
+  revision: r4
+  author: Chris
+  sv_std: IEEE 1800-2017
+  output_dir: out/demo_ss
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_aon
+    mhz: 50
+    source: top port (AON osc)
+    domain: D_AON
+    reset: rst_aon_n
+  - name: clk_cpu
+    mhz: 1000
+    source: top port (CPU PLL)
+    domain: D_CPU
+    reset: rst_cpu_n
+  - name: clk_per
+    mhz: 100
+    source: top port (divider)
+    domain: D_PER
+    reset: rst_per_n
+  - name: clk_sys
+    mhz: 500
+    source: top port (SYS PLL)
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_aon_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port (POR)
+    domain: D_AON
+  - name: rst_cpu_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_CPU
+  - name: rst_per_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_PER
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: ahb_bus
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: mcu0
+        priority: null
+    slave_ports:
+      - index: 0
+        port: itcm0
+        priority: null
+      - index: 1
+        port: br_ahb2aon
+        priority: null
+      - index: 2
+        port: br_ahb2main
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: itcm0
+        region: mem
+        base: '0x0000_0000'
+        end: '0x0000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: br_ahb2main
+        region: sram
+        base: '0x1000_0000'
+        end: '0x1003_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: br_ahb2main
+        region: periph
+        base: '0x4000_0000'
+        end: '0x400F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_ahb2aon
+        region: aon
+        base: '0x5000_0000'
+        end: '0x5000_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: mcu0
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: aon_apb
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_ahb2aon
+        priority: null
+    slave_ports:
+      - index: 0
+        port: wdt0
+        priority: null
+      - index: 1
+        port: rtc0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: wdt0
+        region: regs
+        base: '0x5000_0000'
+        end: '0x5000_0FFF'
+        access: RW
+        secure: true
+      - slave_port: 1
+        slave: rtc0
+        region: regs
+        base: '0x5000_1000'
+        end: '0x5000_1FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_ahb2aon
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: cfg_bus
+    protocol: AXI4-Lite
+    topology: shared-bus
+    data_width: 32
+    addr_width: 32
+    domain: D_SYS
+    arbitration: fixed-priority
+    latency_mode: null
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint:
+      fifo_depth: 2
+      slice: cut
+    template: bag_axil_shared_bus
+    backing_ip: PULP axi_lite_mux + axi_lite_demux
+    master_ports:
+      - index: 0
+        port: br_main2cfg
+        priority: 1
+      - index: 1
+        port: sec0
+        priority: 0
+    slave_ports:
+      - index: 0
+        port: pmu0
+        priority: null
+      - index: 1
+        port: clkrst0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: pmu0
+        region: regs
+        base: '0x4100_0000'
+        end: '0x4100_0FFF'
+        access: RW
+        secure: true
+      - slave_port: 1
+        slave: clkrst0
+        region: regs
+        base: '0x4100_1000'
+        end: '0x4100_1FFF'
+        access: RW
+        secure: true
+    access_rules: []
+    decode:
+      - master: br_main2cfg
+        miss: DECERR
+        default_slave: null
+        aliases: []
+      - master: sec0
+        miss: DECERR
+        default_slave: null
+        aliases: []
+  - name: main_xbar
+    protocol: AXI4
+    topology: crossbar
+    data_width: 64
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: CUT_ALL_AX
+    max_mst_trans: 8
+    max_slv_trans: 8
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP axi_xbar
+    master_ports:
+      - index: 0
+        port: cpu0
+        priority: null
+      - index: 1
+        port: dma0
+        priority: null
+      - index: 2
+        port: dbg0
+        priority: null
+      - index: 3
+        port: br_ahb2main
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ddr0
+        priority: null
+      - index: 1
+        port: sram0
+        priority: null
+      - index: 2
+        port: br_main2per
+        priority: null
+      - index: 3
+        port: br_main2cfg
+        priority: null
+    id_width:
+      master_side: 6
+      slave_side: 8
+    max_parallel: 4
+    addr_rules:
+      - slave_port: 1
+        slave: sram0
+        region: mem
+        base: '0x1000_0000'
+        end: '0x1003_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: br_main2per
+        region: periph
+        base: '0x4000_0000'
+        end: '0x400F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: br_main2cfg
+        region: cfg
+        base: '0x4100_0000'
+        end: '0x410F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: ddr0
+        region: mem
+        base: '0x8000_0000'
+        end: '0xBFFF_FFFF'
+        access: RW
+        secure: false
+    access_rules:
+      - master: br_ahb2main
+        slave: ddr0
+        access: none
+      - master: dbg0
+        slave: ddr0
+        access: RO
+      - master: dma0
+        slave: br_main2cfg
+        access: none
+      - master: dma0
+        slave: br_main2per
+        access: none
+    decode:
+      - master: br_ahb2main
+        miss: DECERR
+        default_slave: null
+        aliases: []
+      - master: cpu0
+        miss: DECERR
+        default_slave: null
+        aliases:
+          - base: '0x0000_0000'
+            size: '0x0004_0000'
+            to: '0x1000_0000'
+            enable: boot_remap_i
+      - master: dbg0
+        miss: DECERR
+        default_slave: null
+        aliases: []
+      - master: dma0
+        miss: DECERR
+        default_slave: null
+        aliases: []
+  - name: periph_apb
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_PER
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_main2per
+        priority: null
+    slave_ports:
+      - index: 0
+        port: uart0
+        priority: null
+      - index: 1
+        port: gpio0
+        priority: null
+      - index: 2
+        port: timer0
+        priority: null
+      - index: 3
+        port: spi0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: uart0
+        region: regs
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: gpio0
+        region: regs
+        base: '0x4000_1000'
+        end: '0x4000_1FFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: timer0
+        region: regs
+        base: '0x4000_2000'
+        end: '0x4000_2FFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: spi0
+        region: regs
+        base: '0x4000_3000'
+        end: '0x4000_3FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_main2per
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu0
+    protocol: AXI4
+    fabric: main_xbar
+    data_width: 128
+    addr_width: 32
+    id_width: 6
+    user_width: 0
+    domain: D_CPU
+    max_outstanding_rd: 16
+    max_outstanding_wr: 16
+  - name: dbg0
+    protocol: AXI4-Lite
+    fabric: main_xbar
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dma0
+    protocol: AXI4
+    fabric: main_xbar
+    data_width: 64
+    addr_width: 32
+    id_width: 4
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 8
+    max_outstanding_wr: 8
+  - name: mcu0
+    protocol: AHB-Lite
+    fabric: ahb_bus
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_AON
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: sec0
+    protocol: AXI4-Lite
+    fabric: cfg_bus
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: clkrst0
+    protocol: AXI4-Lite
+    fabric: cfg_bus
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: ddr0
+    protocol: AXI4
+    fabric: main_xbar
+    data_width: 128
+    addr_width: 32
+    id_width: 8
+    id_width_auto: true
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: variable
+  - name: gpio0
+    protocol: APB4
+    fabric: periph_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: PSLVERR
+    wait_states: 0
+  - name: itcm0
+    protocol: AHB-Lite
+    fabric: ahb_bus
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: pmu0
+    protocol: AXI4-Lite
+    fabric: cfg_bus
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: rtc0
+    protocol: APB4
+    fabric: aon_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: PSLVERR
+    wait_states: 0
+  - name: spi0
+    protocol: APB4
+    fabric: periph_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: PSLVERR
+    wait_states: 0
+  - name: sram0
+    protocol: AXI4
+    fabric: main_xbar
+    data_width: 64
+    addr_width: 32
+    id_width: 8
+    id_width_auto: true
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 1
+  - name: timer0
+    protocol: APB4
+    fabric: periph_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: PSLVERR
+    wait_states: 0
+  - name: uart0
+    protocol: APB4
+    fabric: periph_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: PSLVERR
+    wait_states: 0
+  - name: wdt0
+    protocol: APB4
+    fabric: aon_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: PSLVERR
+    wait_states: 0
+bridges:
+  - name: br_ahb2aon
+    template: bag_ahb2apb
+    upstream: ahb_bus
+    downstream: aon_apb
+    window_base: '0x5000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 32
+    cdc: false
+  - name: br_ahb2main
+    template: bag_ahb2axi
+    upstream: ahb_bus
+    downstream: main_xbar
+    window_base: '0x1000_0000'
+    pass_through: true
+    fifo_depth: 2
+    upstream_protocol: AHB-Lite
+    downstream_protocol: AXI4
+    upstream_width: 32
+    downstream_width: 64
+    cdc: true
+  - name: br_main2cfg
+    template: bag_axi2axil
+    upstream: main_xbar
+    downstream: cfg_bus
+    window_base: '0x4100_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AXI4-Lite
+    upstream_width: 64
+    downstream_width: 32
+    cdc: false
+  - name: br_main2per
+    template: bag_axi2apb
+    upstream: main_xbar
+    downstream: periph_apb
+    window_base: '0x4000_0000'
+    pass_through: true
+    fifo_depth: 2
+    upstream_protocol: AXI4
+    downstream_protocol: APB4
+    upstream_width: 64
+    downstream_width: 32
+    cdc: true
+adapters:
+  - name: cpu0_cdc_2_main_xbar
+    type: cdc
+    port: cpu0
+    fabric: main_xbar
+    chain_index: 0
+    template: bag_cdc
+    params:
+      from: D_CPU
+      to: D_SYS
+    placed_in: demo_ss_bus_top
+    rtl_name: u_cpu0_cdc_2_main_xbar
+  - name: cpu0_dw_2_main_xbar
+    type: dw
+    port: cpu0
+    fabric: main_xbar
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 128
+      to: 64
+    placed_in: main_wrapper
+    rtl_name: u_cpu0_dw_2_main_xbar
+  - name: cpu0_fifo_2_main_xbar
+    type: fifo
+    port: cpu0
+    fabric: main_xbar
+    chain_index: 2
+    template: bag_fifo
+    params:
+      depth: 4
+    placed_in: main_wrapper
+    rtl_name: u_cpu0_fifo_2_main_xbar
+  - name: cpu0_cut_2_main_xbar
+    type: cut
+    port: cpu0
+    fabric: main_xbar
+    chain_index: 3
+    template: bag_cut
+    params:
+      stages: 1
+    placed_in: main_wrapper
+    rtl_name: u_cpu0_cut_2_main_xbar
+  - name: dbg0_pc_2_main_xbar
+    type: pc
+    port: dbg0
+    fabric: main_xbar
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4-Lite
+      to: AXI4
+    placed_in: main_wrapper
+    rtl_name: u_dbg0_pc_2_main_xbar
+  - name: dbg0_dw_2_main_xbar
+    type: dw
+    port: dbg0
+    fabric: main_xbar
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 32
+      to: 64
+    placed_in: main_wrapper
+    rtl_name: u_dbg0_dw_2_main_xbar
+  - name: main_xbar_dw_2_ddr0
+    type: dw
+    port: ddr0
+    fabric: main_xbar
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 64
+      to: 128
+    placed_in: main_wrapper
+    rtl_name: u_ddr0_upsizer
+  - name: main_xbar_fifo_2_ddr0
+    type: fifo
+    port: ddr0
+    fabric: main_xbar
+    chain_index: 1
+    template: bag_fifo
+    params:
+      depth: 8
+    placed_in: main_wrapper
+    rtl_name: u_main_xbar_fifo_2_ddr0
+  - name: main_xbar_cut_2_ddr0
+    type: cut
+    port: ddr0
+    fabric: main_xbar
+    chain_index: 2
+    template: bag_cut
+    params:
+      stages: 2
+    placed_in: main_wrapper
+    rtl_name: u_main_xbar_cut_2_ddr0
+  - name: dma0_fifo_2_main_xbar
+    type: fifo
+    port: dma0
+    fabric: main_xbar
+    chain_index: 0
+    template: bag_fifo
+    params:
+      depth: 2
+    placed_in: main_wrapper
+    rtl_name: u_dma0_fifo_2_main_xbar
+  - name: main_xbar_cut_2_sram0
+    type: cut
+    port: sram0
+    fabric: main_xbar
+    chain_index: 0
+    template: bag_cut
+    params:
+      stages: 1
+    placed_in: main_wrapper
+    rtl_name: u_main_xbar_cut_2_sram0
+port_options:
+  - port: br_ahb2aon
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: br_ahb2main
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_main2cfg
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_main2per
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: clkrst0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: cpu0
+    fifo_depth: 4
+    slice: cut
+    prot: drive
+    qos: drive
+    region: tie-0
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dbg0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: ddr0
+    fifo_depth: 8
+    slice: multicut-2
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dma0
+    fifo_depth: 2
+    slice: none
+    prot: tie-default
+    qos: drive
+    region: tie-0
+    cache: tie-default
+    lock: tie-0
+    pstrb: n/a
+    pslverr: n/a
+  - port: gpio0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: itcm0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: mcu0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: tie-0
+    pstrb: n/a
+    pslverr: n/a
+  - port: pmu0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: rtc0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+  - port: sec0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: spi0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: sram0
+    fifo_depth: 0
+    slice: cut
+    prot: drive
+    qos: tie-0
+    region: tie-0
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: timer0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: uart0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: wdt0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+memory_map:
+  - slave: itcm0
+    region: mem
+    base: '0x0000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: br_ahb2main
+    region: sram
+    base: '0x1000_0000'
+    size: '0x0004_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: sram0
+    region: mem
+    base: '0x1000_0000'
+    size: '0x0004_0000'
+    access: RW
+    secure: false
+    fabric: main_xbar
+  - slave: br_ahb2main
+    region: periph
+    base: '0x4000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: br_main2per
+    region: periph
+    base: '0x4000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: main_xbar
+  - slave: uart0
+    region: regs
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: periph_apb
+  - slave: gpio0
+    region: regs
+    base: '0x4000_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: periph_apb
+  - slave: timer0
+    region: regs
+    base: '0x4000_2000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: periph_apb
+  - slave: spi0
+    region: regs
+    base: '0x4000_3000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: periph_apb
+  - slave: pmu0
+    region: regs
+    base: '0x4100_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: true
+    fabric: cfg_bus
+  - slave: br_main2cfg
+    region: cfg
+    base: '0x4100_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: main_xbar
+  - slave: clkrst0
+    region: regs
+    base: '0x4100_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: true
+    fabric: cfg_bus
+  - slave: br_ahb2aon
+    region: aon
+    base: '0x5000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: wdt0
+    region: regs
+    base: '0x5000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: true
+    fabric: aon_apb
+  - slave: rtc0
+    region: regs
+    base: '0x5000_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: aon_apb
+  - slave: ddr0
+    region: mem
+    base: '0x8000_0000'
+    size: '0x4000_0000'
+    access: RW
+    secure: false
+    fabric: main_xbar
+hierarchy:
+  top: demo_ss_bus_top
+  wrappers:
+    - name: aon_wrapper
+      parent: demo_ss_bus_top
+    - name: main_wrapper
+      parent: demo_ss_bus_top
+    - name: per_wrapper
+      parent: main_wrapper
+  placement:
+    - instance: ahb_bus
+      kind: fabric
+      wrapper: aon_wrapper
+      rtl_name: u_ahb_bus
+    - instance: aon_apb
+      kind: fabric
+      wrapper: aon_wrapper
+      rtl_name: u_aon_apb
+    - instance: br_ahb2aon
+      kind: bridge
+      wrapper: aon_wrapper
+      rtl_name: u_br_ahb2aon
+    - instance: br_ahb2main
+      kind: bridge
+      wrapper: aon_wrapper
+      rtl_name: u_br_ahb2main
+    - instance: br_main2cfg
+      kind: bridge
+      wrapper: main_wrapper
+      rtl_name: u_br_main2cfg
+    - instance: br_main2per
+      kind: bridge
+      wrapper: main_wrapper
+      rtl_name: u_br_main2per
+    - instance: cfg_bus
+      kind: fabric
+      wrapper: main_wrapper
+      rtl_name: u_cfg_bus
+    - instance: cpu0_cdc_2_main_xbar
+      kind: adapter
+      wrapper: demo_ss_bus_top
+      rtl_name: u_cpu0_cdc_2_main_xbar
+    - instance: cpu0_cut_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_cpu0_cut_2_main_xbar
+    - instance: cpu0_dw_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_cpu0_dw_2_main_xbar
+    - instance: cpu0_fifo_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_cpu0_fifo_2_main_xbar
+    - instance: dbg0_dw_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_dbg0_dw_2_main_xbar
+    - instance: dbg0_pc_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_dbg0_pc_2_main_xbar
+    - instance: dma0_fifo_2_main_xbar
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_dma0_fifo_2_main_xbar
+    - instance: main_xbar
+      kind: fabric
+      wrapper: main_wrapper
+      rtl_name: u_main_xbar
+    - instance: main_xbar_cut_2_ddr0
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_main_xbar_cut_2_ddr0
+    - instance: main_xbar_cut_2_sram0
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_main_xbar_cut_2_sram0
+    - instance: main_xbar_dw_2_ddr0
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_ddr0_upsizer
+    - instance: main_xbar_fifo_2_ddr0
+      kind: adapter
+      wrapper: main_wrapper
+      rtl_name: u_main_xbar_fifo_2_ddr0
+    - instance: periph_apb
+      kind: fabric
+      wrapper: per_wrapper
+      rtl_name: u_periph_apb
+wrapper:
+  top: demo_ss_bus_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: demo_ss_bus_pkg
+  file_header: header.txt
+  extra_inputs:
+    - boot_remap_i
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br_ahb2aon
+      exposed: false
+      prefix: null
+    - port: br_ahb2main
+      exposed: false
+      prefix: null
+    - port: br_main2cfg
+      exposed: false
+      prefix: null
+    - port: br_main2per
+      exposed: false
+      prefix: null
+    - port: clkrst0
+      exposed: true
+      prefix: clkrst0_axil
+    - port: cpu0
+      exposed: true
+      prefix: cpu0_axi
+    - port: dbg0
+      exposed: true
+      prefix: dbg0_axil
+    - port: ddr0
+      exposed: true
+      prefix: ddr0_axi
+    - port: dma0
+      exposed: true
+      prefix: dma0_axi
+    - port: gpio0
+      exposed: true
+      prefix: gpio0_apb
+    - port: itcm0
+      exposed: true
+      prefix: itcm0_ahb
+    - port: mcu0
+      exposed: true
+      prefix: mcu0_ahb
+    - port: pmu0
+      exposed: true
+      prefix: pmu0_axil
+    - port: rtc0
+      exposed: true
+      prefix: rtc0_apb
+    - port: sec0
+      exposed: true
+      prefix: sec0_axil
+    - port: spi0
+      exposed: true
+      prefix: spi0_apb
+    - port: sram0
+      exposed: true
+      prefix: sram0_axi
+    - port: timer0
+      exposed: true
+      prefix: timer0_apb
+    - port: uart0
+      exposed: true
+      prefix: uart0_apb
+    - port: wdt0
+      exposed: true
+      prefix: wdt0_apb
+provenance:
+  bag_version: 0.0.1
+  source: demo_ss.xlsx
+  sha256: 5e51f2be4d3fa3b402dc9eae25c79ff29f61943476e76fae3476478267220a53
