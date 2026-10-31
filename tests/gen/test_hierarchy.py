@@ -88,5 +88,14 @@ def test_golden_plan_has_no_collisions() -> None:
 def test_boundary_collision_stops_generation(tmp_path: Path) -> None:
     spec = load(NESTED)
     w = spec.wrapper.model_copy(update={"extra_inputs": ("boot_remap_i", "wdt0_apb4_paddr")})
-    with pytest.raises(GenerateError, match="aon_wrapper: port wdt0_apb4_paddr is claimed by extra input"):
+    with pytest.raises(
+        GenerateError, match="wdt0_apb4_paddr of sub-wrapper aon_wrapper is claimed by extra"
+    ):
         generate(spec.model_copy(update={"wrapper": w}), tmp_path, CONFIGS)
+
+
+def test_clock_named_like_a_boundary_port_is_refused(tmp_path: Path) -> None:
+    spec = load(NESTED)
+    clock = spec.clocks[0].model_copy(update={"name": "wdt0_apb4_paddr"})
+    with pytest.raises(GenerateError, match="is claimed by clock wdt0_apb4_paddr and link wdt0"):
+        generate(spec.model_copy(update={"clocks": (clock,)}), tmp_path, CONFIGS)

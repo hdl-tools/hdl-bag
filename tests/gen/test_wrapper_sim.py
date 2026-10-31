@@ -44,3 +44,16 @@ def test_cli_flow(tmp_path: Path) -> None:
     assert "compile (verilator-build): 0 unwaived" in result.output
     lint_again = CliRunner().invoke(main, ["lint", str(tmp_path / "flow")])
     assert lint_again.exit_code == 0, lint_again.output
+
+
+# Hierarchy variants from the PR 4 review (tests/gen/hier_variants.py): lint and compile.
+@pytest.mark.parametrize("variant", ["deep", "sibling2dom", "midlca", "inputpass", "ties_internal"])
+@pytest.mark.parametrize("style", ["flat", "sv-interface"])
+def test_hierarchy_variant_lints_and_compiles(variant: str, style: str) -> None:
+    from hier_variants import build
+
+    root = REPO / "out" / "gen" / f"var_{variant}_{style}"
+    out = generate(build(variant), root, CONFIGS, style)
+    files = sources(out)
+    for report in (lint(files, out.top, root), compile_design(files, out.top, root)):
+        assert report.ok, report.format()

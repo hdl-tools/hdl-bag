@@ -22,7 +22,7 @@ from pathlib import Path
 
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
-from hdl_bag.gen.render import GenerateError, header  # noqa: F401 - re-exported
+from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import render_harness, render_interface, render_modules
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
@@ -49,6 +49,8 @@ class Outputs:
 
 
 def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
+    if rel in written:
+        raise GenerateError(f"{rel} would be written twice (a design-unit name collision)")
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:

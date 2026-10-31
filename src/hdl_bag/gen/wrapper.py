@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.decode import decode_tables, fabric_offset
-from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, collisions, plan
+from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, plan, problems
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, camel, environment, lit
 from hdl_bag.ir.model import Spec
@@ -353,10 +353,9 @@ def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str,
     """(module name, text) for the top and every sub-wrapper, children first."""
     spec = netlist.spec
     p: Plan = plan(netlist)
-    hits = collisions(netlist, p)
-    if hits:
-        w, port, owners = hits[0]
-        raise GenerateError(f"sub-wrapper {w}: port {port} is claimed by {', '.join(owners)}")
+    errors = [prob for prob in problems(netlist, p) if prob.error]
+    if errors:
+        raise GenerateError(f"{errors[0].what} ({errors[0].rule})")
     fixed = {c.name for c in spec.clocks} | {reset_net(c.domain) for c in spec.clocks}
     fixed |= set(spec.wrapper.extra_inputs)
     scopes: dict[str, Scope] = {}

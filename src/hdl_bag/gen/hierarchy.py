@@ -15,8 +15,10 @@ boundary-name collisions before anything is generated.
 """
 
 from dataclasses import dataclass, field
+from importlib.resources import files
 
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
+from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import subwrapper_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, towards_slave
@@ -90,6 +92,7 @@ def plan(netlist: Netlist) -> Plan:
     spec = netlist.spec
     top = spec.hierarchy.top
     p = Plan(top, {w.name: w.parent for w in spec.hierarchy.wrappers})
+    _validate(p, netlist)
     for w in [top, *p.parent]:
         p.children[w] = sorted(c for c, par in p.parent.items() if par == w)
         p.instances[w] = []
@@ -108,6 +111,24 @@ def plan(netlist: Netlist) -> Plan:
             for w in path[: path.index(lca)]:
                 p.boundaries[w].append(Boundary(buses[name], is_master))
     return p
+
+
+def _validate(p: Plan, netlist: Netlist) -> None:
+    """`bag check` guarantees a tree; an IR written by hand might not be one."""
+    if p.top in p.parent:
+        raise GenerateError(f"sub-wrapper {p.top} has the name of the top wrapper")
+    for w in p.parent:
+        seen, cur = {w}, w
+        while cur != p.top:
+            cur = p.parent.get(cur, "")
+            if cur != p.top and cur not in p.parent:
+                raise GenerateError(f"sub-wrapper {w}: parent {cur or '-'} is not a wrapper")
+            if cur in seen:
+                raise GenerateError(f"sub-wrapper {w} is in a parent loop")
+            seen.add(cur)
+    for inst in netlist.instances:
+        if inst.wrapper != p.top and inst.wrapper not in p.parent:
+            raise GenerateError(f"{inst.name} is placed in {inst.wrapper}, which is not a wrapper")
 
 
 def boundary_port(spec: Spec, bus: Bus, sig: str) -> str:
@@ -141,8 +162,68 @@ def boundary_names(netlist: Netlist, p: Plan) -> dict[str, dict[str, list[str]]]
 def collisions(netlist: Netlist, p: Plan) -> list[tuple[str, str, list[str]]]:
     """(sub-wrapper, port name, claimants) for every boundary port claimed twice."""
     return [
-        (w, name, owners)
+        (w, name, list(dict.fromkeys(owners)))
         for w, claims in sorted(boundary_names(netlist, p).items())
         for name, owners in sorted(claims.items())
-        if len(owners) > 1
+        if len(set(owners)) > 1
     ]
+
+
+def reserved_units(netlist: Netlist) -> dict[str, str]:
+    """Design units the generator writes besides the wrappers: name -> what it is."""
+    spec = netlist.spec
+    inhouse = files("hdl_bag") / "rtl" / "inhouse"
+    units = {f.name[:-3]: "an in-house module" for f in inhouse.iterdir() if f.name.endswith(".sv")}
+    units |= {f"{spec.project.name}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
+    units[f"{spec.hierarchy.top}_flat"] = "the generated flat harness"
+    units[spec.wrapper.package] = "the parameter package"
+    return units
+
+
+def instance_names(netlist: Netlist, p: Plan) -> dict[str, dict[str, list[str]]]:
+    """Per wrapper: instance name -> what claims it (instances, sub-wrappers, reset syncs)."""
+    out: dict[str, dict[str, list[str]]] = {}
+    for w in p.wrappers():
+        claims: dict[str, list[str]] = {}
+        for inst in p.instances[w]:
+            claims.setdefault(inst.rtl_name, []).append(f"{inst.kind} {inst.name}")
+        for c in p.children[w]:
+            claims.setdefault(f"u_{c}", []).append(f"sub-wrapper {c}")
+        if w == p.top:
+            for clock in netlist.spec.clocks:
+                what = f"the reset synchronizer of {clock.domain}"
+                claims.setdefault(f"u_bag_rst_sync_{clock.domain}", []).append(what)
+        out[w] = claims
+    return out
+
+
+@dataclass(frozen=True)
+class Problem:
+    rule: str
+    wrapper: str
+    what: str
+    error: bool = True
+
+
+def problems(netlist: Netlist, p: Plan) -> list[Problem]:
+    """Naming and placement problems of the hierarchy that the row-level checks cannot see."""
+    out = [
+        Problem("WRAP-NAME-COLLISION", w,
+                f"boundary port {port} of sub-wrapper {w} is claimed by {' and '.join(owners)}")
+        for w, port, owners in collisions(netlist, p)
+    ]  # fmt: skip
+    for w, claims in instance_names(netlist, p).items():
+        for name, owners in sorted(claims.items()):
+            if len(owners) > 1:
+                what = f"instance name {name} in {w} is used by {' and '.join(owners)}"
+                out.append(Problem("HIER-RTL-NAME", w, what))
+    units = reserved_units(netlist)
+    for w in sorted(p.parent):
+        if w in units:
+            out.append(
+                Problem("HIER-RESERVED-NAME", w, f"sub-wrapper {w} has the name of {units[w]}")
+            )
+        subtree = [x for x in p.wrappers() if w in p.path_up(x)]
+        if not any(p.instances[x] for x in subtree):
+            out.append(Problem("HIER-EMPTY", w, f"sub-wrapper {w} has no instances", error=False))
+    return out

@@ -209,17 +209,16 @@ def check_wrapper_ports(ctx: Context) -> None:
 
 
 def check_boundary_names(ctx: Context, result: "CheckResult") -> None:
-    """Sub-wrapper boundary port names must be unique within each sub-wrapper.
-
-    The names come from the generator's routing plan (pure; no RTL is generated), so
-    `bag check` reports a collision before anything is written.
+    """Checks on the generator's routing plan (pure; no RTL is generated), reported by
+    `bag check` before anything is written: boundary port names unique per sub-wrapper,
+    instance names unique per wrapper, sub-wrapper names not taken by a generated design
+    unit, and (warning) sub-wrappers with no instances.
     """
-    from hdl_bag.gen.hierarchy import collisions, plan
+    from hdl_bag.gen.hierarchy import plan, problems
     from hdl_bag.gen.netlist import build_netlist
     from hdl_bag.ir.resolve import resolve
 
     netlist = build_netlist(resolve(result))
     rows = {ctx.text(r["Sub-wrapper"]): r for r in ctx.raw.sub_wrappers}
-    for w, port, owners in collisions(netlist, plan(netlist)):
-        ctx.report("WRAP-NAME-COLLISION", rows[w]["Sub-wrapper"],
-                   f"boundary port {port} of sub-wrapper {w} is claimed by {' and '.join(owners)}")  # fmt: skip
+    for prob in problems(netlist, plan(netlist)):
+        ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
