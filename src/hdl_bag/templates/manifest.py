@@ -38,6 +38,9 @@ class Manifest(BaseModel):
     licence: str  # SPDX identifier of the backing implementation
     qualification: Literal["unqualified", "qualified"] = "unqualified"
     opaque: bool = False  # True: user supplies the RTL (bag_external)
+    # Generation: a template with RTL has an instance.sv.j2 next to its manifest that
+    # renders one instantiation; templates without RTL yet stop `bag generate`.
+    rtl: bool = False
 
     @model_validator(mode="after")
     def _by_kind(self) -> "Manifest":

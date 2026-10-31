@@ -2,12 +2,11 @@
 # Copyright 2026 The hdl-bag Authors
 """In-house RTL: lint-clean with every tool, and directed cocotb smoke tests (eda)."""
 
-import os
-import shutil
 from importlib.resources import files
 from pathlib import Path
 
 import pytest
+from simrun import run_cocotb
 
 from hdl_bag.flows import lint
 
@@ -18,9 +17,6 @@ LIBRARY = sorted(INHOUSE.glob("*.sv"))
 TB = HERE / "tb"
 
 pytestmark = pytest.mark.eda
-
-# Fixed so a failure reproduces; cocotb derives each test's seed from it and the name.
-SEED = int(os.environ.get("BAG_COCOTB_SEED", "20261031"))
 
 
 def _sources(*extra: Path) -> list[Path]:
@@ -43,38 +39,7 @@ def test_lint_clean(top: str) -> None:
 
 
 def _run(top: str, module: str, build: str, params: dict[str, int], env: dict[str, str]) -> None:
-    from cocotb_tools.check_results import get_results
-    from cocotb_tools.runner import get_runner
-
-    build_dir = REPO / "out" / "sim" / build
-    if shutil.which("ccache") is None:
-        os.environ["OBJCACHE"] = ""  # Verilator's makefiles default to ccache
-    runner = get_runner("verilator")
-    runner.build(
-        sources=_sources(TB / f"{top}.sv"),
-        hdl_toplevel=top,
-        parameters=params,
-        build_dir=build_dir,
-        build_args=["-Wno-fatal"],
-        always=True,
-    )
-    results = runner.test(
-        hdl_toplevel=top,
-        test_module=module,
-        test_dir=HERE,
-        build_dir=build_dir,
-        results_xml=str(build_dir / "results.xml"),
-        extra_env={
-            **env,
-            "COCOTB_RANDOM_SEED": str(SEED),
-            "PYTHONPATH": os.pathsep.join([str(HERE), os.environ.get("PYTHONPATH", "")]),
-        },
-    )
-    total, failed = get_results(results)
-    expected = (HERE / f"{module}.py").read_text().count("@cocotb.test(")
-    assert (total, failed) == (expected, 0), (
-        f"{failed} of {total} cocotb tests failed (expected {expected} tests); seed {SEED}"
-    )
+    run_cocotb(_sources(TB / f"{top}.sv"), top, HERE / f"{module}.py", build, params, env)
 
 
 @pytest.mark.parametrize("miss_to_default", [0, 1])

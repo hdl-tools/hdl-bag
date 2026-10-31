@@ -59,7 +59,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-mypy_path = "src"
+mypy_path = "src:tests/rtl"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

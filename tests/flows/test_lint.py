@@ -169,3 +169,10 @@ def test_tool_flags_dirty_rtl(tmp_path: Path, tool: str) -> None:
     report = lint([Path("dirty.sv")], "dirty", tmp_path, tools=[tool])
     assert not report.ok
     assert all(f.file == "dirty.sv" for f in report.unwaived if f.file), report.format()
+
+
+def test_compile_reports_errors_only() -> None:
+    from hdl_bag.flows.compile import VerilatorBuild
+
+    found = VerilatorBuild("obj/top").parse(VERILATOR_OUT, ROOT)
+    assert [(f.rule, f.severity) for f in found] == [("error", "error")]

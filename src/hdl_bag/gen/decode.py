@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+"""Per-fabric decode tables, independent of the template that consumes them.
+
+The tables follow bag_addr_decode's parameter set: address rules (one per region on the
+fabric), per-master connectivity and Access_Rules, miss handling and aliases. Every
+table has at least one entry, so a fabric without regions or aliases still elaborates:
+a placeholder rule denies everything, and a placeholder alias is never enabled.
+"""
+
+from dataclasses import dataclass
+
+from hdl_bag.ir.model import Fabric
+
+
+@dataclass(frozen=True)
+class Rule:
+    base: int
+    mask: int  # size - 1
+    slave: int  # slave port index; == no_slaves for the placeholder
+    no_read: bool
+    no_write: bool
+    secure: bool
+
+
+@dataclass(frozen=True)
+class Alias:
+    master: int
+    base: int
+    mask: int
+    to: int
+    enable: str  # "always" or a top-level input
+
+
+@dataclass(frozen=True)
+class DecodeTables:
+    addr_width: int
+    no_masters: int
+    no_slaves: int
+    rules: tuple[Rule, ...]
+    connect: tuple[tuple[bool, ...], ...]  # [master][slave]
+    mst_no_read: tuple[tuple[bool, ...], ...]
+    mst_no_write: tuple[tuple[bool, ...], ...]
+    miss_to_default: tuple[bool, ...]  # [master]
+    default_slave: tuple[int, ...]
+    aliases: tuple[Alias, ...]
+    priority: tuple[int, ...]  # [master]; 0 when the fabric is not fixed-priority
+
+    @property
+    def alias_enables(self) -> tuple[str, ...]:
+        """Enable of each alias entry: a top-level input, "1" (always) or "0" (placeholder)."""
+        return tuple(
+            "0" if not a.enable else "1" if a.enable == "always" else a.enable for a in self.aliases
+        )
+
+
+def decode_tables(fabric: Fabric) -> DecodeTables:
+    masters = {p.port: p.index for p in fabric.master_ports}
+    slaves = {p.port: p.index for p in fabric.slave_ports}
+    nm, ns = len(masters), len(slaves)
+
+    rules = [
+        Rule(r.base, r.end - r.base, r.slave_port, r.access == "WO", r.access == "RO", r.secure)
+        for r in fabric.addr_rules
+    ] or [Rule(0, 0, ns, True, True, False)]
+
+    connect = [[True] * ns for _ in range(nm)]
+    no_read = [[False] * ns for _ in range(nm)]
+    no_write = [[False] * ns for _ in range(nm)]
+    for a in fabric.access_rules:
+        m, s = masters[a.master], slaves[a.slave]
+        if a.access == "none":
+            connect[m][s] = False
+        elif a.access == "RO":
+            no_write[m][s] = True
+        else:  # WO
+            no_read[m][s] = True
+
+    miss = [False] * nm
+    default = [0] * nm
+    aliases = []
+    for d in fabric.decode:
+        m = masters[d.master]
+        if d.miss == "default-slave" and d.default_slave is not None:
+            miss[m], default[m] = True, slaves[d.default_slave]
+        aliases += [Alias(m, a.base, a.size - 1, a.to, a.enable) for a in d.aliases]
+    aliases.sort(key=lambda a: (a.master, a.base))
+
+    priority = [0] * nm
+    if fabric.arbitration == "fixed-priority":
+        for p in fabric.master_ports:
+            priority[p.index] = p.priority or 0
+
+    return DecodeTables(
+        addr_width=fabric.addr_width,
+        no_masters=nm,
+        no_slaves=ns,
+        rules=tuple(rules),
+        connect=tuple(map(tuple, connect)),
+        mst_no_read=tuple(map(tuple, no_read)),
+        mst_no_write=tuple(map(tuple, no_write)),
+        miss_to_default=tuple(miss),
+        default_slave=tuple(default),
+        aliases=tuple(aliases) or (Alias(0, 0, 0, 0, ""),),
+        priority=tuple(priority),
+    )

@@ -55,11 +55,37 @@ class Slot:
         self.sig.value = sh.word
 
 
-class Port:
-    """Named signals of one bus port; each name maps to (signal, width) and is a Slot."""
+class _Tied:
+    """A signal the DUT does not have (tied off at the wrapper): reads a constant."""
 
-    def __init__(self, dut: Any, index: int, signals: dict[str, tuple[str, int]]) -> None:
-        self._slots = {n: Slot(getattr(dut, sig), index, w) for n, (sig, w) in signals.items()}
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def get(self) -> int:
+        return self.value
+
+    def set(self, v: int) -> None:
+        pass
+
+
+class Port:
+    """Named signals of one bus port; each name maps to (signal, width) and is a Slot.
+
+    With TIED, a signal the DUT does not expose reads as TIED[name] (default 0)."""
+
+    def __init__(
+        self,
+        dut: Any,
+        index: int,
+        signals: dict[str, tuple[str, int]],
+        tied: dict[str, int] | None = None,
+    ) -> None:
+        self._slots: dict[str, Slot | _Tied] = {}
+        for n, (sig, w) in signals.items():
+            if tied is not None and not hasattr(dut, sig):
+                self._slots[n] = _Tied(tied.get(n, 0) & ((1 << w) - 1))
+            else:
+                self._slots[n] = Slot(getattr(dut, sig), index, w)
 
     def __getitem__(self, name: str) -> int:
         return self._slots[name].get()
@@ -91,6 +117,23 @@ def fabric_port(
         width = width if n != "pstrb" else dw // 8
         sigs[n] = (f"{side}_{n}_{'o' if n in out else 'i'}", width)
     return Port(dut, index, sigs)
+
+
+def wrapper_port(
+    dut: Any,
+    prefix: str,
+    kind: dict[str, int],
+    aw: int,
+    dw: int,
+    tied: dict[str, int] | None = None,
+) -> Port:
+    """A flat wrapper port PREFIX_<signal>. Signals the wrapper does not expose (tied off
+    by Port_Options) read as TIED (default 0); writes to them are dropped."""
+    sigs = {}
+    for n, w in kind.items():
+        width = w or (aw if "addr" in n else dw)
+        sigs[n] = (f"{prefix}_{n}", width if n != "pstrb" else dw // 8)
+    return Port(dut, 0, sigs, tied or {})
 
 
 # ---------------------------------------------------------------------------- APB
