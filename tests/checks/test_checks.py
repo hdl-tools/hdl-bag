@@ -255,6 +255,14 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Hierarchy row 16: nowhere is not defined in the Sub-wrapper table (HIER-UNKNOWN-SUBWRAPPER)"]),
     ("HIER-PLACED-TWICE", [("Hierarchy", 27, "Instance", "main_xbar"), ("Hierarchy", 27, "Sub-wrapper", "aon_wrapper")],
      ["Hierarchy row 27: main_xbar is already placed on row 16 (HIER-PLACED-TWICE)"]),
+    ("HIER-RTL-NAME", [("Hierarchy", 16, "RTL instance name", "u_cfg_bus")],
+     ["Hierarchy row 6: instance name u_cfg_bus in main_wrapper is used by fabric cfg_bus and fabric main_xbar (HIER-RTL-NAME)"]),
+    ("HIER-RTL-NAME-child", [("Hierarchy", 16, "RTL instance name", "u_per_wrapper")],
+     ["Hierarchy row 6: instance name u_per_wrapper in main_wrapper is used by fabric main_xbar and sub-wrapper per_wrapper (HIER-RTL-NAME)"]),
+    ("HIER-RESERVED-NAME", [("Hierarchy", 7, "Sub-wrapper", "bag_sync"), ("Hierarchy", 20, "Sub-wrapper", "bag_sync")],
+     ["Hierarchy row 7: sub-wrapper bag_sync has the name of an in-house module (HIER-RESERVED-NAME)"]),
+    ("HIER-EMPTY", [("Hierarchy", 9, "Sub-wrapper", "spare_wrapper"), ("Hierarchy", 9, "Parent", "demo_ss_bus_top")],
+     ["Hierarchy row 9: sub-wrapper spare_wrapper has no instances (HIER-EMPTY)"]),
     ("WRAP-PORT-NOT-LISTED", _clear("Wrapper", 31, ("Port", "Exposed at top", "Top-level prefix")),
      ["Wrapper: master sec0 is not listed under Exposed ports (WRAP-PORT-NOT-LISTED)"]),
     ("WRAP-UNKNOWN-PORT", [("Wrapper", 38, "Port", "ghost"), ("Wrapper", 38, "Exposed at top", "Y")],
@@ -265,6 +273,8 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Wrapper row 34: bridge br_main2per is always internal; set N (WRAP-INTERNAL-PORT)"]),
     ("WRAP-NAME-COLLISION", [("Wrapper", 11, "Value", "boot_remap_i, cpu0_axi_awaddr")],
      ["Wrapper row 18: top-level port cpu0_axi_awaddr of cpu0 collides with Wrapper > Extra top-level inputs (WRAP-NAME-COLLISION)"]),
+    ("WRAP-NAME-COLLISION-boundary", [("Wrapper", 11, "Value", "boot_remap_i, br_main2per_2_periph_apb_apb4_paddr")],
+     ["Hierarchy row 7: boundary port br_main2per_2_periph_apb_apb4_paddr of sub-wrapper per_wrapper is claimed by extra input br_main2per_2_periph_apb_apb4_paddr and link br_main2per_2_periph_apb (WRAP-NAME-COLLISION)"]),
 ]  # fmt: skip
 
 

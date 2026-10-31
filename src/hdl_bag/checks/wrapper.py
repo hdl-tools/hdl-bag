@@ -2,7 +2,7 @@
 # Copyright 2026 The hdl-bag Authors
 """Hierarchy (sub-wrappers, placement) and Wrapper (exposed ports, name collisions)."""
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
@@ -14,6 +14,9 @@ from hdl_bag.protocols import (
     Protocol,
     port_signals,
 )
+
+if TYPE_CHECKING:
+    from hdl_bag.checks import CheckResult
 
 
 def check_hierarchy(ctx: Context) -> None:
@@ -203,3 +206,19 @@ def check_wrapper_ports(ctx: Context) -> None:
                     "Wrapper",
                     f"{kind} {name} is not listed under Exposed ports",
                 )
+
+
+def check_boundary_names(ctx: Context, result: "CheckResult") -> None:
+    """Checks on the generator's routing plan (pure; no RTL is generated), reported by
+    `bag check` before anything is written: boundary port names unique per sub-wrapper,
+    instance names unique per wrapper, sub-wrapper names not taken by a generated design
+    unit, and (warning) sub-wrappers with no instances.
+    """
+    from hdl_bag.gen.hierarchy import plan, problems
+    from hdl_bag.gen.netlist import build_netlist
+    from hdl_bag.ir.resolve import resolve
+
+    netlist = build_netlist(resolve(result))
+    rows = {ctx.text(r["Sub-wrapper"]): r for r in ctx.raw.sub_wrappers}
+    for prob in problems(netlist, plan(netlist)):
+        ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)

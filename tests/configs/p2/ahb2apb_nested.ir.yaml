@@ -1,0 +1,317 @@
+schema: '0.3'
+project:
+  name: demo_ss
+  revision: r4
+  author: Chris
+  sv_std: IEEE 1800-2017
+  output_dir: out/demo_ss
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_aon
+    mhz: 50
+    source: top port (AON osc)
+    domain: D_AON
+    reset: rst_aon_n
+resets:
+  - name: rst_aon_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port (POR)
+    domain: D_AON
+fabrics:
+  - name: ahb_bus
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: mcu0
+        priority: null
+    slave_ports:
+      - index: 0
+        port: itcm0
+        priority: null
+      - index: 1
+        port: br_ahb2aon
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: itcm0
+        region: mem
+        base: '0x0000_0000'
+        end: '0x0000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_ahb2aon
+        region: aon
+        base: '0x5000_0000'
+        end: '0x5000_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: mcu0
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: aon_apb
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_ahb2aon
+        priority: null
+    slave_ports:
+      - index: 0
+        port: wdt0
+        priority: null
+      - index: 1
+        port: rtc0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: wdt0
+        region: regs
+        base: '0x5000_0000'
+        end: '0x5000_0FFF'
+        access: RW
+        secure: true
+      - slave_port: 1
+        slave: rtc0
+        region: regs
+        base: '0x5000_1000'
+        end: '0x5000_1FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_ahb2aon
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: mcu0
+    protocol: AHB-Lite
+    fabric: ahb_bus
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_AON
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: itcm0
+    protocol: AHB-Lite
+    fabric: ahb_bus
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: rtc0
+    protocol: APB4
+    fabric: aon_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: PSLVERR
+    wait_states: 0
+  - name: wdt0
+    protocol: APB4
+    fabric: aon_apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: PSLVERR
+    wait_states: 0
+bridges:
+  - name: br_ahb2aon
+    template: bag_ahb2apb
+    upstream: ahb_bus
+    downstream: aon_apb
+    window_base: '0x5000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 32
+    cdc: false
+adapters: []
+port_options:
+  - port: br_ahb2aon
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: itcm0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: mcu0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: tie-0
+    pstrb: n/a
+    pslverr: n/a
+  - port: rtc0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+  - port: wdt0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+memory_map:
+  - slave: itcm0
+    region: mem
+    base: '0x0000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: br_ahb2aon
+    region: aon
+    base: '0x5000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_bus
+  - slave: wdt0
+    region: regs
+    base: '0x5000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: true
+    fabric: aon_apb
+  - slave: rtc0
+    region: regs
+    base: '0x5000_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: aon_apb
+hierarchy:
+  top: demo_ss_bus_top
+  wrappers:
+    - name: aon_wrapper
+      parent: demo_ss_bus_top
+    - name: per_wrapper
+      parent: aon_wrapper
+  placement:
+    - instance: ahb_bus
+      kind: fabric
+      wrapper: aon_wrapper
+      rtl_name: u_ahb_bus
+    - instance: aon_apb
+      kind: fabric
+      wrapper: per_wrapper
+      rtl_name: u_apb_mux
+    - instance: br_ahb2aon
+      kind: bridge
+      wrapper: demo_ss_bus_top
+      rtl_name: u_br_ahb2aon
+wrapper:
+  top: demo_ss_bus_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: demo_ss_bus_pkg
+  file_header: header.txt
+  extra_inputs:
+    - boot_remap_i
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br_ahb2aon
+      exposed: false
+      prefix: null
+    - port: itcm0
+      exposed: true
+      prefix: itcm0_ahb
+    - port: mcu0
+      exposed: true
+      prefix: mcu0_ahb
+    - port: rtc0
+      exposed: true
+      prefix: rtc0_apb
+    - port: wdt0
+      exposed: true
+      prefix: wdt0_apb
+provenance:
+  bag_version: 0.0.1
+  source: ahb2apb_nested.xlsx
+  sha256: 4c0e0b5360839becc9513fe50bcfe18ba37494592c6b86bda56b0ca8d6f3ebc1

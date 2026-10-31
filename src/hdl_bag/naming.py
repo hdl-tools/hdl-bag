@@ -11,3 +11,16 @@ def flat_signal_name(pattern: str, port: str, proto: str, signal: str, prefix: s
     """
     stem = pattern.replace("{port}_{proto}", prefix) if prefix else pattern
     return stem.replace("{port}", port).replace("{proto}", proto).replace("{signal}", signal)
+
+
+def subwrapper_signal_name(pattern: str, instance: str, proto: str, signal: str) -> str:
+    """Sub-wrapper boundary port name (Wrapper > Sub-wrapper port naming).
+
+    ``{instance}`` is the link crossing the boundary: the bus name (an exposed port's
+    name, or ``<from>_2_<to>`` for a link between two instances).
+    """
+    return (
+        pattern.replace("{instance}", instance)
+        .replace("{proto}", proto)
+        .replace("{signal}", signal)
+    )
