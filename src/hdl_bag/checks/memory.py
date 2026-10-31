@@ -62,6 +62,7 @@ def _pow2(v: int) -> bool:
 def check_memory_map(ctx: Context) -> list[Region]:
     regions: list[Region] = []
     names: dict[tuple[str, str], int] = {}
+    blocks: dict[str, Region] = {}  # D29: a slave's first region
     for row in ctx.raw.memory_map:
         target = ctx.text(row["Slave / bridge"], required=True)
         rname = ctx.name(row["Region"])
@@ -126,17 +127,23 @@ def check_memory_map(ctx: Context) -> list[Region]:
                 ctx.report("MM-ADDR-RANGE", row["Size (hex)"],
                            f"size {_hex(size)} exceeds the {s_addr}-bit address space of {target}")  # fmt: skip
                 continue
-            # D29: a narrow slave sees the low address bits, so its region must start
-            # on a multiple of its own address space (it then sees offsets from 0).
+            # D29: a narrow slave sees the low address bits, so all its regions must lie
+            # in one 2^width-aligned block or two of them would look the same to it.
+            first = blocks.get(target)
             if (
                 isinstance(s_addr, int)
                 and isinstance(f_addr, int)
                 and s_addr < f_addr
-                and base % (1 << s_addr)
+                and first is not None
+                and first.base >> s_addr != base >> s_addr
             ):
+                lo = first.base >> s_addr << s_addr
                 ctx.report("MM-SLAVE-ALIGN", row["Base (hex)"],
-                           f"base {_hex(base)} is not aligned to the {s_addr}-bit address space of {target}")  # fmt: skip
+                           f"{target} {r.span()} is outside the {s_addr}-bit block "
+                           f"{_hex(lo)}..{_hex(lo + (1 << s_addr) - 1)} of its region "
+                           f"{first.name} ({first.row.where})")  # fmt: skip
                 continue
+            blocks.setdefault(target, r)
         clash = next((o for o in regions if o.fabric == fabric and o.overlaps(r.base, r.end)), None)
         if clash:
             ctx.report("MM-OVERLAP", row["Base (hex)"],

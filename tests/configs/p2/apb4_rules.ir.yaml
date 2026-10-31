@@ -120,7 +120,7 @@ slaves:
     protocol: APB4
     fabric: apb
     data_width: 32
-    addr_width: 32
+    addr_width: 16
     id_width: null
     id_width_auto: false
     user_width: 0
@@ -287,4 +287,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_rules.xlsx
-  sha256: 05ba4d16d6aab29c4f30caf03edf3c02c4cd5a6f885a673ae429af46749a7881
+  sha256: 69625ed026df26ff36d3aa1a5e7a7f31534bef5561de58f3177ec47fa60a0af8
