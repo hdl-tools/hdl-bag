@@ -80,7 +80,7 @@ def signal_applies(column: str, protocol: Protocol, is_slave: bool) -> bool:
 
 # Signals each optional column controls (removed from the wrapper when tied).
 OPTIONAL_SIGNAL_NAMES: Final[dict[str, frozenset[str]]] = {
-    "PROT": frozenset({"awprot", "arprot", "hprot", "pprot"}),
+    "PROT": frozenset({"awprot", "arprot", "hprot", "hnonsec", "pprot"}),
     "QOS": frozenset({"awqos", "arqos"}),
     "REGION": frozenset({"awregion", "arregion"}),
     "CACHE": frozenset({"awcache", "arcache"}),
@@ -103,8 +103,9 @@ _AXI4_LITE: Final = (
     "bresp", "bvalid", "bready", "araddr", "arprot", "arvalid", "arready",
     "rdata", "rresp", "rvalid", "rready",
 )  # fmt: skip
+# hnonsec is the AMBA 5 AHB security signal (D27): AHB-Lite HPROT has no secure bit.
 _AHB_MASTER: Final = (
-    "haddr", "hburst", "hmastlock", "hprot", "hsize", "htrans", "hwdata", "hwrite",
+    "haddr", "hburst", "hmastlock", "hprot", "hnonsec", "hsize", "htrans", "hwdata", "hwrite",
     "hrdata", "hready", "hresp",
 )  # fmt: skip
 # HMASTLOCK is not forwarded to slaves in v1 (D26).

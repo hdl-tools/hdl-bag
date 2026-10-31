@@ -41,9 +41,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
     "types-openpyxl>=3.1.5.20261017",
-]
-# Simulation (cocotb smoke tests); installed in the tools image only.
-sim = [
+    # cocotb smoke tests (pytest -m eda); installed everywhere so mypy sees its types.
     "cocotb==2.1.0",
 ]
 
@@ -79,3 +77,4 @@ markers = ["eda: needs the EDA tools (Verilator, slang, Verible, cocotb)"]
 "tests/checks/*.py" = ["E501"]
 "tests/test_cli.py" = ["E501"]
 "tests/flows/*.py" = ["E501"]
+"tests/rtl/*.py" = ["E501"]

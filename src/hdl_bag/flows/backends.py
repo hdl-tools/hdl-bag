@@ -37,7 +37,7 @@ class Slang:
 
     def command(self, files: list[Path], top: str) -> list[str]:
         return [
-            self.executable, "--quiet", "-Weverything", "--top", top,
+            self.executable, "--quiet", "-Weverything", *slang_flags(), "--top", top,
             *(f.as_posix() for f in files),
         ]  # fmt: skip
 
@@ -101,6 +101,24 @@ class Verible:
                             m["msg"])
                 )  # fmt: skip
         return out
+
+
+def slang_flags() -> list[str]:
+    """Options from the packaged config/slang.flags."""
+    return parse_flags((files_root() / "slang.flags").read_text(encoding="utf-8"))
+
+
+def parse_flags(text: str) -> list[str]:
+    """One option per line, each with a ``# reason``; blank and comment lines are skipped."""
+    out = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        option, sep, reason = raw.partition("#")
+        if not sep or not reason.strip():
+            raise ValueError(f"slang.flags line {n}: '{option.strip()}' has no reason")
+        out.append(option.strip())
+    return out
 
 
 def files_root() -> Traversable:

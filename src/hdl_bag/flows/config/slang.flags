@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+#
+# slang warning options on top of -Weverything. One option per line, each followed by
+# "# <reason>". A line without a reason is rejected when the lint flow loads this file.
+-Wno-unused-def  # file lists hold whole libraries (bag_sync, ...); unused modules are expected
+-Wno-case-redundant-default  # every case lists its enum values and keeps a default for X/reset safety
+-Wno-useless-cast  # width casts in parameterized RTL are identities for some parameter values
+-Wno-unused-but-set-variable  # the `unused` sink idiom; unused signals are checked by Verilator UNUSED*

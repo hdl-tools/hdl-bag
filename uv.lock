@@ -161,14 +161,12 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cocotb" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "types-openpyxl" },
-]
-sim = [
-    { name = "cocotb" },
 ]
 
 [package.metadata]
@@ -182,13 +180,13 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cocotb", specifier = "==2.1.0" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.5" },
     { name = "types-openpyxl", specifier = ">=3.1.5.20261017" },
 ]
-sim = [{ name = "cocotb", specifier = "==2.1.0" }]
 
 [[package]]
 name = "hypothesis"
