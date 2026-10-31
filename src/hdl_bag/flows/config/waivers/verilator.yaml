@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+#
+# verilator waivers for hdl-bag in-house and generated RTL. One entry per waived site;
+# every entry needs a reason. See hdl_bag/flows/waivers.py for the format.
+[]
