@@ -18,6 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.decode import decode_tables, fabric_offset
+from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, collisions, plan
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, camel, environment, lit
 from hdl_bag.ir.model import Spec
@@ -56,6 +57,7 @@ class Scope:
     domains: set[str] = field(default_factory=set)
     inputs_used: set[str] = field(default_factory=set)
     reserved: set[str] = field(default_factory=set)  # port names of this module
+    boundary: dict[str, Boundary] = field(default_factory=dict)  # sub-wrapper boundary
     _declared: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -72,6 +74,8 @@ class Scope:
 
     def ref(self, bus: Bus, sig: str) -> str:
         """The wire carrying SIG of BUS in this module (assumes it exists and is not tied)."""
+        if bus.name in self.boundary:
+            return boundary_port(self.spec, bus, sig)
         if bus.name in self.external:
             if self.style == "flat":
                 return self.flat_name(bus, sig)
@@ -287,33 +291,113 @@ def _resets(scope: Scope) -> list[str]:
     return out
 
 
-def render_wrapper(netlist: Netlist, style: str, header: str) -> str:
-    spec = netlist.spec
-    external = {b.name: b for b in netlist.ports if b.external}
-    scope = Scope(spec, style, external)
-    ports = _port_decls(scope, netlist)  # fills scope.reserved before any net is declared
-    bodies = [render_instance(scope, inst) for inst in netlist.instances]
-    _tie_external_outputs(scope, netlist)
-    for domain in sorted(scope.domains):
-        if reset_net(domain) in scope.reserved:
-            raise GenerateError(f"generated reset '{reset_net(domain)}' collides with a port")
-    resets = _resets(scope)
-    for x in spec.wrapper.extra_inputs:
-        if x not in scope.inputs_used:
-            scope.decls.append(f"  logic unused_{x};")
-            scope.assigns.append(f"  assign unused_{x} = {x};")
-    top = spec.hierarchy.top
-    lines = [header.rstrip("\n"), "", f"module {top} (", *ports, ");", ""]
-    if resets:
-        lines += ["  // Clocks and resets", *resets, ""]
+def _format_ports(rows: list[tuple[str, int, str]], comments: dict[int, str]) -> list[str]:
+    out = []
+    for n, (direction, w, name) in enumerate(rows):
+        if n in comments:
+            out.append(f"    // {comments[n]}")
+        sep = "," if n < len(rows) - 1 else ""
+        out.append(f"    {direction:<6} logic {_width(w)}{name}{sep}")
+    return out
+
+
+@dataclass
+class _Sub:
+    """What a sub-wrapper exposes: the clocks, resets and inputs its subtree uses."""
+
+    clocks: list[tuple[str, str]]  # (domain, clock port)
+    inputs: list[str]
+
+
+def _sub_rows(scope: Scope, sub: _Sub, crossings: list[Boundary]) -> list[str]:
+    rows: list[tuple[str, int, str]] = []
+    comments: dict[int, str] = {}
+    for domain, clock in sub.clocks:
+        rows += [("input", 1, clock), ("input", 1, reset_net(domain))]
+    rows += [("input", 1, x) for x in sub.inputs]
+    for b in crossings:
+        comments[len(rows)] = f"{b.bus.name}: {b.bus.protocol}"
+        rows += [(b.direction(s), scope.width(b.bus, s), boundary_port(scope.spec, b.bus, s))
+                 for s in b.signals()]  # fmt: skip
+    return _format_ports(rows, comments)
+
+
+def _instantiate_child(parent: Scope, name: str, sub: _Sub, crossings: list[Boundary]) -> str:
+    conns = []
+    for domain, clock in sub.clocks:
+        conns += [(clock, parent.clock(domain)), (reset_net(domain), parent.reset(domain))]
+    for x in sub.inputs:
+        parent.inputs_used.add(x)
+        conns.append((x, x))
+    for b in crossings:
+        conns += [(boundary_port(parent.spec, b.bus, s), parent.ref(b.bus, s)) for s in b.signals()]
+    lines = [f"  // sub-wrapper {name}", f"  {name} u_{name} ("]
+    lines += [f"      .{port}({expr}){',' if n < len(conns) - 1 else ''}"
+              for n, (port, expr) in enumerate(conns)]  # fmt: skip
+    return "\n".join([*lines, "  );"])
+
+
+def _module(name: str, header: str, ports: list[str], scope: Scope, body: list[str]) -> str:
+    lines = [header.rstrip("\n"), "", f"module {name} (", *ports, ");", ""]
     if scope.decls:
         lines += ["  // Nets", *scope.decls, ""]
     if scope.assigns:
         lines += [*scope.assigns, ""]
-    for body in bodies:
-        lines += [body.rstrip("\n"), ""]
-    lines += [f"endmodule : {top}", ""]
+    for b in body:
+        lines += [b.rstrip("\n"), ""]
+    lines += [f"endmodule : {name}", ""]
     return "\n".join(lines)
+
+
+def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str, str]]:
+    """(module name, text) for the top and every sub-wrapper, children first."""
+    spec = netlist.spec
+    p: Plan = plan(netlist)
+    hits = collisions(netlist, p)
+    if hits:
+        w, port, owners = hits[0]
+        raise GenerateError(f"sub-wrapper {w}: port {port} is claimed by {', '.join(owners)}")
+    fixed = {c.name for c in spec.clocks} | {reset_net(c.domain) for c in spec.clocks}
+    fixed |= set(spec.wrapper.extra_inputs)
+    scopes: dict[str, Scope] = {}
+    top_ports: list[str] = []
+    for w in p.wrappers():
+        if w == p.top:
+            scope = Scope(spec, style, {b.name: b for b in netlist.ports if b.external})
+            top_ports = _port_decls(scope, netlist)  # reserves the top's port names
+        else:
+            scope = Scope(spec, "flat", {}, boundary={b.bus.name: b for b in p.boundaries[w]})
+            scope.reserved |= fixed | {boundary_port(spec, b.bus, s)
+                                       for b in p.boundaries[w] for s in b.signals()}  # fmt: skip
+        scopes[w] = scope
+    bodies = {w: [render_instance(scopes[w], i) for i in p.instances[w]] for w in p.wrappers()}
+
+    subs: dict[str, _Sub] = {}
+    modules: list[tuple[str, str]] = []
+    clock_of = {c.domain: c.name for c in spec.clocks}
+    for w in p.wrappers():  # children first: their needs are final when the parent uses them
+        scope = scopes[w]
+        children = [_instantiate_child(scope, c, subs[c], p.boundaries[c]) for c in p.children[w]]
+        if w != p.top:
+            subs[w] = _Sub(
+                sorted((d, clock_of[d]) for d in scope.domains),
+                [x for x in spec.wrapper.extra_inputs if x in scope.inputs_used],
+            )
+            ports = _sub_rows(scope, subs[w], p.boundaries[w])
+            modules.append((w, _module(w, header, ports, scope, [*children, *bodies[w]])))
+            continue
+        _tie_external_outputs(scope, netlist)
+        for domain in sorted(scope.domains):
+            if reset_net(domain) in scope.reserved:
+                raise GenerateError(f"generated reset '{reset_net(domain)}' collides with a port")
+        resets = _resets(scope)
+        for x in spec.wrapper.extra_inputs:
+            if x not in scope.inputs_used:
+                scope.decls.append(f"  logic unused_{x};")
+                scope.assigns.append(f"  assign unused_{x} = {x};")
+        body = ["  // Clocks and resets\n" + "\n".join(resets)] if resets else []
+        modules.append((w, _module(w, header, top_ports, scope, [*body, *children, *bodies[w]])))
+    return modules
 
 
 # -------------------------------------------------------------------- sv-interface style

@@ -6,6 +6,7 @@ Output layout (relative to the output directory)::
 
     rtl/pkg/<package>.sv       parameter package
     rtl/<top>.sv               wrapper (flat or sv-interface ports)
+    rtl/<sub-wrapper>.sv       one per Hierarchy sub-wrapper (flat boundary ports)
     rtl/<top>_flat.sv          sv-interface style only: flat harness, the lint/compile top
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
     rtl/inhouse/*.sv           copies of the in-house IP the design uses
@@ -21,8 +22,8 @@ from pathlib import Path
 
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
-from hdl_bag.gen.render import GenerateError, header
-from hdl_bag.gen.wrapper import render_harness, render_interface, render_wrapper
+from hdl_bag.gen.render import GenerateError, header  # noqa: F401 - re-exported
+from hdl_bag.gen.wrapper import render_harness, render_interface, render_modules
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
@@ -75,12 +76,6 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _manifest(outdir, written, None, None)
         raise MissingRtl(missing)
     top = spec.hierarchy.top
-    nested = sorted({i.wrapper for i in netlist.instances} - {top})
-    if spec.hierarchy.wrappers or nested:
-        raise GenerateError(
-            "Hierarchy sub-wrappers are not generated yet (Phase 2 PR 4); "
-            f"placements into {', '.join(nested) or 'sub-wrappers'} would be lost"
-        )
 
     srcs: list[str] = list(_WRAPPER_CELLS)
     for t in used:
@@ -91,9 +86,14 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     for rel in sorted(srcs):
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
-    top_rel = f"rtl/{top}.sv"
-    _write(outdir, top_rel, render_wrapper(netlist, style, hdr), written)
-    order = [pkg_rel, *sorted(srcs)]
+    # Sub-wrappers (children first), then the top.
+    module_rels = []
+    for name, text in render_modules(netlist, style, hdr):
+        rel = f"rtl/{name}.sv"
+        _write(outdir, rel, text, written)
+        module_rels.append(rel)
+    top_rel = module_rels[-1]
+    order = [pkg_rel, *sorted(srcs), *module_rels[:-1]]
     lint_top = top
     if style == "sv-interface":
         interfaces = []

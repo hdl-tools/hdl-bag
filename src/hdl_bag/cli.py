@@ -10,6 +10,7 @@ from hdl_bag import __version__, ir
 from hdl_bag.checks import CheckResult, run_checks
 from hdl_bag.flows import Report, compile_design, lint
 from hdl_bag.gen import MissingRtl, Outputs, generate, load_outputs, sources
+from hdl_bag.gen.render import GenerateError
 from hdl_bag.reader import ReaderError, read_workbook
 from hdl_bag.template import write_template
 
@@ -87,6 +88,9 @@ def _generate(spec_path: Path, output: Path | None, style: str | None) -> Output
     except MissingRtl as exc:
         click.echo(f"wrote collateral to {outdir}")
         click.echo(f"error: {exc} (AXI templates arrive in Phase 3)", err=True)
+        raise SystemExit(1) from exc
+    except (GenerateError, OSError) as exc:
+        click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     click.echo(f"wrote {len(out.files)} file(s) to {outdir} (top {out.top})")
     return out

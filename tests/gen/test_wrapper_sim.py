@@ -11,21 +11,25 @@ from hdl_bag.flows import compile_design, lint
 from hdl_bag.gen import generate, sources
 from hdl_bag.ir import load
 
-CONFIG = REPO / "tests" / "configs" / "p2" / "ahb2apb_pt.ir.yaml"
+CONFIGS = REPO / "tests" / "configs" / "p2"
+CONFIG = CONFIGS / "ahb2apb_pt.ir.yaml"
 
 pytestmark = pytest.mark.eda
 
 
+# ahb2apb_nested is ahb2apb_pt with the fabrics in nested sub-wrappers: same top ports,
+# so the same wiring simulation applies.
+@pytest.mark.parametrize("config", ["ahb2apb_pt", "ahb2apb_nested"])
 @pytest.mark.parametrize("style", ["flat", "sv-interface"])
-def test_generated_design(style: str) -> None:
-    root = REPO / "out" / "gen" / f"ahb2apb_pt_{style}"
-    out = generate(load(CONFIG), root, CONFIG.parent, style)
+def test_generated_design(config: str, style: str) -> None:
+    root = REPO / "out" / "gen" / f"{config}_{style}"
+    out = generate(load(CONFIGS / f"{config}.ir.yaml"), root, CONFIGS, style)
     files = sources(out)
     for report in (lint(files, out.top, root), compile_design(files, out.top, root)):
         assert report.ok, report.format()
     run_cocotb(
         [root / f for f in files], out.top, Path(__file__).parent / "cocotb_wrapper_ahb2apb_pt.py",
-        f"wrapper_ahb2apb_pt_{style}",
+        f"wrapper_{config}_{style}",
     )  # fmt: skip
 
 

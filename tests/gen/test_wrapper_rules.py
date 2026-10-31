@@ -290,15 +290,6 @@ def test_reset_name_collision_is_an_error(tmp_path: Path) -> None:
         generate(spec.model_copy(update={"resets": (r,), "clocks": (c,)}), tmp_path, CONFIG.parent)
 
 
-def test_sub_wrappers_are_rejected_until_supported(tmp_path: Path) -> None:
-    golden = load(GOLDEN_IR)
-    spec = _spec()
-    spec = spec.model_copy(update={"hierarchy": spec.hierarchy.model_copy(
-        update={"wrappers": golden.hierarchy.wrappers[:1]})})  # fmt: skip
-    with pytest.raises(GenerateError, match="sub-wrappers are not generated yet"):
-        generate(spec, tmp_path, CONFIG.parent)
-
-
 def test_package_name_collision_is_an_error(tmp_path: Path) -> None:
     spec = _spec()
     r = spec.memory_map[0]

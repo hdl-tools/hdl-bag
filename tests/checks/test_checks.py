@@ -265,6 +265,8 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Wrapper row 34: bridge br_main2per is always internal; set N (WRAP-INTERNAL-PORT)"]),
     ("WRAP-NAME-COLLISION", [("Wrapper", 11, "Value", "boot_remap_i, cpu0_axi_awaddr")],
      ["Wrapper row 18: top-level port cpu0_axi_awaddr of cpu0 collides with Wrapper > Extra top-level inputs (WRAP-NAME-COLLISION)"]),
+    ("WRAP-NAME-COLLISION-boundary", [("Wrapper", 11, "Value", "boot_remap_i, br_main2per_2_periph_apb_apb4_paddr")],
+     ["Hierarchy row 7: boundary port br_main2per_2_periph_apb_apb4_paddr of sub-wrapper per_wrapper is claimed by extra input br_main2per_2_periph_apb_apb4_paddr and link br_main2per_2_periph_apb (WRAP-NAME-COLLISION)"]),
 ]  # fmt: skip
 
 
