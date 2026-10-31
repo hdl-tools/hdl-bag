@@ -12,6 +12,7 @@ topologies:
 arbitration:
   - single-master
 sources:
+  - rtl/inhouse/bag_addr_decode.sv
   - rtl/inhouse/bag_apb_mux.sv
 licence: Apache-2.0
 qualification: unqualified

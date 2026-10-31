@@ -13,6 +13,7 @@ arbitration:
   - round-robin
   - fixed-priority
 sources:
+  - rtl/inhouse/bag_addr_decode.sv
   - rtl/inhouse/bag_ahb_lite_bus.sv
 licence: Apache-2.0
 qualification: unqualified

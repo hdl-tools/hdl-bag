@@ -27,7 +27,7 @@ ARG OSS_CAD_SUITE_DATE=2026-10-01
 ARG BENDER_VERSION=v0.32.1
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl git make perl xz-utils zlib1g-dev \
+        build-essential ca-certificates ccache curl git make perl xz-utils zlib1g-dev \
         libreoffice-calc-nogui \
     && rm -rf /var/lib/apt/lists/*
 

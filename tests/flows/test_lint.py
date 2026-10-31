@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from hdl_bag.flows import Finding, WaiverError, lint, load_waivers
-from hdl_bag.flows.backends import BACKENDS, Slang, Verible, Verilator
+from hdl_bag.flows.backends import BACKENDS, Slang, Verible, Verilator, parse_flags, slang_flags
 from hdl_bag.flows.waivers import Waiver, apply_waivers
 
 ROOT = Path("/run")
@@ -102,6 +102,15 @@ def test_builtin_waivers_load() -> None:
 
     for tool in BACKENDS:
         builtin_waivers(tool)
+
+
+def test_slang_flags_need_reasons() -> None:
+    assert "-Wno-unused-def" in slang_flags()
+    assert parse_flags("# c\n\n-Wno-x  # why\n") == ["-Wno-x"]
+    with pytest.raises(ValueError, match="'-Wno-y' has no reason"):
+        parse_flags("-Wno-y\n")
+    with pytest.raises(ValueError, match="has no reason"):
+        parse_flags("-Wno-z  #   \n")
 
 
 def test_missing_tool_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
