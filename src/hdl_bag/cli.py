@@ -7,6 +7,8 @@ from pathlib import Path
 import click
 
 from hdl_bag import __version__
+from hdl_bag.checks import run_checks
+from hdl_bag.reader import ReaderError, read_workbook
 from hdl_bag.template import write_template
 
 
@@ -29,3 +31,20 @@ def template(sample: bool, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     write_template(output, sample=sample)
     click.echo(f"wrote {output}")
+
+
+@main.command()
+@click.argument("spec", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+def check(spec: Path) -> None:
+    """Read SPEC and run every check. Exit status 1 on any error; warnings are printed."""
+    try:
+        raw = read_workbook(spec)
+    except ReaderError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+    result = run_checks(raw, spec.parent)
+    for f in result.findings:
+        click.echo(f"{f.severity}: {f.message}")
+    click.echo(f"{spec.name}: {len(result.errors)} error(s), {len(result.warnings)} warning(s)")
+    if result.errors:
+        raise SystemExit(1)

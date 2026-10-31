@@ -19,7 +19,7 @@ class Cell(BaseModel):
 
     sheet: str
     row: int
-    column: str  # header name
+    column: str  # header name; for Setting/Value blocks, the setting
     value: RawValue
 
     @property

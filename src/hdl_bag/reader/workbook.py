@@ -162,7 +162,7 @@ def _read_kv(wb: openpyxl.Workbook, sheet: str) -> tuple[dict[str, Cell], int]:
         if str(key) in out:
             raise ReaderError(f"{sheet} row {r}: duplicate setting '{key}' (READ-SETTING)")
         out[str(key)] = Cell(
-            sheet=sheet, row=r, column="Value", value=_norm(ws.cell(r, cols["Value"]).value)
+            sheet=sheet, row=r, column=str(key), value=_norm(ws.cell(r, cols["Value"]).value)
         )
         r += 1
     return out, r - 1
