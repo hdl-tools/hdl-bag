@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+#
+# Verible lint rule configuration for hdl-bag RTL (in-house and generated).
+# Default ruleset, plus the changes below. Every change carries its reason.

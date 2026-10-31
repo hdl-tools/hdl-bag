@@ -60,3 +60,19 @@ jobs:
       - run: uv run pytest tests/golden
         env:
           BAG_RECALC_WORKBOOK: out/demo_ss.recalc.xlsx
+
+  eda:
+    # Lint flow and simulation tests against the pinned EDA tools (pytest -m eda).
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: uv sync --locked --group sim
+      - run: uv run pytest -m eda
