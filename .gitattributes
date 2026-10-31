@@ -1,0 +1,4 @@
+# Byte-identical generated/golden files require LF everywhere, on every OS.
+* text=auto eol=lf
+*.xlsx binary
+*.png binary
