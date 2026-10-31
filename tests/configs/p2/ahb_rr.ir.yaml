@@ -1,0 +1,348 @@
+schema: '0.3'
+project:
+  name: ahb_rr
+  revision: p2
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/ahb_rr
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_h
+    mhz: 100
+    source: top port
+    domain: D_H
+    reset: rst_h_n
+resets:
+  - name: rst_h_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_H
+fabrics:
+  - name: ahb
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D_H
+    arbitration: round-robin
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: m_c
+        priority: null
+      - index: 1
+        port: m_b
+        priority: null
+      - index: 2
+        port: m_a
+        priority: null
+    slave_ports:
+      - index: 0
+        port: t0
+        priority: null
+      - index: 1
+        port: t1
+        priority: null
+      - index: 2
+        port: t2
+        priority: null
+      - index: 3
+        port: t3
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: t0
+        region: mem
+        base: '0x0000_0000'
+        end: '0x0000_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: t1
+        region: mem
+        base: '0x0010_0000'
+        end: '0x0010_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: t2
+        region: mem
+        base: '0x0020_0000'
+        end: '0x0020_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: t3
+        region: mem
+        base: '0x00F0_0000'
+        end: '0x00F0_0FFF'
+        access: RW
+        secure: false
+    access_rules:
+      - master: m_a
+        slave: t1
+        access: RO
+      - master: m_a
+        slave: t3
+        access: WO
+      - master: m_b
+        slave: t2
+        access: WO
+      - master: m_c
+        slave: t3
+        access: none
+    decode:
+      - master: m_a
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+      - master: m_b
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+      - master: m_c
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+masters:
+  - name: m_a
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_H
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: m_b
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 24
+    id_width: null
+    user_width: 0
+    domain: D_H
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: m_c
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_H
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: t0
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_H
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: t1
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_H
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: t2
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_H
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: t3
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_H
+    error_response: HRESP_ERROR
+    wait_states: 0
+bridges: []
+adapters: []
+port_options:
+  - port: m_a
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: m_b
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: tie-0
+    pstrb: n/a
+    pslverr: n/a
+  - port: m_c
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: t0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: t1
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: t2
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: t3
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+memory_map:
+  - slave: t0
+    region: mem
+    base: '0x0000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: t1
+    region: mem
+    base: '0x0010_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: t2
+    region: mem
+    base: '0x0020_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: t3
+    region: mem
+    base: '0x00F0_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: ahb
+hierarchy:
+  top: ahb_rr_top
+  wrappers: []
+  placement:
+    - instance: ahb
+      kind: fabric
+      wrapper: ahb_rr_top
+      rtl_name: u_ahb
+wrapper:
+  top: ahb_rr_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: ahb_rr_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: m_a
+      exposed: true
+      prefix: null
+    - port: m_b
+      exposed: true
+      prefix: null
+    - port: m_c
+      exposed: true
+      prefix: null
+    - port: t0
+      exposed: true
+      prefix: null
+    - port: t1
+      exposed: true
+      prefix: null
+    - port: t2
+      exposed: true
+      prefix: null
+    - port: t3
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: ahb_rr.xlsx
+  sha256: 54d7f8c53691354c7516635ee11ea3da9261705ea6ce0bcec9e5bb90a33a8404

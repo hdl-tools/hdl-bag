@@ -1,0 +1,586 @@
+schema: '0.3'
+project:
+  name: multi
+  revision: p2
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/multi
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_m
+    mhz: 100
+    source: top port
+    domain: D_M
+    reset: rst_m_n
+  - name: clk_p3
+    mhz: 100
+    source: top port
+    domain: D_P3
+    reset: rst_p3_n
+  - name: clk_s
+    mhz: 100
+    source: top port
+    domain: D_S
+    reset: rst_s
+resets:
+  - name: rst_m_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_M
+  - name: rst_p3_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_P3
+  - name: rst_s
+    polarity: active-high
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_S
+fabrics:
+  - name: ahb_m
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D_M
+    arbitration: round-robin
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+      - index: 1
+        port: dma
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ram
+        priority: null
+      - index: 1
+        port: br_y
+        priority: null
+      - index: 2
+        port: br_n
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: ram
+        region: mem
+        base: '0x0000_0000'
+        end: '0x0000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_y
+        region: win
+        base: '0x4000_0000'
+        end: '0x4000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: br_n
+        region: win
+        base: '0x6000_0000'
+        end: '0x6000_FFFF'
+        access: RW
+        secure: false
+    access_rules:
+      - master: dma
+        slave: br_n
+        access: none
+    decode:
+      - master: cpu
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+      - master: dma
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: ahb_s
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D_S
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: aux
+        priority: null
+    slave_ports:
+      - index: 0
+        port: aux_ram
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: aux_ram
+        region: mem
+        base: '0x8000_0000'
+        end: '0x8000_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: aux
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases:
+          - base: '0x0000_0000'
+            size: '0x0000_1000'
+            to: '0x8000_0000'
+            enable: remap_i
+  - name: p3
+    protocol: APB3
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_P3
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_n
+        priority: null
+    slave_ports:
+      - index: 0
+        port: legacy
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: legacy
+        region: regs
+        base: '0x6000_0000'
+        end: '0x6000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_n
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: p4
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_M
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_y
+        priority: null
+    slave_ports:
+      - index: 0
+        port: uart
+        priority: null
+      - index: 1
+        port: spi
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: uart
+        region: regs
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RO
+        secure: false
+      - slave_port: 1
+        slave: spi
+        region: regs
+        base: '0x4000_1000'
+        end: '0x4000_1FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_y
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: aux
+    protocol: AHB-Lite
+    fabric: ahb_s
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_S
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: cpu
+    protocol: AHB-Lite
+    fabric: ahb_m
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_M
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dma
+    protocol: AHB-Lite
+    fabric: ahb_m
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_M
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: aux_ram
+    protocol: AHB-Lite
+    fabric: ahb_s
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_S
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: legacy
+    protocol: APB3
+    fabric: p3
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P3
+    error_response: PSLVERR
+    wait_states: 0
+  - name: ram
+    protocol: AHB-Lite
+    fabric: ahb_m
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_M
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: spi
+    protocol: APB4
+    fabric: p4
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_M
+    error_response: PSLVERR
+    wait_states: 0
+  - name: uart
+    protocol: APB4
+    fabric: p4
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_M
+    error_response: PSLVERR
+    wait_states: 0
+bridges:
+  - name: br_n
+    template: bag_ahb2apb
+    upstream: ahb_m
+    downstream: p3
+    window_base: '0x6000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: APB3
+    upstream_width: 32
+    downstream_width: 32
+    cdc: true
+  - name: br_y
+    template: bag_ahb2apb
+    upstream: ahb_m
+    downstream: p4
+    window_base: '0x4000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 32
+    cdc: false
+adapters: []
+port_options:
+  - port: aux
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: aux_ram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_n
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: br_y
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dma
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: legacy
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: ram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: spi
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: tie-0
+  - port: uart
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+memory_map:
+  - slave: ram
+    region: mem
+    base: '0x0000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_m
+  - slave: br_y
+    region: win
+    base: '0x4000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_m
+  - slave: uart
+    region: regs
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RO
+    secure: false
+    fabric: p4
+  - slave: spi
+    region: regs
+    base: '0x4000_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: p4
+  - slave: br_n
+    region: win
+    base: '0x6000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_m
+  - slave: legacy
+    region: regs
+    base: '0x6000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: p3
+  - slave: aux_ram
+    region: mem
+    base: '0x8000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb_s
+hierarchy:
+  top: multi_top
+  wrappers: []
+  placement:
+    - instance: ahb_m
+      kind: fabric
+      wrapper: multi_top
+      rtl_name: u_ahb_m
+    - instance: ahb_s
+      kind: fabric
+      wrapper: multi_top
+      rtl_name: u_ahb_s
+    - instance: br_n
+      kind: bridge
+      wrapper: multi_top
+      rtl_name: u_br_n
+    - instance: br_y
+      kind: bridge
+      wrapper: multi_top
+      rtl_name: u_br_y
+    - instance: p3
+      kind: fabric
+      wrapper: multi_top
+      rtl_name: u_p3
+    - instance: p4
+      kind: fabric
+      wrapper: multi_top
+      rtl_name: u_p4
+wrapper:
+  top: multi_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: multi_pkg
+  file_header: header.txt
+  extra_inputs:
+    - remap_i
+    - unused_i
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: aux
+      exposed: true
+      prefix: null
+    - port: aux_ram
+      exposed: true
+      prefix: null
+    - port: br_n
+      exposed: false
+      prefix: null
+    - port: br_y
+      exposed: false
+      prefix: null
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: dma
+      exposed: true
+      prefix: null
+    - port: legacy
+      exposed: true
+      prefix: null
+    - port: ram
+      exposed: true
+      prefix: null
+    - port: spi
+      exposed: true
+      prefix: null
+    - port: uart
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: multi.xlsx
+  sha256: 13026f98f4f2e462b6da9ee9485e53e2a7b1a9711c2925cecf4fcd34bc622563

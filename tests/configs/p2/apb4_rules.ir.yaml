@@ -1,0 +1,290 @@
+schema: '0.3'
+project:
+  name: apb4_rules
+  revision: p2
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/apb4_rules
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_r
+    mhz: 100
+    source: top port
+    domain: D_R
+    reset: rst_r_n
+resets:
+  - name: rst_r_n
+    polarity: active-low
+    assertion: sync
+    deassertion: sync
+    source: top port
+    domain: D_R
+fabrics:
+  - name: apb
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_R
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ro0
+        priority: null
+      - index: 1
+        port: wo0
+        priority: null
+      - index: 2
+        port: sec0
+        priority: null
+      - index: 3
+        port: dual0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: ro0
+        region: regs
+        base: '0x1000_0000'
+        end: '0x1000_0FFF'
+        access: RO
+        secure: false
+      - slave_port: 1
+        slave: wo0
+        region: regs
+        base: '0x1001_0000'
+        end: '0x1001_0FFF'
+        access: WO
+        secure: false
+      - slave_port: 2
+        slave: sec0
+        region: regs
+        base: '0x1002_0000'
+        end: '0x1002_0FFF'
+        access: RW
+        secure: true
+      - slave_port: 3
+        slave: dual0
+        region: ctrl
+        base: '0x1003_0000'
+        end: '0x1003_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: dual0
+        region: status
+        base: '0x1003_1000'
+        end: '0x1003_1FFF'
+        access: RO
+        secure: false
+    access_rules: []
+    decode:
+      - master: cpu
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: APB4
+    fabric: apb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_R
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: dual0
+    protocol: APB4
+    fabric: apb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_R
+    error_response: PSLVERR
+    wait_states: 0
+  - name: ro0
+    protocol: APB4
+    fabric: apb
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_R
+    error_response: PSLVERR
+    wait_states: 0
+  - name: sec0
+    protocol: APB4
+    fabric: apb
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_R
+    error_response: PSLVERR
+    wait_states: 0
+  - name: wo0
+    protocol: APB4
+    fabric: apb
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_R
+    error_response: PSLVERR
+    wait_states: 0
+bridges: []
+adapters: []
+port_options:
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+  - port: dual0
+    fifo_depth: 0
+    slice: none
+    prot: tie-default
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: ro0
+    fifo_depth: 0
+    slice: none
+    prot: tie-0
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-0
+    pslverr: tie-0
+  - port: sec0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: wo0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: tie-default
+    pslverr: drive
+memory_map:
+  - slave: ro0
+    region: regs
+    base: '0x1000_0000'
+    size: '0x0000_1000'
+    access: RO
+    secure: false
+    fabric: apb
+  - slave: wo0
+    region: regs
+    base: '0x1001_0000'
+    size: '0x0000_1000'
+    access: WO
+    secure: false
+    fabric: apb
+  - slave: sec0
+    region: regs
+    base: '0x1002_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: true
+    fabric: apb
+  - slave: dual0
+    region: ctrl
+    base: '0x1003_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: dual0
+    region: status
+    base: '0x1003_1000'
+    size: '0x0000_1000'
+    access: RO
+    secure: false
+    fabric: apb
+hierarchy:
+  top: apb4_rules_top
+  wrappers: []
+  placement:
+    - instance: apb
+      kind: fabric
+      wrapper: apb4_rules_top
+      rtl_name: u_apb
+wrapper:
+  top: apb4_rules_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: apb4_rules_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: dual0
+      exposed: true
+      prefix: null
+    - port: ro0
+      exposed: true
+      prefix: null
+    - port: sec0
+      exposed: true
+      prefix: null
+    - port: wo0
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: apb4_rules.xlsx
+  sha256: 05ba4d16d6aab29c4f30caf03edf3c02c4cd5a6f885a673ae429af46749a7881
