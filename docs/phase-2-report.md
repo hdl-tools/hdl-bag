@@ -44,7 +44,9 @@ Beyond the gate, every config also has:
 | P2-3 | Templates without RTL (all AXI until Phase 3): collateral is written, then `MissingRtl` names them. |
 | D27 | AHB-Lite ports carry AMBA 5 `hnonsec` under the PROT column. |
 | D28 | A tied security attribute fails closed: HNONSEC=1 and PPROT[1]=1 (AxPROT[1]=1 in Phase 3). |
-| D29 | Narrow slaves see the low address bits; `MM-SLAVE-ALIGN` checks region alignment. |
+| D29 | Narrow slaves see the low address bits. `MM-SLAVE-ALIGN` checks that all of a slave's regions lie in one 2^width-aligned block (relaxed at the phase review, #16). |
+| D30 | A slave sees the address after alias translation (confirmed at the phase review; this is the current behaviour). |
+| D31 | The user-guide notes found in Phase 2 are written together in Phase 6 (known gap 7). |
 | Review | Every RTL or verification stage is reviewed by the chip-design agent suite, and findings are fixed in the same PR. |
 | Test split | The stub connectivity oracle and the route test belong in PR 6; PR 3 took the review fixes plus the structural tests. |
 
@@ -78,10 +80,7 @@ Each RTL or verification PR was reviewed (review-only) by `chip-design-rtl:rtl-d
 
 ## Known gaps (carried forward)
 
-1. **Open owner questions:**
-   - Should D29 be relaxed to "all of a slave's regions lie in one 2^width-aligned block"? It currently rejects a narrow slave with two regions.
-   - Is it intended that the slave sees the translated alias address?
-   - Guide notes are needed (see 7).
+1. **Owner questions from the phase review (answered):** D29 is relaxed to one aligned block (#16). Slaves see the translated alias address (D30). Guide notes go to Phase 6 (D31).
 2. **ahb2apb reset:** both sides of a CDC bridge must be reset together. This is documented in the RTL but not checked.
 3. **Alias pins** must be quasi-static or synchronous to the fabric clock. This is documented in the RTL, with no synchronizer.
 4. **Synchronizers:** no synthesis attributes or technology-cell hook on `bag_sync` / `bag_rst_sync`.
@@ -92,7 +91,8 @@ Each RTL or verification PR was reviewed (review-only) by `chip-design-rtl:rtl-d
    - Sub-wrappers use flat ports.
    - Sub-wrappers receive the conditioned `bag_rst_<domain>_n`.
    - D28 and D29.
-   - With D29 alignment, a pass-through N offset never changes what a narrow slave sees.
+   - Under D29, a pass-through N offset never makes two of a narrow slave's addresses look the same.
+   - Slaves see the address after alias translation (D30).
    - The Hierarchy Check-column list.
 8. **Phase 4 scope** (per the reviews): protocol monitors, bursts and pipelined back-to-back AHB, sub-word and 64-bit transfers, randomized traffic with a scoreboard, lock behaviour, reset during traffic, CDC stress and coverage.
 9. **Docker:** the Docker Desktop WSL integration on the development machine dropped twice (Resource Saver). This affects only local EDA runs, not CI.
