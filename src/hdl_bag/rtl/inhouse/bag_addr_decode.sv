@@ -8,6 +8,8 @@
 //   2. the address rules: base/mask per region, the slave port it hits, RO/WO, secure-only;
 //   3. that master's connectivity and Access_Rules (RO/WO) towards the hit slave port.
 // A miss or a blocked access selects the master's default slave port, or raises err_o.
+// err_o is also raised whenever nothing is selected, so a rule or default slave that
+// points outside the slave ports can never give a silent OKAY or hang a bus.
 //
 // Regions and alias windows are powers of two (checked by `bag check`), so a window test
 // is a mask compare. All tables come from the generated parameter package.
@@ -115,6 +117,7 @@ module bag_addr_decode #(
         end
       end
     end
+    if (sel_o == '0) err_o = 1'b1;
   end
 
 endmodule

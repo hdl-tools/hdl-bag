@@ -11,7 +11,12 @@
 // * PSLVERR on any part becomes the two-cycle HRESP ERROR.
 // * Clocks (D10): the two sides talk through a 4-phase req/ack handshake. With
 //   AsyncCdc = 1 req and ack pass through bag_sync; the payload is held stable while
-//   req (or ack) is high, so it crosses without synchronizers.
+//   req (or ack) is high, so it crosses without synchronizers (CDC/STA: constrain the
+//   payload paths with a max-delay, data-path-only exception).
+// * Reset: hrst_ni and prst_ni must assert together (one reset event for both sides).
+//   Resetting one side alone during a transfer can desynchronize the handshake.
+// * Limits, checked at elaboration: PDataWidth <= HDataWidth <= 8 * PDataWidth, and
+//   AddrOffset aligned to the AHB data width.
 
 module bag_ahb2apb #(
     parameter int unsigned           HAddrWidth = 32,
@@ -59,6 +64,13 @@ module bag_ahb2apb #(
   localparam int unsigned PBytes = PDataWidth / 8;
   localparam int unsigned HBytes = HDataWidth / 8;
   localparam int unsigned PLaneBits = PBytes > 1 ? unsigned'($clog2(PBytes)) : 1;
+
+  if (PDataWidth > HDataWidth || HDataWidth > 8 * PDataWidth) begin : gen_width_check
+    $error("bag_ahb2apb: need PDataWidth <= HDataWidth <= 8 * PDataWidth");
+  end
+  if (AddrOffset % HAddrWidth'(HBytes) != '0) begin : gen_offset_check
+    $error("bag_ahb2apb: AddrOffset must be aligned to the AHB data width");
+  end
 
   // ------------------------------------------------------------ payload (AHB domain)
   logic [HAddrWidth-1:0] req_addr_q;  // translated, aligned to the APB data width
@@ -109,12 +121,15 @@ module bag_ahb2apb #(
   logic                  accept;
   logic [HAddrWidth-1:0] beat_addr;
   logic [           6:0] beat_bytes;
+  logic [ PLaneBits-1:0] lane_offset;
   logic [HDataWidth-1:0] rdata_q;
 
   assign accept = hsel_i && hready_i && htrans_i[1] &&
                   (a_q == AIdle || a_q == ADone || a_q == AErr2);
   assign beat_addr = haddr_i - AddrOffset;
   assign beat_bytes = 7'd1 << hsize_i;
+  // Byte lane within the APB word; an 8-bit APB bus has a single lane.
+  assign lane_offset = PBytes > 1 ? PLaneBits'(beat_addr) : '0;
 
   always_ff @(posedge hclk_i or negedge hrst_ni) begin
     if (!hrst_ni) begin
@@ -155,7 +170,7 @@ module bag_ahb2apb #(
           req_strb_q  <= '1;
         end else begin
           req_count_q <= 4'd1;
-          req_strb_q  <= PStrbWidth'((32'd1 << beat_bytes) - 32'd1) << beat_addr[PLaneBits-1:0];
+          req_strb_q  <= PStrbWidth'((32'd1 << beat_bytes) - 32'd1) << lane_offset;
         end
         req_prot_q  <= {!hprot_i[0], hnonsec_i, hprot_i[1]};
         req_write_q <= hwrite_i;

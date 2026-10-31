@@ -7,6 +7,7 @@
 // come back from it. A miss or blocked access with no default slave is answered by an
 // internal default slave: PREADY high, PSLVERR high, PRDATA zero. APB is not pipelined,
 // so the mux is purely combinational. APB3 instances tie pprot and pstrb.
+// alias_en_i must be quasi-static (or synchronous and stable during a transfer).
 
 module bag_apb_mux #(
     parameter int unsigned AddrWidth = 32,
@@ -102,7 +103,7 @@ module bag_apb_mux #(
     assign m_paddr_o[s]   = addr;
     assign m_pprot_o[s]   = s_pprot_i;
     assign m_psel_o[s]    = s_psel_i & sel[s];
-    assign m_penable_o[s] = s_penable_i;
+    assign m_penable_o[s] = s_penable_i & sel[s];
     assign m_pwrite_o[s]  = s_pwrite_i;
     assign m_pwdata_o[s]  = s_pwdata_i;
     assign m_pstrb_o[s]   = s_pstrb_i;

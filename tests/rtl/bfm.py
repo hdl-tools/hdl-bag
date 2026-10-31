@@ -140,8 +140,8 @@ class Access:
     write: bool
     data: int
     strb: int = 0
-    prot: int = 0
-    master: int | None = None
+    prot: int = 0  # APB: PPROT; AHB: HPROT | HNONSEC << 4
+    size: int = 0  # AHB HSIZE
 
 
 @dataclass
@@ -153,8 +153,10 @@ class ApbSlave:
     data_width: int = 32
     max_wait: int = 2
     err_addrs: set[int] = field(default_factory=set)
-    mem: dict[int, int] = field(default_factory=dict)
-    log: list[Access] = field(default_factory=list)
+    mem: dict[int, int] = field(default_factory=dict)  # by APB-word address
+    log: list[Access] = field(default_factory=list)  # raw PADDR / PSTRB per completed access
+    trace: list[tuple[int, int]] | None = None  # shared (slave id, PADDR) order of accesses
+    ident: int = 0
 
     def start(self) -> None:
         import cocotb
@@ -166,39 +168,57 @@ class ApbSlave:
         p, nbytes = self.port, self.data_width // 8
         ready = waits = 0
         rdata = err = 0
+        access = False  # the coming cycle is an ACCESS cycle of this slave
+        prev = (0, 0, 0)  # psel, penable, pready of the previous cycle
+        prev_ctl: tuple[int, ...] = ()
         while True:
             await RisingEdge(self.clk)
-            p["pready"], p["prdata"], p["pslverr"] = (
-                ready,
-                rdata if ready else 0,
-                err if ready else 0,
-            )
+            # Responses are junk unless this is the completing access cycle, so a fabric
+            # that samples them at the wrong time or merges slaves fails the test.
+            if ready:
+                p["pready"], p["prdata"], p["pslverr"] = 1, rdata, err
+            else:
+                p["pready"] = 0 if access else random.getrandbits(1)
+                p["prdata"] = random.getrandbits(self.data_width)
+                p["pslverr"] = random.getrandbits(1)
             await ReadOnly()
-            if p["psel"] and not p["penable"]:
-                addr = p["paddr"] & ~(nbytes - 1)
+            psel, penable = p["psel"], p["penable"]
+            ctl = tuple(p[n] for n in ("paddr", "pwrite", "pwdata", "pstrb", "pprot"))
+            # Protocol checks (APB3/APB4): PENABLE only with PSEL; ACCESS follows SETUP;
+            # PSEL and PENABLE stay high and control stays stable until PREADY.
+            assert not penable or psel, f"slave {self.ident}: PENABLE without PSEL"
+            if psel and penable:
+                assert prev[0], f"slave {self.ident}: ACCESS without SETUP"
+                assert ctl == prev_ctl, f"slave {self.ident}: control changed in ACCESS"
+            if prev[0] and prev[1] and not prev[2]:
+                assert psel and penable, f"slave {self.ident}: access dropped before PREADY"
+            prev, prev_ctl = (psel, penable, ready), ctl
+            if psel and not penable:
+                word = p["paddr"] & ~(nbytes - 1)
                 waits = random.randint(0, self.max_wait)
-                err = int(addr in self.err_addrs)
-                rdata = self.mem.get(addr, 0)
-                ready = int(waits == 0)
-            elif p["psel"] and p["penable"]:
+                err = int(word in self.err_addrs)
+                rdata = self.mem.get(word, 0)
+                ready, access = int(waits == 0), True
+            elif psel and penable:
                 if ready:
-                    addr = p["paddr"] & ~(nbytes - 1)
-                    write = bool(p["pwrite"])
-                    strb = p["pstrb"] if write else 0
-                    self.log.append(Access(addr, write, p["pwdata"], strb, p["pprot"]))
+                    addr, write, wdata = p["paddr"], bool(p["pwrite"]), p["pwdata"]
+                    self.log.append(Access(addr, write, wdata, p["pstrb"], p["pprot"]))
+                    if self.trace is not None:
+                        self.trace.append((self.ident, addr))
+                    word = addr & ~(nbytes - 1)
                     if write and not err:
-                        old = self.mem.get(addr, 0)
+                        old = self.mem.get(word, 0)
                         for b in range(nbytes):
-                            if strb >> b & 1:
+                            if p["pstrb"] >> b & 1:
                                 lane = 0xFF << (8 * b)
-                                old = (old & ~lane) | (p["pwdata"] & lane)
-                        self.mem[addr] = old
-                    ready = 0
+                                old = (old & ~lane) | (wdata & lane)
+                        self.mem[word] = old
+                    ready, access = 0, False
                 else:
                     waits -= 1
                     ready = int(waits <= 0)
             else:
-                ready = 0
+                ready, access = 0, False
 
 
 # ---------------------------------------------------------------------------- AHB
@@ -248,12 +268,22 @@ class AhbMaster:
         results: list[AhbResult] = []
         pending: Beat | None = None
         i = 0
+        err_first = False  # the previous cycle was the first cycle of an ERROR response
         await RisingEdge(self.clk)
         if beats:
             self._drive(beats[0])
         while pending is not None or i < len(beats):
             await ReadOnly()
-            ready = self.p["hready"]
+            ready, resp = self.p["hready"], self.p["hresp"]
+            # Response checks: ERROR is exactly two cycles (HREADY low, then high, HRESP
+            # high in both); without a data phase in flight the master sees OKAY, ready.
+            if err_first:
+                assert ready and resp, "ERROR response not completed in its second cycle"
+            elif resp:
+                assert not ready, "ERROR response without its first (HREADY low) cycle"
+            if pending is None:
+                assert ready and not resp, "HREADY low or ERROR with no data phase in flight"
+            err_first = bool(resp and not ready)
             if ready:
                 if pending is not None:
                     results.append(AhbResult(self.p["hrdata"], bool(self.p["hresp"])))
@@ -301,50 +331,64 @@ class AhbSlave:
 
     async def _run(self) -> None:
         p, nbytes = self.port, self.data_width // 8
-        beat: tuple[int, bool, int, int, int] | None = None  # addr, write, size, prot, nonsec
-        out = (1, 0, 0)  # hreadyout, hrdata, hresp
+        beat: Access | None = None
+        out = (1, self._junk(), 0)  # hreadyout, hrdata, hresp
         waits, err_phase = 0, 0
+        prev: tuple[int, ...] | None = None  # address phase seen while HREADY was low
         while True:
             await RisingEdge(self.clk)
             p["hreadyout"], p["hrdata"], p["hresp"] = out
             await ReadOnly()
+            # Protocol check: an address phase presented to this slave while HREADY is low
+            # must stay unchanged until HREADY is high (AHB-Lite address/control stability).
+            ctl = tuple(p[n] for n in ("hsel", "htrans", "haddr", "hwrite", "hsize", "hburst",
+                                       "hprot", "hnonsec"))  # fmt: skip
+            if prev is not None:
+                assert ctl == prev, (
+                    f"slave {self.ident}: address phase changed in a wait state: {prev} -> {ctl}"
+                )
+            valid = p["hsel"] and p["htrans"] in (NONSEQ, SEQ)
+            prev = ctl if (valid and not p["hready"]) else None
             # Data phase in progress.
             if beat is not None and p["hreadyout"]:
-                addr, write, size, _prot, _nonsec = beat
-                if err_phase == 0 and write:
-                    self._write(addr, size, p["hwdata"])
+                if err_phase == 0 and beat.write:
+                    self._write(beat, p["hwdata"])
                 beat = None
             elif beat is not None:
                 if err_phase == 1:
-                    out, err_phase = (1, 0, 1), 2
+                    out, err_phase = (1, self._junk(), 1), 2
                 else:
                     waits -= 1
-                    if waits <= 0:
-                        out = (1, self._read(beat[0]), 0)
+                    out = (1, self._read(beat.addr), 0) if waits <= 0 else (0, self._junk(), 0)
                 continue
-            out, err_phase = (1, 0, 0), 0
+            out, err_phase = (1, self._junk(), 0), 0
             # Address phase.
-            if p["hready"] and p["hsel"] and p["htrans"] in (NONSEQ, SEQ):
-                addr, write, size = p["haddr"], bool(p["hwrite"]), p["hsize"]
-                beat = (addr, write, size, p["hprot"], p["hnonsec"])
-                self.log.append(Access(addr, write, 0, 0, p["hprot"] | p["hnonsec"] << 4))
+            if p["hready"] and valid:
+                addr = p["haddr"]
+                beat = Access(
+                    addr, bool(p["hwrite"]), 0, 0, p["hprot"] | p["hnonsec"] << 4, p["hsize"]
+                )
+                self.log.append(beat)
                 if self.trace is not None:
                     self.trace.append((self.ident, addr))
                 if (addr & ~(nbytes - 1)) in self.err_addrs:
-                    out, err_phase = (0, 0, 1), 1
+                    out, err_phase = (0, self._junk(), 1), 1
                 else:
                     waits = random.randint(0, self.max_wait)
-                    out = (1, self._read(addr), 0) if waits == 0 else (0, 0, 0)
+                    out = (1, self._read(addr), 0) if waits == 0 else (0, self._junk(), 0)
+
+    def _junk(self) -> int:
+        return random.getrandbits(self.data_width)
 
     def _read(self, addr: int) -> int:
         return self.mem.get(addr & ~(self.data_width // 8 - 1), 0)
 
-    def _write(self, addr: int, size: int, data: int) -> None:
+    def _write(self, beat: Access, data: int) -> None:
         nbytes = self.data_width // 8
-        word = addr & ~(nbytes - 1)
+        word = beat.addr & ~(nbytes - 1)
         old = self.mem.get(word, 0)
-        for b in range(addr % nbytes, addr % nbytes + (1 << size)):
+        for b in range(beat.addr % nbytes, beat.addr % nbytes + (1 << beat.size)):
             lane = 0xFF << (8 * b)
             old = (old & ~lane) | (data & lane)
         self.mem[word] = old
-        self.log[-1].data = data
+        beat.data = data
