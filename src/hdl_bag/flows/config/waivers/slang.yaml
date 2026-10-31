@@ -3,4 +3,9 @@
 #
 # slang waivers for hdl-bag in-house and generated RTL. One entry per waived site;
 # every entry needs a reason. See hdl_bag/flows/waivers.py for the format.
-[]
+- rule: unused-package-parameter
+  file: rtl/pkg/*.sv
+  reason: >-
+    The generated parameter package exports every fabric table and the memory map
+    (<Slave><Region>Base/Size) for the SoC that instantiates the wrapper; the wrapper
+    itself reads only the tables its templates need.

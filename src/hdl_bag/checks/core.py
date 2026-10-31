@@ -71,6 +71,7 @@ RULES: Final[dict[str, Severity]] = {
     "MM-SIZE-NOT-POW2": E,
     "MM-MISALIGNED": E,
     "MM-ADDR-RANGE": E,
+    "MM-SLAVE-ALIGN": E,
     "MM-SMALL-AXI": W,
     "MM-PATH-NO-REGION": W,
     "BRIDGE-WINDOW-BASE": E,

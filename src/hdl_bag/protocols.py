@@ -142,3 +142,66 @@ def port_signals(
     if not has_user:
         drop |= _USER_SIGNALS
     return tuple(s for s in base if s not in drop)
+
+
+# Signals driven towards the slave (by a master or by the interconnect); every other
+# signal of a port is a response, driven by the slave.
+_TOWARDS_SLAVE: Final[frozenset[str]] = frozenset({
+    *(s for s in _AXI4 if s[0] in "aw" and not s.endswith("ready")), "bready", "rready",
+    *(s for s in _AHB_SLAVE if s not in {"hrdata", "hreadyout", "hresp"}), "hmastlock",
+    *(s for s in _APB4 if s not in {"pready", "prdata", "pslverr"}),
+})  # fmt: skip
+
+
+def towards_slave(signal: str, is_slave: bool) -> bool:
+    """True if SIGNAL is driven by the master side (master or interconnect) on a port.
+
+    HREADY is the one signal whose direction depends on the port: the interconnect drives
+    it to a master as a response, and to a slave as an input."""
+    if signal == "hready":
+        return is_slave
+    return signal in _TOWARDS_SLAVE
+
+
+def signal_width(signal: str, addr_width: int, data_width: int, id_width: int = 0,
+                 user_width: int = 0) -> int:  # fmt: skip
+    """Bit width of one AMBA signal."""
+    if signal.endswith("addr"):
+        return addr_width
+    if signal.endswith("data"):
+        return data_width
+    if signal in {"wstrb", "pstrb"}:
+        return data_width // 8
+    if signal in _ID_SIGNALS:
+        return id_width
+    if signal in _USER_SIGNALS:
+        return user_width
+    return _FIXED_WIDTHS.get(signal[2:] if signal[:2] in {"aw", "ar"} else signal, 1)
+
+
+_FIXED_WIDTHS: Final[dict[str, int]] = {
+    "len": 8, "size": 3, "burst": 2, "cache": 4, "prot": 3, "qos": 4, "region": 4,
+    "bresp": 2, "rresp": 2,
+    "hburst": 3, "hprot": 4, "hsize": 3, "htrans": 2, "pprot": 3,
+}  # fmt: skip
+
+# Port_Options tie-default values (AMBA recommended defaults); tie-0 is zero.
+# A value of -1 means all ones; TIE_WRITE_STROBE means "all ones on writes, zero on
+# reads" (APB4 requires PSTRB low for reads).
+TIE_WRITE_STROBE: Final = -2
+TIE_DEFAULTS: Final[dict[str, int]] = {
+    "awcache": 0b0011, "arcache": 0b0011,
+    "hprot": 0b0011,
+    "pstrb": TIE_WRITE_STROBE,
+}  # fmt: skip
+# D28: a tied security attribute fails closed (non-secure), for tie-0 and tie-default.
+# The value is ORed into the tie value of the signal.
+TIE_NONSECURE: Final[dict[str, int]] = {
+    "hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010,
+}  # fmt: skip
+
+
+def tie_value(signal: str, mode: str) -> int:
+    """Value of SIGNAL tied by a Port_Options column set to MODE (tie-0 / tie-default)."""
+    value = TIE_DEFAULTS.get(signal, 0) if mode == "tie-default" else 0
+    return value | TIE_NONSECURE.get(signal, 0)

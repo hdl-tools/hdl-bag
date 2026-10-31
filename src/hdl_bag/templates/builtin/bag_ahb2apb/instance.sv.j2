@@ -1,0 +1,42 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_ahb2apb. Context: hdl_bag.gen.wrapper.render_instance. -#}
+{% set up = inst.up %}
+{% set dn = inst.down %}
+  // {{ bridge.name }}: {{ bridge.upstream }} (AHB-Lite) -> {{ bridge.downstream }} ({{ bridge.downstream_protocol }})
+  bag_ahb2apb #(
+      .HAddrWidth({{ up.addr_width }}),
+      .HDataWidth({{ up.data_width }}),
+      .PAddrWidth({{ dn.addr_width }}),
+      .PDataWidth({{ dn.data_width }}),
+      .AddrOffset({{ lit(up.addr_width, 0 if bridge.pass_through else bridge.window_base) }}),
+      .AsyncCdc  (1'b{{ 1 if bridge.cdc else 0 }})
+  ) {{ name }} (
+      .hclk_i     ({{ ctx.clk(up.domain) }}),
+      .hrst_ni    ({{ ctx.rst(up.domain) }}),
+      .hsel_i     ({{ ctx.i(up, "hsel") }}),
+      .haddr_i    ({{ ctx.i(up, "haddr") }}),
+      .hburst_i   ({{ ctx.i(up, "hburst") }}),
+      .hprot_i    ({{ ctx.i(up, "hprot", 3) }}),
+      .hnonsec_i  ({{ ctx.i(up, "hnonsec") }}),
+      .hsize_i    ({{ ctx.i(up, "hsize") }}),
+      .htrans_i   ({{ ctx.i(up, "htrans") }}),
+      .hwdata_i   ({{ ctx.i(up, "hwdata") }}),
+      .hwrite_i   ({{ ctx.i(up, "hwrite") }}),
+      .hready_i   ({{ ctx.i(up, "hready", 1) }}),
+      .hrdata_o   ({{ ctx.o(up, "hrdata") }}),
+      .hreadyout_o({{ ctx.o(up, "hreadyout") }}),
+      .hresp_o    ({{ ctx.o(up, "hresp") }}),
+      .pclk_i     ({{ ctx.clk(dn.domain) }}),
+      .prst_ni    ({{ ctx.rst(dn.domain) }}),
+      .paddr_o    ({{ ctx.o(dn, "paddr") }}),
+      .pprot_o    ({{ ctx.o(dn, "pprot") }}),
+      .psel_o     ({{ ctx.o(dn, "psel") }}),
+      .penable_o  ({{ ctx.o(dn, "penable") }}),
+      .pwrite_o   ({{ ctx.o(dn, "pwrite") }}),
+      .pwdata_o   ({{ ctx.o(dn, "pwdata") }}),
+      .pstrb_o    ({{ ctx.o(dn, "pstrb") }}),
+      .pready_i   ({{ ctx.i(dn, "pready", 1) }}),
+      .prdata_i   ({{ ctx.i(dn, "prdata") }}),
+      .pslverr_i  ({{ ctx.i(dn, "pslverr") }})
+  );

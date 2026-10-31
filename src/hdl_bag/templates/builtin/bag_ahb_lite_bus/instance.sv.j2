@@ -1,0 +1,61 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_ahb_lite_bus. Context: hdl_bag.gen.wrapper.render_instance. -#}
+{% set t = pkg ~ "::" ~ p %}
+{% set ms = inst.masters %}
+{% set ss = inst.slaves %}
+  // {{ fabric.name }}: AHB-Lite single layer, {{ fabric.arbitration }}
+  bag_ahb_lite_bus #(
+      .AddrWidth    ({{ fabric.addr_width }}),
+      .DataWidth    ({{ fabric.data_width }}),
+      .NoMasters    ({{ t }}NoMasters),
+      .NoSlaves     ({{ t }}NoSlaves),
+      .NoRules      ({{ t }}NoRules),
+      .NoAliases    ({{ t }}NoAliases),
+      .FixedPriority(1'b{{ 1 if fabric.arbitration == "fixed-priority" else 0 }}),
+      .Priority     ({{ t }}Priority),
+      .RuleBase     ({{ t }}RuleBase),
+      .RuleMask     ({{ t }}RuleMask),
+      .RuleSlave    ({{ t }}RuleSlave),
+      .RuleNoRead   ({{ t }}RuleNoRead),
+      .RuleNoWrite  ({{ t }}RuleNoWrite),
+      .RuleSecure   ({{ t }}RuleSecure),
+      .Connect      ({{ t }}Connect),
+      .MstNoRead    ({{ t }}MstNoRead),
+      .MstNoWrite   ({{ t }}MstNoWrite),
+      .MissToDefault({{ t }}MissToDefault),
+      .DefaultSlave ({{ t }}DefaultSlave),
+      .AliasMaster  ({{ t }}AliasMaster),
+      .AliasBase    ({{ t }}AliasBase),
+      .AliasMask    ({{ t }}AliasMask),
+      .AliasTo      ({{ t }}AliasTo)
+  ) {{ name }} (
+      .clk_i        ({{ ctx.clk(fabric.domain) }}),
+      .rst_ni       ({{ ctx.rst(fabric.domain) }}),
+      .alias_en_i   ({{ ctx.alias_en() }}),
+      .s_haddr_i    ({{ ctx.vec("s_haddr", ms, "haddr", "in") }}),
+      .s_hburst_i   ({{ ctx.vec("s_hburst", ms, "hburst", "in") }}),
+      .s_hmastlock_i({{ ctx.vec("s_hmastlock", ms, "hmastlock", "in") }}),
+      .s_hprot_i    ({{ ctx.vec("s_hprot", ms, "hprot", "in", 3) }}),
+      .s_hnonsec_i  ({{ ctx.vec("s_hnonsec", ms, "hnonsec", "in") }}),
+      .s_hsize_i    ({{ ctx.vec("s_hsize", ms, "hsize", "in") }}),
+      .s_htrans_i   ({{ ctx.vec("s_htrans", ms, "htrans", "in") }}),
+      .s_hwdata_i   ({{ ctx.vec("s_hwdata", ms, "hwdata", "in") }}),
+      .s_hwrite_i   ({{ ctx.vec("s_hwrite", ms, "hwrite", "in") }}),
+      .s_hrdata_o   ({{ ctx.vec("s_hrdata", ms, "hrdata", "out") }}),
+      .s_hready_o   ({{ ctx.vec("s_hready", ms, "hready", "out") }}),
+      .s_hresp_o    ({{ ctx.vec("s_hresp", ms, "hresp", "out") }}),
+      .m_hsel_o     ({{ ctx.vec("m_hsel", ss, "hsel", "out") }}),
+      .m_haddr_o    ({{ ctx.vec("m_haddr", ss, "haddr", "out") }}),
+      .m_hburst_o   ({{ ctx.vec("m_hburst", ss, "hburst", "out") }}),
+      .m_hprot_o    ({{ ctx.vec("m_hprot", ss, "hprot", "out") }}),
+      .m_hnonsec_o  ({{ ctx.vec("m_hnonsec", ss, "hnonsec", "out") }}),
+      .m_hsize_o    ({{ ctx.vec("m_hsize", ss, "hsize", "out") }}),
+      .m_htrans_o   ({{ ctx.vec("m_htrans", ss, "htrans", "out") }}),
+      .m_hwdata_o   ({{ ctx.vec("m_hwdata", ss, "hwdata", "out") }}),
+      .m_hwrite_o   ({{ ctx.vec("m_hwrite", ss, "hwrite", "out") }}),
+      .m_hready_o   ({{ ctx.vec("m_hready", ss, "hready", "out") }}),
+      .m_hrdata_i   ({{ ctx.vec("m_hrdata", ss, "hrdata", "in") }}),
+      .m_hreadyout_i({{ ctx.vec("m_hreadyout", ss, "hreadyout", "in", 1) }}),
+      .m_hresp_i    ({{ ctx.vec("m_hresp", ss, "hresp", "in") }})
+  );

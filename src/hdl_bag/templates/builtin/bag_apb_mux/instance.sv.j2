@@ -1,0 +1,49 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_apb_mux. Context: hdl_bag.gen.wrapper.render_instance. -#}
+{% set m = inst.masters[0] %}
+{% set t = pkg ~ "::" ~ p %}
+  // {{ fabric.name }}: {{ fabric.protocol }} decoder-mux
+  bag_apb_mux #(
+      .AddrWidth    ({{ fabric.addr_width }}),
+      .DataWidth    ({{ fabric.data_width }}),
+      .NoSlaves     ({{ t }}NoSlaves),
+      .NoRules      ({{ t }}NoRules),
+      .NoAliases    ({{ t }}NoAliases),
+      .RuleBase     ({{ t }}RuleBase),
+      .RuleMask     ({{ t }}RuleMask),
+      .RuleSlave    ({{ t }}RuleSlave),
+      .RuleNoRead   ({{ t }}RuleNoRead),
+      .RuleNoWrite  ({{ t }}RuleNoWrite),
+      .RuleSecure   ({{ t }}RuleSecure),
+      .Connect      ({{ t }}Connect[0]),
+      .MstNoRead    ({{ t }}MstNoRead[0]),
+      .MstNoWrite   ({{ t }}MstNoWrite[0]),
+      .MissToDefault({{ t }}MissToDefault[0]),
+      .DefaultSlave ({{ t }}DefaultSlave[0]),
+      .AliasBase    ({{ t }}AliasBase),
+      .AliasMask    ({{ t }}AliasMask),
+      .AliasTo      ({{ t }}AliasTo)
+  ) {{ name }} (
+      .alias_en_i ({{ ctx.alias_en() }}),
+      .s_paddr_i  ({{ ctx.i(m, "paddr") }}),
+      .s_pprot_i  ({{ ctx.i(m, "pprot") }}),
+      .s_psel_i   ({{ ctx.i(m, "psel") }}),
+      .s_penable_i({{ ctx.i(m, "penable") }}),
+      .s_pwrite_i ({{ ctx.i(m, "pwrite") }}),
+      .s_pwdata_i ({{ ctx.i(m, "pwdata") }}),
+      .s_pstrb_i  ({{ ctx.i(m, "pstrb", -1) }}),
+      .s_pready_o ({{ ctx.o(m, "pready") }}),
+      .s_prdata_o ({{ ctx.o(m, "prdata") }}),
+      .s_pslverr_o({{ ctx.o(m, "pslverr") }}),
+      .m_paddr_o  ({{ ctx.vec("m_paddr", inst.slaves, "paddr", "out") }}),
+      .m_pprot_o  ({{ ctx.vec("m_pprot", inst.slaves, "pprot", "out") }}),
+      .m_psel_o   ({{ ctx.vec("m_psel", inst.slaves, "psel", "out") }}),
+      .m_penable_o({{ ctx.vec("m_penable", inst.slaves, "penable", "out") }}),
+      .m_pwrite_o ({{ ctx.vec("m_pwrite", inst.slaves, "pwrite", "out") }}),
+      .m_pwdata_o ({{ ctx.vec("m_pwdata", inst.slaves, "pwdata", "out") }}),
+      .m_pstrb_o  ({{ ctx.vec("m_pstrb", inst.slaves, "pstrb", "out") }}),
+      .m_pready_i ({{ ctx.vec("m_pready", inst.slaves, "pready", "in", 1) }}),
+      .m_prdata_i ({{ ctx.vec("m_prdata", inst.slaves, "prdata", "in") }}),
+      .m_pslverr_i({{ ctx.vec("m_pslverr", inst.slaves, "pslverr", "in") }})
+  );

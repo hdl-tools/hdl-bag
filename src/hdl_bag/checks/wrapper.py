@@ -6,6 +6,7 @@ from typing import Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
+from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import (
     OPTIONAL_SIGNAL_NAMES,
     OPTIONAL_SIGNALS,
@@ -189,13 +190,8 @@ def check_wrapper_ports(ctx: Context) -> None:
             has_user=isinstance(user, int) and user > 0,
             removed=_tied(ctx, port),
         )  # fmt: skip
-        stem = pattern.replace("{port}_{proto}", prefix) if prefix else pattern
         for sig in signals:
-            name = (
-                stem.replace("{port}", port)
-                .replace("{proto}", PROTO_TOKEN[protocol])
-                .replace("{signal}", sig)
-            )
+            name = flat_signal_name(pattern, port, PROTO_TOKEN[protocol], sig, prefix)
             claim(name, port, row["Port"])
 
     for kind, column in (("master", "Master"), ("slave", "Slave"), ("bridge", "Bridge")):

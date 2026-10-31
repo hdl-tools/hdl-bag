@@ -16,3 +16,4 @@ sources:
   - rtl/inhouse/bag_apb_mux.sv
 licence: Apache-2.0
 qualification: unqualified
+rtl: true
