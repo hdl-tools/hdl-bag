@@ -40,6 +40,7 @@ dev = [
     "mypy>=1.10",
     "pytest>=8",
     "ruff>=0.5",
+    "types-openpyxl>=3.1.5.20261017",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -61,3 +62,7 @@ mypy_path = "src"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.ruff.lint.per-file-ignores]
+# Header comments, notes and formulas are schema text; keep them verbatim on one line.
+"src/hdl_bag/template/*.py" = ["E501"]
