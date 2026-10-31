@@ -1,0 +1,440 @@
+schema: '0.3'
+project:
+  name: apb3_wide
+  revision: p2
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/apb3_wide
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_p
+    mhz: 100
+    source: top port
+    domain: D_P
+    reset: rst_p_n
+resets:
+  - name: rst_p_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_P
+fabrics:
+  - name: apb
+    protocol: APB3
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_P
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: host
+        priority: null
+    slave_ports:
+      - index: 0
+        port: p3
+        priority: null
+      - index: 1
+        port: p6
+        priority: null
+      - index: 2
+        port: p1
+        priority: null
+      - index: 3
+        port: p4
+        priority: null
+      - index: 4
+        port: p7
+        priority: null
+      - index: 5
+        port: p0
+        priority: null
+      - index: 6
+        port: p5
+        priority: null
+      - index: 7
+        port: p2
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 7
+        slave: p2
+        region: regs
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: p4
+        region: regs
+        base: '0x4001_0000'
+        end: '0x4001_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: p6
+        region: regs
+        base: '0x4002_0000'
+        end: '0x4002_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 5
+        slave: p0
+        region: regs
+        base: '0x4003_0000'
+        end: '0x4003_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 4
+        slave: p7
+        region: regs
+        base: '0x4004_0000'
+        end: '0x4004_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: p3
+        region: regs
+        base: '0x4005_0000'
+        end: '0x4005_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 6
+        slave: p5
+        region: regs
+        base: '0x4006_0000'
+        end: '0x4006_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: p1
+        region: regs
+        base: '0x4007_0000'
+        end: '0x4007_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: host
+        miss: default-slave
+        default_slave: p5
+        aliases: []
+masters:
+  - name: host
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_P
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: p0
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p1
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p2
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p3
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p4
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p5
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p6
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+  - name: p7
+    protocol: APB3
+    fabric: apb
+    data_width: 32
+    addr_width: 13
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_P
+    error_response: PSLVERR
+    wait_states: 0
+bridges: []
+adapters: []
+port_options:
+  - port: host
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p0
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p1
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p2
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: tie-0
+  - port: p3
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p4
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p5
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: p6
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: tie-0
+  - port: p7
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+memory_map:
+  - slave: p2
+    region: regs
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p4
+    region: regs
+    base: '0x4001_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p6
+    region: regs
+    base: '0x4002_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p0
+    region: regs
+    base: '0x4003_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p7
+    region: regs
+    base: '0x4004_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p3
+    region: regs
+    base: '0x4005_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p5
+    region: regs
+    base: '0x4006_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+  - slave: p1
+    region: regs
+    base: '0x4007_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb
+hierarchy:
+  top: apb3_wide_top
+  wrappers: []
+  placement:
+    - instance: apb
+      kind: fabric
+      wrapper: apb3_wide_top
+      rtl_name: u_apb
+wrapper:
+  top: apb3_wide_top
+  port_style: flat
+  signal_pattern: '{proto}_{port}_{signal}'
+  clock_reset_ports: one per domain
+  package: apb3_wide_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: host
+      exposed: true
+      prefix: null
+    - port: p0
+      exposed: true
+      prefix: null
+    - port: p1
+      exposed: true
+      prefix: null
+    - port: p2
+      exposed: true
+      prefix: null
+    - port: p3
+      exposed: true
+      prefix: null
+    - port: p4
+      exposed: true
+      prefix: null
+    - port: p5
+      exposed: true
+      prefix: null
+    - port: p6
+      exposed: true
+      prefix: null
+    - port: p7
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: apb3_wide.xlsx
+  sha256: 725981dd18b1b7ea95fe4a0c3be15c20fda08ce2263bdfb410c71c9ef9471620

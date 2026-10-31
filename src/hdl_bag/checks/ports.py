@@ -7,6 +7,7 @@ from typing import Final, Literal
 from hdl_bag.checks.basics import check_domain_ref
 from hdl_bag.checks.context import Context
 from hdl_bag.protocols import (
+    APB_FAMILY,
     AXI_FAMILY,
     DATA_WIDTHS,
     ERROR_RESPONSES,
@@ -230,6 +231,9 @@ def check_bridges(ctx: Context) -> None:
                            f"{fabric} is {proto}")  # fmt: skip
 
 
+TIED = ("tie-0", "tie-default")
+
+
 def check_port_options(ctx: Context) -> None:
     seen: dict[str, int] = {}
     for row in ctx.raw.port_options:
@@ -274,6 +278,12 @@ def check_port_options(ctx: Context) -> None:
                 ctx.report(
                     "PORTOPT-SIGNAL", row[col], f"{col} does not exist on {protocol}; use n/a"
                 )
+        # A tied PSLVERR on the master side of an APB fabric hides every error from it,
+        # its own miss response included: the master sees OKAY with no slave behind it.
+        if side == "master" and protocol in APB_FAMILY and signals["PSLVERR"] in TIED:
+            ctx.report("PORTOPT-ERROR-MASKED", row["PSLVERR"],
+                       f"PSLVERR is tied on {port}: errors from {attach[port]}, its miss response "
+                       "included, never reach it")  # fmt: skip
         buffered = (isinstance(depth, int) and depth > 0) or sl in (
             "cut",
             "multicut-2",

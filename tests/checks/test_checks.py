@@ -253,6 +253,11 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Hierarchy row 26: cpu0_dw_2_ghost is not a fabric, bridge or adapter instance (HIER-UNKNOWN-INSTANCE)"]),
     ("HIER-UNKNOWN-SUBWRAPPER", [("Hierarchy", 16, "Sub-wrapper", "nowhere")],
      ["Hierarchy row 16: nowhere is not defined in the Sub-wrapper table (HIER-UNKNOWN-SUBWRAPPER)"]),
+    ("PORTOPT-ERROR-MASKED", [("Port_Options", 18, h, v) for h, v in (
+        ("Port", "br_ahb2aon"), ("FIFO depth", 0), ("Register slice", "none"), ("PROT", "drive"),
+        ("QOS", "n/a"), ("REGION", "n/a"), ("CACHE", "n/a"), ("LOCK / excl", "n/a"),
+        ("PSTRB", "drive"), ("PSLVERR", "tie-0"))],
+     ["Port_Options row 18: PSLVERR is tied on br_ahb2aon: errors from aon_apb, its miss response included, never reach it (PORTOPT-ERROR-MASKED)"]),
     ("HIER-PLACED-TWICE", [("Hierarchy", 27, "Instance", "main_xbar"), ("Hierarchy", 27, "Sub-wrapper", "aon_wrapper")],
      ["Hierarchy row 27: main_xbar is already placed on row 16 (HIER-PLACED-TWICE)"]),
     ("HIER-RTL-NAME", [("Hierarchy", 16, "RTL instance name", "u_cfg_bus")],

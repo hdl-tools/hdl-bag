@@ -91,6 +91,7 @@ RULES: Final[dict[str, Severity]] = {
     "PORTOPT-UNKNOWN-PORT": E,
     "PORTOPT-DUPLICATE": E,
     "PORTOPT-SIGNAL": E,
+    "PORTOPT-ERROR-MASKED": W,
     # hierarchy and wrapper
     "HIER-UNKNOWN-PARENT": E,
     "HIER-SELF-PARENT": E,
