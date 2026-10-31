@@ -109,6 +109,17 @@ def check_memory_map(ctx: Context) -> list[Region]:
                 ctx.report("MM-ADDR-RANGE", row["Size (hex)"],
                            f"size {_hex(size)} exceeds the {s_addr}-bit address space of {target}")  # fmt: skip
                 continue
+            # D29: a narrow slave sees the low address bits, so its region must start
+            # on a multiple of its own address space (it then sees offsets from 0).
+            if (
+                isinstance(s_addr, int)
+                and isinstance(f_addr, int)
+                and s_addr < f_addr
+                and base % (1 << s_addr)
+            ):
+                ctx.report("MM-SLAVE-ALIGN", row["Base (hex)"],
+                           f"base {_hex(base)} is not aligned to the {s_addr}-bit address space of {target}")  # fmt: skip
+                continue
         clash = next((o for o in regions if o.fabric == fabric and o.overlaps(r.base, r.end)), None)
         if clash:
             ctx.report("MM-OVERLAP", row["Base (hex)"],

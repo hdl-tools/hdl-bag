@@ -204,6 +204,8 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Memory_Map row 20: base 0x5000_1800 is not aligned to size 0x0000_1000 (MM-MISALIGNED)"]),
     ("MM-ADDR-RANGE", [("Memory_Map", 11, "Size (hex)", "0x0000_2000")],
      ["Memory_Map row 11: size 0x0000_2000 exceeds the 12-bit address space of uart0 (MM-ADDR-RANGE)"]),
+    ("MM-SLAVE-ALIGN", [("Memory_Map", 11, "Base (hex)", "0x4000_3800"), ("Memory_Map", 11, "Size (hex)", "0x0000_0800")],
+     ["Memory_Map row 11: base 0x4000_3800 is not aligned to the 12-bit address space of uart0 (MM-SLAVE-ALIGN)"]),
     ("MM-SMALL-AXI", [("Memory_Map", 9, "Size (hex)", "0x0000_0800")],
      ["Memory_Map row 9: pmu0 region regs is smaller than 4 KB on AXI fabric cfg_bus (MM-SMALL-AXI)"]),
     ("MM-PATH-NO-REGION", _clear("Memory_Map", 20, MM_COLS),

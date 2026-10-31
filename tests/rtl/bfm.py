@@ -71,7 +71,8 @@ class _Tied:
 class Port:
     """Named signals of one bus port; each name maps to (signal, width) and is a Slot.
 
-    With TIED, a signal the DUT does not expose reads as TIED[name] (default 0)."""
+    Signals named in TIED must be absent from the DUT (tied off at the wrapper) and read
+    as that value; every other signal must exist. A misnamed or dropped port fails."""
 
     def __init__(
         self,
@@ -82,9 +83,11 @@ class Port:
     ) -> None:
         self._slots: dict[str, Slot | _Tied] = {}
         for n, (sig, w) in signals.items():
-            if tied is not None and not hasattr(dut, sig):
-                self._slots[n] = _Tied(tied.get(n, 0) & ((1 << w) - 1))
+            if tied is not None and n in tied:
+                assert not hasattr(dut, sig), f"{sig} should be tied off, but the DUT has it"
+                self._slots[n] = _Tied(tied[n] & ((1 << w) - 1))
             else:
+                assert hasattr(dut, sig), f"the DUT has no signal {sig}"
                 self._slots[n] = Slot(getattr(dut, sig), index, w)
 
     def __getitem__(self, name: str) -> int:
@@ -127,8 +130,8 @@ def wrapper_port(
     dw: int,
     tied: dict[str, int] | None = None,
 ) -> Port:
-    """A flat wrapper port PREFIX_<signal>. Signals the wrapper does not expose (tied off
-    by Port_Options) read as TIED (default 0); writes to them are dropped."""
+    """A flat wrapper port PREFIX_<signal>. Signals listed in TIED are tied off by
+    Port_Options: the wrapper must not expose them; they read as the given value."""
     sigs = {}
     for n, w in kind.items():
         width = w or (aw if "addr" in n else dw)

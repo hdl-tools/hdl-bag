@@ -185,10 +185,23 @@ _FIXED_WIDTHS: Final[dict[str, int]] = {
     "hburst": 3, "hprot": 4, "hsize": 3, "htrans": 2, "pprot": 3,
 }  # fmt: skip
 
-# Port_Options tie-default values (AMBA recommended defaults); tie-0 is always zero.
-# A value of -1 means all ones.
+# Port_Options tie-default values (AMBA recommended defaults); tie-0 is zero.
+# A value of -1 means all ones; TIE_WRITE_STROBE means "all ones on writes, zero on
+# reads" (APB4 requires PSTRB low for reads).
+TIE_WRITE_STROBE: Final = -2
 TIE_DEFAULTS: Final[dict[str, int]] = {
     "awcache": 0b0011, "arcache": 0b0011,
     "hprot": 0b0011,
-    "pstrb": -1,
+    "pstrb": TIE_WRITE_STROBE,
 }  # fmt: skip
+# D28: a tied security attribute fails closed (non-secure), for tie-0 and tie-default.
+# The value is ORed into the tie value of the signal.
+TIE_NONSECURE: Final[dict[str, int]] = {
+    "hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010,
+}  # fmt: skip
+
+
+def tie_value(signal: str, mode: str) -> int:
+    """Value of SIGNAL tied by a Port_Options column set to MODE (tie-0 / tie-default)."""
+    value = TIE_DEFAULTS.get(signal, 0) if mode == "tie-default" else 0
+    return value | TIE_NONSECURE.get(signal, 0)

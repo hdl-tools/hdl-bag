@@ -48,9 +48,18 @@ def header(spec: Spec, user_header: str | None, comment: str = "//") -> str:
     return text + "\n".join(banner) + "\n"
 
 
+class GenerateError(ValueError):
+    """The IR cannot be generated as asked (a name collision, an unsupported feature)."""
+
+
 def lit(width: int, value: int) -> str:
-    """Sized SV literal; -1 means all ones."""
-    value = (1 << width) - 1 if value == -1 else value & ((1 << width) - 1)
+    """Sized SV literal; -1 means all ones. A value that does not fit is an error."""
+    if width < 1:
+        raise GenerateError(f"literal of width {width}")
+    if value == -1:
+        value = (1 << width) - 1
+    elif not 0 <= value < 1 << width:
+        raise GenerateError(f"value {value:#x} does not fit in {width} bits")
     if width <= 4:
         return f"{width}'b{value:0{width}b}"
     digits = f"{value:0{(width + 3) // 4}X}"

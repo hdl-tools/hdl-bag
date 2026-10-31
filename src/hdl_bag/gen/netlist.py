@@ -11,7 +11,7 @@ side sees the constant and the driving side's output is left unused.
 from dataclasses import dataclass, field
 
 from hdl_bag.ir.model import Adapter, Bridge, Fabric, PortOption, Spec
-from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, TIE_DEFAULTS, Protocol, port_signals
+from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, Protocol, port_signals, tie_value
 
 # Port_Options field -> optional-signal column
 _OPTION_COLUMNS = {
@@ -66,7 +66,7 @@ def _ties(option: PortOption | None) -> dict[str, int]:
         value = getattr(option, fld)
         if value in ("tie-0", "tie-default"):
             for sig in OPTIONAL_SIGNAL_NAMES[column]:
-                out[sig] = TIE_DEFAULTS.get(sig, 0) if value == "tie-default" else 0
+                out[sig] = tie_value(sig, value)
     return out
 
 
@@ -74,7 +74,8 @@ def _bus(name: str, protocol: str, aw: int, dw: int, idw: int | None, uw: int, d
          is_slave: bool, option: PortOption | None, external: bool = False) -> Bus:  # fmt: skip
     proto = Protocol(protocol)
     signals = port_signals(proto, is_slave, has_id=bool(idw), has_user=uw > 0)
-    ties = {s: v for s, v in _ties(option).items() if s in signals}
+    tied = _ties(option)
+    ties = {s: tied[s] for s in signals if s in tied}  # protocol order: deterministic
     return Bus(name, proto, aw, dw, idw or 0, uw, domain, is_slave, signals, ties, external)
 
 
@@ -106,10 +107,12 @@ def build_netlist(spec: Spec) -> Netlist:
     instances: list[Instance] = []
     for b in spec.bridges:
         up_f, down_f = fabrics[b.upstream], fabrics[b.downstream]
+        # A bridge's Port_Options apply to its downstream (master) end, as the checks
+        # and the workbook define; the upstream end is a plain slave of its fabric.
         opt = options.get(b.name)
         up = _bus(f"{b.upstream}_2_{b.name}", b.upstream_protocol, up_f.addr_width,
                   b.upstream_width, up_f.id_width.slave_side if up_f.id_width else None, 0,
-                  up_f.domain, True, opt)  # fmt: skip
+                  up_f.domain, True, None)  # fmt: skip
         down = _bus(f"{b.name}_2_{b.downstream}", b.downstream_protocol, down_f.addr_width,
                     b.downstream_width, None, 0, down_f.domain, False, opt)  # fmt: skip
         ends[(b.name, b.upstream)] = up

@@ -6,8 +6,8 @@ Tables are typed localparams written as assignment patterns (highest index first
 both Verilator and slang accept them when passed to a parameter.
 """
 
-from hdl_bag.gen.decode import DecodeTables, decode_tables
-from hdl_bag.gen.render import camel, lit
+from hdl_bag.gen.decode import DecodeTables, decode_tables, fabric_offset
+from hdl_bag.gen.render import GenerateError, camel, lit
 from hdl_bag.ir.model import Spec
 
 
@@ -71,12 +71,21 @@ def package(spec: Spec, header: str) -> str:
     lines = [header.rstrip("\n"), "", f"package {name};", ""]
     for f in spec.fabrics:
         lines.append(f"  // {f.name}: {f.protocol} {f.topology}, template {f.template}")
-        lines += fabric_params(camel(f.name), decode_tables(f))
+        offset = fabric_offset(spec, f)
+        if offset:
+            lines.append(f"  // decoded relative to the pass-through N window at {lit(64, offset)}")
+        lines += fabric_params(camel(f.name), decode_tables(f, offset))
         lines.append("")
     lines.append("  // Memory map (system addresses)")
     for r in spec.memory_map:
         p = camel(r.slave) + camel(r.region)
         _lp(lines, "logic [63:0]", f"{p}Base", lit(64, r.base))
         _lp(lines, "logic [63:0]", f"{p}Size", lit(64, r.size))
+    names = [line.split("=")[0].split()[-1] for line in lines if "localparam" in line]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise GenerateError(
+            f"package names collide: {', '.join(dup)} (rename a fabric, slave or region)"
+        )
     lines += ["", f"endpackage : {name}", ""]
     return "\n".join(lines)

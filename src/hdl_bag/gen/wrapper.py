@@ -17,11 +17,19 @@ from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
 
-from hdl_bag.gen.decode import decode_tables
+from hdl_bag.gen.decode import decode_tables, fabric_offset
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
-from hdl_bag.gen.render import camel, environment, lit
+from hdl_bag.gen.render import GenerateError, camel, environment, lit
 from hdl_bag.ir.model import Spec
-from hdl_bag.protocols import PROTO_TOKEN, Protocol, port_signals, signal_width, towards_slave
+from hdl_bag.naming import flat_signal_name
+from hdl_bag.protocols import (
+    PROTO_TOKEN,
+    TIE_WRITE_STROBE,
+    Protocol,
+    port_signals,
+    signal_width,
+    towards_slave,
+)
 
 
 def _width(w: int) -> str:
@@ -47,7 +55,8 @@ class Scope:
     assigns: list[str] = field(default_factory=list)
     domains: set[str] = field(default_factory=set)
     inputs_used: set[str] = field(default_factory=set)
-    _declared: set[str] = field(default_factory=set)
+    reserved: set[str] = field(default_factory=set)  # port names of this module
+    _declared: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._prefix = {p.port: p.prefix for p in self.spec.wrapper.ports}
@@ -57,11 +66,9 @@ class Scope:
         return self._prefix.get(bus.name) or f"{bus.name}_{PROTO_TOKEN[bus.protocol]}"
 
     def flat_name(self, bus: Bus, sig: str) -> str:
-        pattern = self.spec.wrapper.signal_pattern
+        proto = PROTO_TOKEN[bus.protocol]
         prefix = self._prefix.get(bus.name)
-        if prefix and "{port}_{proto}" in pattern:
-            pattern = pattern.replace("{port}_{proto}", prefix)
-        return pattern.format(port=prefix or bus.name, proto=PROTO_TOKEN[bus.protocol], signal=sig)
+        return flat_signal_name(self.spec.wrapper.signal_pattern, bus.name, proto, sig, prefix)
 
     def ref(self, bus: Bus, sig: str) -> str:
         """The wire carrying SIG of BUS in this module (assumes it exists and is not tied)."""
@@ -78,12 +85,16 @@ class Scope:
         return signal_width(sig, bus.addr_width, bus.data_width, bus.id_width, bus.user_width)
 
     def declare(self, name: str, width: int, packed: int = 0) -> None:
-        if name not in self._declared:
-            self._declared.add(name)
-            dims = (f"[{packed - 1}:0]" if packed else "") + (
-                f"[{width - 1}:0]" if width > 1 else ""
-            )
-            self.decls.append(f"  logic {dims} {name};" if dims else f"  logic {name};")
+        dims = (f"[{packed - 1}:0]" if packed else "") + (f"[{width - 1}:0]" if width > 1 else "")
+        decl = f"  logic {dims} {name};" if dims else f"  logic {name};"
+        if name in self.reserved:
+            raise GenerateError(f"generated net '{name}' collides with a port of the wrapper")
+        if name in self._declared:
+            if self._declared[name] != decl:
+                raise GenerateError(f"generated net '{name}' declared twice with different types")
+            return
+        self._declared[name] = decl
+        self.decls.append(decl)
 
     def sink(self, name: str, width: int) -> str:
         self.declare(f"unused_{name}", width)
@@ -96,7 +107,19 @@ class Scope:
 
     def reset(self, domain: str) -> str:
         self.domains.add(domain)
-        return f"rst_{domain.lower()}_n"
+        return reset_net(domain)
+
+    def tie(self, bus: Bus, sig: str, width: int) -> str:
+        """The constant (or write-qualified strobe) a tied signal of BUS carries."""
+        value = bus.ties[sig]
+        if value == TIE_WRITE_STROBE:
+            return f"{{{width}{{{self.ref(bus, 'pwrite')}}}}}"
+        return lit(width, value)
+
+
+def reset_net(domain: str) -> str:
+    """Internal active-low reset of DOMAIN (the bag_ prefix keeps it off user names)."""
+    return f"bag_rst_{domain}_n"
 
 
 @dataclass
@@ -109,7 +132,7 @@ class InstanceContext:
     def i(self, bus: Bus, sig: str, default: int = 0, width: int | None = None) -> str:
         w = width or Scope.width(bus, sig)
         if sig in bus.ties:
-            return lit(w, bus.ties[sig])
+            return self.scope.tie(bus, sig, w)
         if sig not in bus.signals:
             return lit(w, default)
         return self.scope.ref(bus, sig)
@@ -155,7 +178,8 @@ class InstanceContext:
     def alias_en(self) -> str:
         """Alias enable vector of the instance's fabric, highest alias first."""
         assert self.inst.fabric is not None
-        enables = decode_tables(self.inst.fabric).alias_enables
+        fab = self.inst.fabric
+        enables = decode_tables(fab, fabric_offset(self.scope.spec, fab)).alias_enables
         bits = []
         for e in reversed(enables):
             if e in ("0", "1"):
@@ -178,7 +202,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         p=camel(inst.name),
         fabric=fab,
         bridge=inst.bridge,
-        tables=decode_tables(fab) if fab else None,
+        tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
     )
 
@@ -210,6 +234,7 @@ def _port_decls(scope: Scope, netlist: Netlist) -> list[str]:
             modport = "to_slave" if bus.is_slave else "to_master"
             rows.append((f"{interface_name(spec, bus)}.{modport}", 0, scope.port_prefix(bus)))
     out = []
+    scope.reserved.update(name for _, _, name in rows)
     for n, (direction, w, name) in enumerate(rows):
         if n in comments:
             out.append(f"    // {comments[n]}")
@@ -226,10 +251,10 @@ def _tie_external_outputs(scope: Scope, netlist: Netlist) -> None:
     if scope.style == "flat":
         return
     for bus in netlist.ports:
-        for sig, value in bus.ties.items():
+        for sig in bus.ties:
             if towards_slave(sig, bus.is_slave) == bus.is_slave:  # the wrapper drives it
-                w = scope.width(bus, sig)
-                scope.assigns.append(f"  assign {scope.port_prefix(bus)}.{sig} = {lit(w, value)};")
+                value = scope.tie(bus, sig, scope.width(bus, sig))
+                scope.assigns.append(f"  assign {scope.port_prefix(bus)}.{sig} = {value};")
 
 
 def _resets(scope: Scope) -> list[str]:
@@ -238,7 +263,7 @@ def _resets(scope: Scope) -> list[str]:
     out = []
     for c in sorted(spec.clocks, key=lambda c: c.domain):
         r = resets[c.domain]
-        net = f"rst_{c.domain.lower()}_n"
+        net = reset_net(c.domain)
         if c.domain not in scope.domains:
             for sig in (c.name, r.name):
                 out.append(f"  logic unused_{sig};")
@@ -251,7 +276,7 @@ def _resets(scope: Scope) -> list[str]:
                 "  bag_rst_sync #(",
                 f"      .ActiveLow  (1'b{int(low)}),",
                 f"      .AsyncAssert(1'b{int(r.assertion == 'async')})",
-                f"  ) u_rst_sync_{c.domain.lower()} (",
+                f"  ) u_bag_rst_sync_{c.domain} (",
                 f"      .clk_i ({c.name}),",
                 f"      .rst_i ({r.name}),",
                 f"      .rst_no({net})",
@@ -266,15 +291,19 @@ def render_wrapper(netlist: Netlist, style: str, header: str) -> str:
     spec = netlist.spec
     external = {b.name: b for b in netlist.ports if b.external}
     scope = Scope(spec, style, external)
+    ports = _port_decls(scope, netlist)  # fills scope.reserved before any net is declared
     bodies = [render_instance(scope, inst) for inst in netlist.instances]
     _tie_external_outputs(scope, netlist)
+    for domain in sorted(scope.domains):
+        if reset_net(domain) in scope.reserved:
+            raise GenerateError(f"generated reset '{reset_net(domain)}' collides with a port")
     resets = _resets(scope)
     for x in spec.wrapper.extra_inputs:
         if x not in scope.inputs_used:
             scope.decls.append(f"  logic unused_{x};")
             scope.assigns.append(f"  assign unused_{x} = {x};")
     top = spec.hierarchy.top
-    lines = [header.rstrip("\n"), "", f"module {top} (", *_port_decls(scope, netlist), ");", ""]
+    lines = [header.rstrip("\n"), "", f"module {top} (", *ports, ");", ""]
     if resets:
         lines += ["  // Clocks and resets", *resets, ""]
     if scope.decls:
@@ -383,7 +412,7 @@ def render_harness(netlist: Netlist, header: str) -> str:
             else:
                 # Not part of this port's role, or a tied input the wrapper ignores: give
                 # it a defined value, and read it so no interface signal is left dangling.
-                w = Scope.width(bus, sig)
+                w = max(Scope.width(bus, sig), 1)  # interfaces declare absent ID/USER as 1 bit
                 body.append(f"  assign {ifc}.{sig} = {lit(w, 0)};")
                 body.append(f"  logic {_width(w)}unused_{ifc}_{sig};")
                 body.append(f"  assign unused_{ifc}_{sig} = {ifc}.{sig};")
