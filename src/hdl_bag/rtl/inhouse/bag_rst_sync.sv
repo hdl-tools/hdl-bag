@@ -15,8 +15,16 @@ module bag_rst_sync #(
     output logic rst_no
 );
 
-  logic              rst_n;
+  if (Stages < 2) begin : gen_stages_check
+    $error("bag_rst_sync: Stages must be at least 2");
+  end
+
+  logic rst_n;
+  // The last stage is both flopped data and the domain's asynchronous reset: that is
+  // what a reset synchronizer is.
+  /* verilator lint_off SYNCASYNCNET */
   logic [Stages-1:0] q;
+  /* verilator lint_on SYNCASYNCNET */
 
   assign rst_n = ActiveLow ? rst_i : ~rst_i;
 

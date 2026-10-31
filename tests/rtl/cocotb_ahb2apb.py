@@ -58,7 +58,7 @@ def _lane(addr: int, value: int) -> int:
     return value << (8 * (addr % (HDW // 8)))
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def words_cross_with_offset(dut: Any) -> None:
     m, s = await _setup(dut)
     size = (PDW // 8).bit_length() - 1  # one APB-width beat
@@ -71,7 +71,7 @@ async def words_cross_with_offset(dut: Any) -> None:
         assert s.log[-1].addr == addr - OFFSET
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def wide_beat_splits_into_apb_transfers(dut: Any) -> None:
     m, s = await _setup(dut)
     size = (HDW // 8).bit_length() - 1  # one full AHB beat
@@ -86,7 +86,7 @@ async def wide_beat_splits_into_apb_transfers(dut: Any) -> None:
     assert (r.data, r.err) == (data, False)
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def byte_writes_use_strobes(dut: Any) -> None:
     m, s = await _setup(dut)
     assert not await m.write(
@@ -99,7 +99,21 @@ async def byte_writes_use_strobes(dut: Any) -> None:
     assert word >> (PDW - 8) == 0x5A and word & ((1 << (PDW - 8)) - 1) == (1 << (PDW - 8)) - 1
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def every_byte_lane_writes(dut: Any) -> None:
+    """A byte write to each byte of an AHB word strobes exactly its APB lane."""
+    m, s = await _setup(dut)
+    word, pb = BASE + 0x340, PDW // 8
+    for b in range(HDW // 8):
+        addr = word + b
+        assert not await m.write(addr, _lane(addr, 0xA0 + b), size=0)
+        assert s.log[-1].strb == 1 << (b % pb), (b, s.log[-1].strb)
+    for b in range(HDW // 8):
+        apb_word = (word + b - OFFSET) & ~(pb - 1)
+        assert (s.mem[apb_word] >> (8 * (b % pb))) & 0xFF == 0xA0 + b, b
+
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def pslverr_becomes_hresp_error(dut: Any) -> None:
     m, s = await _setup(dut)
     s.err_addrs.add(BASE + 0x400 - OFFSET)
@@ -108,16 +122,38 @@ async def pslverr_becomes_hresp_error(dut: Any) -> None:
     assert not (await m.read(BASE + 0x500, size=0)).err
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def pprot_from_hprot_and_hnonsec(dut: Any) -> None:
+    """PPROT = {instruction = !HPROT[0], non-secure = HNONSEC, privileged = HPROT[1]}."""
     m, s = await _setup(dut)
-    await m.write(BASE + 0x600, 0, size=0, prot=0b0010, nonsec=1)  # privileged instruction
-    assert s.log[-1].prot == 0b111
-    await m.write(BASE + 0x600, 0, size=0, prot=0b0001, nonsec=0)  # user data, secure
-    assert s.log[-1].prot == 0b000
+    for hprot in range(4):
+        for nonsec in (0, 1):
+            await m.write(BASE + 0x600, 0, size=0, prot=hprot, nonsec=nonsec)
+            expect = (1 - (hprot & 1)) << 2 | nonsec << 1 | (hprot >> 1 & 1)
+            assert s.log[-1].prot == expect, (hprot, nonsec, s.log[-1].prot)
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def wide_beat_error_on_any_part(dut: Any) -> None:
+    m, s = await _setup(dut)
+    size, parts = (HDW // 8).bit_length() - 1, HDW // PDW
+    for bad in range(parts):
+        s.err_addrs = {BASE + 0x800 - OFFSET + bad * PDW // 8}
+        n = len(s.log)
+        assert await m.write(BASE + 0x800, 0, size=size)
+        assert len(s.log) - n == parts  # every part is still issued
+    s.err_addrs = set()
+    assert not await m.write(BASE + 0x800, 0, size=size)
+
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def reads_drive_no_strobes(dut: Any) -> None:
+    m, s = await _setup(dut)
+    await m.read(BASE + 0x900, size=0)
+    assert s.log[-1].strb == 0 and not s.log[-1].write
+
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
 async def incr4_burst_becomes_four_transfers(dut: Any) -> None:
     m, s = await _setup(dut)
     size = (PDW // 8).bit_length() - 1
@@ -130,3 +166,4 @@ async def incr4_burst_becomes_four_transfers(dut: Any) -> None:
     n = len(s.log)
     assert not any(r.err for r in await m.run(beats))
     assert [a.addr for a in s.log[n:]] == [BASE + 0x700 - OFFSET + step * i for i in range(4)]
+    assert [a.data & 0xFF for a in s.log[n:]] == [1, 2, 3, 4]

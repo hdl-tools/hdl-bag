@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 import cocotb
-from bfm import APB, APB_RESP, ApbMaster, ApbSlave, fabric_port
+from bfm import APB, APB_RESP, ApbMaster, ApbResult, ApbSlave, fabric_port
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
 
@@ -14,11 +14,16 @@ MISS_TO_DEFAULT = os.environ.get("MISS_TO_DEFAULT") == "1"
 NONSEC = 0b010
 
 
+TRACE: list[tuple[int, int]] = []
+
+
 async def _setup(dut: Any) -> tuple[ApbMaster, list[ApbSlave]]:
     Clock(dut.clk_i, 10, unit="ns").start()
     dut.alias_en_i.value = 0
+    TRACE.clear()
     slaves = [
-        ApbSlave(dut.clk_i, fabric_port(dut, "m", i, APB, APB_RESP, 32, 32)) for i in range(3)
+        ApbSlave(dut.clk_i, fabric_port(dut, "m", i, APB, APB_RESP, 32, 32), trace=TRACE, ident=i)
+        for i in range(3)
     ]
     for s in slaves:
         s.start()
@@ -27,20 +32,24 @@ async def _setup(dut: Any) -> tuple[ApbMaster, list[ApbSlave]]:
     return master, slaves
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def decode_hits_each_region(dut: Any) -> None:
     m, s = await _setup(dut)
-    for addr, slave in ((0x1000_0000, 0), (0x1000_0FFC, 0), (0x1000_3000, 1), (0x1000_3FFC, 1)):
-        assert not await m.write(addr, addr ^ 0x5A5A_5A5A)
-        r = await m.read(addr)
+    hits = ((0x1000_0000, 0), (0x1000_0FFC, 0), (0x1000_3000, 1), (0x1000_3FFC, 1))
+    for addr, _ in hits:
+        assert not await m.write(addr, addr ^ 0x5A5A_5A5A, prot=0b101)
+        r = await m.read(addr, prot=NONSEC)  # non-secure access to a normal region is fine
         assert (r.data, r.err) == (addr ^ 0x5A5A_5A5A, False)
-        assert s[slave].log[-1].addr == addr
-    assert not await m.write(0x1000_2010, 7)  # s2 is write-only and secure
+    assert [x for addr, slave in hits for x in ((slave, addr), (slave, addr))] == TRACE
+    assert [a.prot for a in s[0].log] == [0b101, NONSEC, 0b101, NONSEC]  # PPROT forwarded
+    assert not await m.write(0x1000_2010, 7, prot=0b101)  # s2: write-only, secure (PPROT[1]=0)
     assert s[2].mem[0x1000_2010] == 7
-    assert (await m.read(0x1000_1004)).err is False  # s1 region 1 is read-only
+    s[1].mem[0x1000_1004] = 0xC0FF_EE01  # s1 region 1 is read-only
+    assert (await m.read(0x1000_1004)) == ApbResult(0xC0FF_EE01, False)
+    assert TRACE[-2:] == [(2, 0x1000_2010), (1, 0x1000_1004)]
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def ro_wo_and_secure_are_enforced(dut: Any) -> None:
     m, s = await _setup(dut)
     errs = [
@@ -57,7 +66,7 @@ async def ro_wo_and_secure_are_enforced(dut: Any) -> None:
         assert not any(x.log for x in s), "blocked accesses must not reach a slave"
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def miss_response_or_default_slave(dut: Any) -> None:
     m, s = await _setup(dut)
     r = await m.read(0x3000_0000)
@@ -67,19 +76,27 @@ async def miss_response_or_default_slave(dut: Any) -> None:
         assert r.err and r.data == 0 and not s[0].log
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def alias_follows_its_enable(dut: Any) -> None:
-    m, s = await _setup(dut)
+    m, _s = await _setup(dut)
     assert not await m.write(0x1000_0010, 0x1234)
-    r = await m.read(0x0000_0010)
-    assert r.err != MISS_TO_DEFAULT  # alias off: a miss
+    assert not await m.write(0x1000_0FFC, 0x5678)
+    TRACE.clear()
+    r = await m.read(0x0000_0010)  # alias off: a miss
+    if MISS_TO_DEFAULT:
+        assert (r.data, r.err, TRACE) == (0, False, [(0, 0x0000_0010)])
+    else:
+        assert r.err and not TRACE
     dut.alias_en_i.value = 1
-    r = await m.read(0x0000_0010)
-    assert (r.data, r.err) == (0x1234, False)
-    assert s[0].log[-1].addr == 0x1000_0010
+    TRACE.clear()
+    assert (await m.read(0x0000_0010)) == ApbResult(0x1234, False)
+    assert (await m.read(0x0000_0FFC)) == ApbResult(0x5678, False)  # top of the window
+    assert TRACE == [(0, 0x1000_0010), (0, 0x1000_0FFC)]
+    r = await m.read(0x0000_1000)  # one past the window: a miss
+    assert r.err != MISS_TO_DEFAULT
 
 
-@cocotb.test()
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def slave_error_and_strobes_pass_through(dut: Any) -> None:
     m, s = await _setup(dut)
     s[0].err_addrs.add(0x1000_0100)

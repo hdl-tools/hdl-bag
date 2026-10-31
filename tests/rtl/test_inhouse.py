@@ -19,6 +19,9 @@ TB = HERE / "tb"
 
 pytestmark = pytest.mark.eda
 
+# Fixed so a failure reproduces; cocotb derives each test's seed from it and the name.
+SEED = int(os.environ.get("BAG_COCOTB_SEED", "20261031"))
+
 
 def _sources(*extra: Path) -> list[Path]:
     return [p.relative_to(REPO) for p in (*LIBRARY, *extra)]
@@ -63,11 +66,15 @@ def _run(top: str, module: str, build: str, params: dict[str, int], env: dict[st
         results_xml=str(build_dir / "results.xml"),
         extra_env={
             **env,
+            "COCOTB_RANDOM_SEED": str(SEED),
             "PYTHONPATH": os.pathsep.join([str(HERE), os.environ.get("PYTHONPATH", "")]),
         },
     )
     total, failed = get_results(results)
-    assert total > 0 and failed == 0, f"{failed} of {total} cocotb tests failed"
+    expected = (HERE / f"{module}.py").read_text().count("@cocotb.test(")
+    assert (total, failed) == (expected, 0), (
+        f"{failed} of {total} cocotb tests failed (expected {expected} tests); seed {SEED}"
+    )
 
 
 @pytest.mark.parametrize("miss_to_default", [0, 1])
@@ -88,7 +95,8 @@ def test_ahb_lite_bus(fixed: int) -> None:
         (32, 32, 0, 10, 10),  # same clock, same width, pass-through Y
         (64, 32, 0x4000_0000, 10, 10),  # 64 -> 32 split, pass-through N
         (32, 8, 0, 10, 30),  # CDC 1:3, 32 -> 8
-        (64, 32, 0x4000_0000, 30, 10),  # CDC 3:1
+        (64, 32, 0x3FFF_F000, 30, 10),  # CDC 3:1, an offset that needs a borrow
+        (64, 8, 0x2000_0100, 10, 7),  # CDC 10:7, 64 -> 8 split
     ],
 )
 def test_ahb2apb(hdw: int, pdw: int, offset: int, hclk: int, pclk: int) -> None:

@@ -13,6 +13,10 @@
 //   * A burst (HBURST != SINGLE) or a locked sequence (HMASTLOCK) keeps the grant while
 //     the owner continues with SEQ / BUSY or holds HMASTLOCK. HMASTLOCK is not forwarded
 //     to slaves (v1).
+//   * The grant is frozen while HREADY is low, so the address phase on the bus stays
+//     stable through wait states. Arbitration sees requests as presented (HTRANS), not
+//     as accepted, which keeps slave HREADYOUT off the arbiter-to-HSEL path.
+// alias_en_i must be quasi-static or synchronous to clk_i: it steers the decode.
 // Decode is bag_addr_decode on the granted master's address. A miss or blocked access
 // with no default slave port goes to an internal default slave that answers IDLE / BUSY
 // with OKAY and NONSEQ / SEQ with the two-cycle ERROR response.
@@ -115,6 +119,8 @@ module bag_ahb_lite_bus #(
   logic                 lock_valid_q;
   logic                 lock_cont;
   logic [NoMasters-1:0] last_q;  // one-hot last grant, for round-robin
+  logic [NoMasters-1:0] grant_q;  // grant of the previous cycle
+  logic                 stall_q;  // HREADY was low in the previous cycle
 
   // Address phase on the shared bus.
   logic [AddrWidth-1:0] bus_haddr;
@@ -149,7 +155,7 @@ module bag_ahb_lite_bus #(
       end
       s_hrdata_o[m] = bus_hrdata;
       live_valid[m] = s_hready_o[m] && s_htrans_i[m][1];
-      req[m]        = held_valid_q[m] || live_valid[m];
+      req[m]        = held_valid_q[m] || s_htrans_i[m][1];
     end
   end
 
@@ -170,14 +176,17 @@ module bag_ahb_lite_bus #(
     int unsigned last;
     grant = '0;
     found = 1'b0;
-    best  = '1;
+    best  = '0;
     last  = 0;
-    if (lock_cont) begin
+    if (stall_q) begin
+      grant = grant_q;  // the address phase must not change during a wait state
+    end else if (lock_cont) begin
       grant = lock_mst_q;
     end else if (FixedPriority) begin
       for (int unsigned m = 0; m < NoMasters; m++) begin
-        if (req[m] && Priority[m] < best) begin
+        if (req[m] && (!found || Priority[m] < best)) begin
           best  = Priority[m];
+          found = 1'b1;
           grant = '0;
           grant[m] = 1'b1;
         end
@@ -266,7 +275,7 @@ module bag_ahb_lite_bus #(
   );
 
   for (genvar s = 0; s < NoSlaves; s++) begin : gen_slave
-    assign m_hsel_o[s]    = dec_sel[s];
+    assign m_hsel_o[s]    = dec_sel[s] && bus_htrans != Idle;
     assign m_haddr_o[s]   = dec_haddr;
     assign m_hburst_o[s]  = bus_hburst;
     assign m_hprot_o[s]   = bus_hprot;
@@ -287,7 +296,9 @@ module bag_ahb_lite_bus #(
     bus_hready = 1'b1;
     bus_hresp  = 1'b0;
     bus_hrdata = '0;
-    if (data_dflt_q) begin
+    if (!data_valid_q) begin
+      // IDLE data phase: zero-wait OKAY, whatever slave the idle address decodes to.
+    end else if (data_dflt_q) begin
       bus_hready = dflt_q != DfltErr1;
       bus_hresp  = dflt_q != DfltOk;
     end else begin
@@ -326,8 +337,12 @@ module bag_ahb_lite_bus #(
       lock_valid_q <= 1'b0;
       lock_mst_q   <= '0;
       last_q       <= '0;
+      grant_q      <= '0;
+      stall_q      <= 1'b0;
     end else begin
-      dflt_q <= dflt_d;
+      dflt_q  <= dflt_d;
+      grant_q <= grant;
+      stall_q <= !bus_hready;
       if (bus_hready) begin
         data_valid_q <= granted && bus_htrans != Idle;
         data_mst_q   <= grant;

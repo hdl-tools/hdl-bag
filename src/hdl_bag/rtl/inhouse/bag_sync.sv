@@ -13,6 +13,10 @@ module bag_sync #(
     output logic q_o
 );
 
+  if (Stages < 2) begin : gen_stages_check
+    $error("bag_sync: Stages must be at least 2");
+  end
+
   logic [Stages-1:0] q;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin

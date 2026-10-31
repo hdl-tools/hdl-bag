@@ -6,7 +6,8 @@
 //   0x2000_1000 +4K  s1  RO
 //   0x2000_2000 +4K  s2  RW, secure-only
 //   0x2000_3000 +4K  s1  RW
-//   m1 has no access to s2; m2 has read-only access to s0.
+//   m1 has no access to s2; m2 has read-only access to s0 and write-only access to s2.
+//   m1's misses and blocked accesses go to default slave port s0; m0 and m2 get ERROR.
 //   m0 alias 0x0000_0000 +4K -> 0x2000_0000 while alias_en_i[0].
 //   Fixed priority (when selected): m1 > m2 > m0.
 
@@ -53,6 +54,8 @@ module tb_ahb_lite_bus #(
   localparam logic [3:0][31:0] RuleSlave = '{32'd1, 32'd2, 32'd1, 32'd0};
   localparam logic [2:0][2:0] Connect = '{3'b111, 3'b011, 3'b111};
   localparam logic [2:0][2:0] MstNoWrite = '{3'b001, 3'b000, 3'b000};
+  localparam logic [2:0][2:0] MstNoRead = '{3'b100, 3'b000, 3'b000};
+  localparam logic [2:0] MissToDefault = 3'b010;
   localparam logic [0:0][31:0] AliasMaster = '{32'd0};
   localparam logic [0:0][31:0] AliasBase = '{32'h0000_0000};
   localparam logic [0:0][31:0] AliasMask = '{32'h0000_0FFF};
@@ -74,7 +77,9 @@ module tb_ahb_lite_bus #(
       .RuleNoWrite  (4'b0010),
       .RuleSecure   (4'b0100),
       .Connect      (Connect),
-      .MstNoRead    ('0),
+      .MstNoRead    (MstNoRead),
+      .MissToDefault(MissToDefault),
+      .DefaultSlave ('0),
       .MstNoWrite   (MstNoWrite),
       .AliasMaster  (AliasMaster),
       .AliasBase    (AliasBase),
