@@ -69,6 +69,15 @@ OPTIONAL_SIGNALS: Final[dict[str, frozenset[Protocol]]] = {
     "PSTRB": frozenset({Protocol.APB4}),
     "PSLVERR": frozenset({Protocol.APB3, Protocol.APB4}),
 }
+
+
+def signal_applies(column: str, protocol: Protocol, is_slave: bool) -> bool:
+    """Whether a Port_Options optional-signal column exists on a port."""
+    if column == "LOCK / excl" and protocol == Protocol.AHB_LITE and is_slave:
+        return False  # D26
+    return protocol in OPTIONAL_SIGNALS[column]
+
+
 # Signals each optional column controls (removed from the wrapper when tied).
 OPTIONAL_SIGNAL_NAMES: Final[dict[str, frozenset[str]]] = {
     "PROT": frozenset({"awprot", "arprot", "hprot", "pprot"}),
@@ -98,7 +107,8 @@ _AHB_MASTER: Final = (
     "haddr", "hburst", "hmastlock", "hprot", "hsize", "htrans", "hwdata", "hwrite",
     "hrdata", "hready", "hresp",
 )  # fmt: skip
-_AHB_SLAVE: Final = (*_AHB_MASTER, "hsel", "hreadyout")
+# HMASTLOCK is not forwarded to slaves in v1 (D26).
+_AHB_SLAVE: Final = (*(x for x in _AHB_MASTER if x != "hmastlock"), "hsel", "hreadyout")
 _APB4: Final = (
     "paddr", "pprot", "psel", "penable", "pwrite", "pwdata", "pstrb", "pready", "prdata",
     "pslverr",
