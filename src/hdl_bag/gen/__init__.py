@@ -11,6 +11,9 @@ Output layout (relative to the output directory)::
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
     rtl/inhouse/*.sv           copies of the in-house IP the design uses
     <project>.f                file list in compile order
+    sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
+    doc/memmap.md, .html       memory-map document (Generate memory-map doc)
+    doc/port_map.md            per-fabric port map (Generate memory-map doc)
     bag_outputs.json           every file written (with sha256), the top and the file list
 """
 
@@ -20,6 +23,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
+from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
 from hdl_bag.gen.render import GenerateError, header
@@ -69,6 +73,12 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
 
     pkg_rel = f"rtl/pkg/{spec.wrapper.package}.sv"
     _write(outdir, pkg_rel, package(spec, hdr), written)
+    if spec.project.outputs.c_header:
+        _write(outdir, f"sw/{spec.project.name}_memmap.h", c_header(spec, user_header), written)
+    if spec.project.outputs.doc:
+        _write(outdir, "doc/memmap.md", memmap_md(spec, user_header), written)
+        _write(outdir, "doc/memmap.html", memmap_html(spec, user_header), written)
+        _write(outdir, "doc/port_map.md", port_map_md(spec, user_header), written)
 
     registry = builtin_registry()
     netlist = build_netlist(spec)
