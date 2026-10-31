@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_ahb2axi
+kind: bridge
+api_version: 1
+description: 'In-house AHB-Lite to AXI: one outstanding transfer, AXI ID width 1, HPROT mapped to AxPROT/AxCACHE.'
+upstream:
+  - AHB-Lite
+downstream:
+  - AXI4
+  - AXI4-Lite
+sources:
+  - rtl/inhouse/bag_ahb2axi.sv
+licence: Apache-2.0
+qualification: unqualified

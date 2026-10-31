@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_axi2axil
+kind: bridge
+api_version: 1
+description: 'AXI4 to AXI4-Lite: PULP axi_to_axi_lite; bursts split into single transfers. PULP module and parameter names are verified at the pinned commit in Phase 3.'
+upstream:
+  - AXI4
+downstream:
+  - AXI4-Lite
+sources:
+  - bender:axi:axi_to_axi_lite
+licence: SHL-0.51
+qualification: unqualified

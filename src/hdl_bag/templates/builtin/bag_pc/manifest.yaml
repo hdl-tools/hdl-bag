@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_pc
+kind: adapter
+api_version: 1
+description: Protocol adapter AXI4 <-> AXI4-Lite (PULP axi_to_axi_lite / axi_lite_to_axi). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+  - AXI4-Lite
+adapter_type: pc
+sources:
+  - bender:axi:axi_to_axi_lite
+  - bender:axi:axi_lite_to_axi
+licence: SHL-0.51
+qualification: unqualified

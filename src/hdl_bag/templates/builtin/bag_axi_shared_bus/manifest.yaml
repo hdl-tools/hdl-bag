@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_axi_shared_bus
+kind: fabric
+api_version: 1
+description: 'AXI4 shared bus: N:1 axi_mux, mid-point axi_fifo + axi_cut/axi_multicut, 1:M axi_demux. Fixed priority uses an in-house priority arbiter at the mux (Phase 3). PULP module and parameter names are verified at the pinned commit in Phase 3.'
+protocols:
+  - AXI4
+topologies:
+  - shared-bus
+arbitration:
+  - round-robin
+  - fixed-priority
+sources:
+  - bender:axi:axi_mux
+  - bender:axi:axi_demux
+  - bender:axi:axi_fifo
+  - bender:axi:axi_cut
+  - bender:axi:axi_multicut
+licence: SHL-0.51
+qualification: unqualified

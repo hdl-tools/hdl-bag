@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_axi2ahb
+kind: bridge
+api_version: 1
+description: 'In-house AXI to AHB-Lite: IDs serialized, responses in order, INCR bursts mapped, others split.'
+upstream:
+  - AXI4
+  - AXI4-Lite
+downstream:
+  - AHB-Lite
+sources:
+  - rtl/inhouse/bag_axi2ahb.sv
+licence: Apache-2.0
+qualification: unqualified

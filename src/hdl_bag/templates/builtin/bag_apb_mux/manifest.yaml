@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_apb_mux
+kind: fabric
+api_version: 1
+description: In-house APB decoder plus PSEL/PRDATA/PREADY/PSLVERR mux and default-slave error.
+protocols:
+  - APB4
+  - APB3
+topologies:
+  - decoder-mux
+arbitration:
+  - single-master
+sources:
+  - rtl/inhouse/bag_apb_mux.sv
+licence: Apache-2.0
+qualification: unqualified

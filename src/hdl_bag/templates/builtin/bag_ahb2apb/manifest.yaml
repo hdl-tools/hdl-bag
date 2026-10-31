@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_ahb2apb
+kind: bridge
+api_version: 1
+description: 'In-house AHB-Lite to APB: bursts split into single APB transfers.'
+upstream:
+  - AHB-Lite
+downstream:
+  - APB4
+  - APB3
+sources:
+  - rtl/inhouse/bag_ahb2apb.sv
+licence: Apache-2.0
+qualification: unqualified

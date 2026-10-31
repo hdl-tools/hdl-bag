@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_external
+kind: fabric
+api_version: 1
+description: 'Opaque user-supplied fabric: BAG generates its ports and wrapper wiring only; no fabric RTL, tests or formal.'
+protocols:
+  - AXI4
+  - AXI4-Lite
+  - AHB-Lite
+  - APB4
+  - APB3
+topologies:
+  - crossbar
+  - shared-bus
+  - single-layer
+  - decoder-mux
+arbitration:
+  - round-robin
+  - fixed-priority
+  - single-master
+licence: NOASSERTION
+qualification: unqualified
+opaque: true
