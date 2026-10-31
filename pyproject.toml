@@ -68,5 +68,7 @@ addopts = "-ra"
 "src/hdl_bag/template/*.py" = ["E501"]
 # Rule messages are user-facing text; keep each on one line.
 "src/hdl_bag/checks/*.py" = ["E501"]
+"src/hdl_bag/ir/resolve.py" = ["E501"]
+"src/hdl_bag/ir/to_workbook.py" = ["E501"]
 "tests/checks/*.py" = ["E501"]
 "tests/test_cli.py" = ["E501"]

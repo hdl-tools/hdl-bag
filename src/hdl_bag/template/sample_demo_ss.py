@@ -6,7 +6,10 @@ Rows hold input-column values only, in input-column order; derived columns are
 filled with formulas by the builder.
 """
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from hdl_bag.template.data import SpecData
 
 Cell = str | int | None
 
@@ -226,3 +229,34 @@ EXPOSED_PORTS: Final[list[list[Cell]]] = [
     ["br_ahb2main", "N", "", "internal", ""],
     ["br_main2cfg", "N", "", "internal", ""],
 ]  # fmt: skip
+
+
+def _sample() -> "SpecData":
+    from hdl_bag.template.data import PROJECT_DEFAULTS, WRAPPER_DEFAULTS, SpecData
+
+    return SpecData(
+        title="BAG spec template - sample: demo_ss",
+        description=(
+            "Example subsystem: AXI main crossbar, APB peripheral bus, "
+            "AHB-Lite always-on segment, three sub-wrappers."
+        ),
+        project={**PROJECT_DEFAULTS, **PROJECT},
+        wrapper={**WRAPPER_DEFAULTS, **WRAPPER},
+        clocks=[list(r) for r in CLOCKS],
+        resets=[list(r) for r in RESETS],
+        fabrics=[list(r) for r in FABRICS],
+        masters=[list(r) for r in MASTERS],
+        slaves=[list(r) for r in SLAVES],
+        bridges=[list(r) for r in BRIDGES],
+        topology=[list(r) for r in TOPOLOGY],
+        access_rules=[list(r) for r in ACCESS_RULES],
+        memory_map=[list(r) for r in MEMORY_MAP],
+        address_decode=[list(r) for r in ADDRESS_DECODE],
+        port_options=[list(r) for r in PORT_OPTIONS],
+        sub_wrappers=[list(r) for r in SUB_WRAPPERS],
+        placement=[list(r) for r in PLACEMENT],
+        exposed_ports=[list(r) for r in EXPOSED_PORTS],
+    )
+
+
+SAMPLE: Final = _sample()

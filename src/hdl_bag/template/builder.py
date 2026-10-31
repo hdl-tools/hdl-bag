@@ -19,8 +19,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hdl_bag.template import sample_demo_ss as demo
-from hdl_bag.template.sample_demo_ss import Cell
+from hdl_bag.template.data import Cell, SpecData
+from hdl_bag.template.sample_demo_ss import SAMPLE
 
 SCHEMA_VERSION: Final = "0.3"
 COMMENT_AUTHOR: Final = "BAG"
@@ -114,8 +114,13 @@ def _rng(col: str) -> str:
 
 
 class _Builder:
-    def __init__(self, sample: bool) -> None:
-        self.sample = sample
+    def __init__(self, data: SpecData | None) -> None:
+        """``data`` None builds the blank template."""
+        self.blank = data is None
+        self.d = data or SpecData(
+            title="BAG spec template",
+            description="Blank template. Fill the sheets top to bottom, then run bag check.",
+        )
         self.wb = Workbook()
         self.wb.remove(self.wb.active)  # type: ignore[arg-type]
         self.lref: dict[str, str] = {}
@@ -134,7 +139,7 @@ class _Builder:
         self,
         ws: Worksheet,
         cols: Sequence[Col],
-        rows: Sequence[Sequence[Cell]],
+        key: str,
         hdr_row: int = HDR_ROW,
         freeze: bool = True,
         spare: int = 10,
@@ -142,20 +147,21 @@ class _Builder:
     ) -> int:
         """Write a header row and data rows.
 
-        ``rows`` hold input-column values only (sample data; dropped in the blank
-        template). ``fixed`` rows are full-width and kept in both variants. Derived
-        formulas are wrapped to stay blank while column A is empty, and also fill
-        ``spare`` empty rows below the data, so rows the user adds are checked too.
-        The blank template keeps the same number of formula rows as the sample.
+        ``key`` names the SpecData table; its rows hold input-column values only.
+        ``fixed`` rows are full-width and always written first. Derived formulas are
+        wrapped to stay blank while column A is empty, and also fill ``spare`` empty
+        rows below the data, so rows the user adds are checked too. Every workbook
+        keeps at least as many formula rows as the demo_ss sample.
         """
         tmpl = {
             c: '=IF($A{r}="","",' + f[1:] + ")"
             for c, (_, _, kind, _, f) in enumerate(cols)
             if kind == "drv" and f is not None
         }
-        n_spare = spare if self.sample else spare + len(rows)
+        rows: list[list[Cell]] = getattr(self.d, key)
+        n_spare = spare + max(0, len(getattr(SAMPLE, key)) - len(rows))
         full: list[list[Cell]] = [list(r) for r in fixed]
-        for row in rows if self.sample else ():
+        for row in rows:
             vals = iter(row)
             full.append([tmpl[c] if kind == "drv" else next(vals)
                          for c, (_, _, kind, _, _) in enumerate(cols)])  # fmt: skip
@@ -207,7 +213,7 @@ class _Builder:
             font=Font(name=FONT, color="9C0006", bold=True)))  # fmt: skip
 
     @staticmethod
-    def kv(ws: Worksheet, start: int, items: Sequence[tuple[str, str | None, str]]) -> int:
+    def kv(ws: Worksheet, start: int, items: Sequence[tuple[str, Cell, str]]) -> int:
         ws.column_dimensions["A"].width = 30
         ws.column_dimensions["B"].width = 34
         ws.column_dimensions["C"].width = 70
@@ -223,8 +229,11 @@ class _Builder:
                 cell.border, cell.alignment = BORDER, WRAP
         return start + len(items)
 
-    def value(self, sample_values: dict[str, str], key: str) -> str | None:
-        return sample_values[key] if self.sample else None
+    def project_value(self, key: str) -> Cell:
+        return self.d.project.get(key)
+
+    def wrapper_value(self, key: str) -> Cell:
+        return self.d.wrapper.get(key)
 
     # ------------------------------------------------------------ sheets
     def lists(self) -> None:
@@ -244,16 +253,7 @@ class _Builder:
             ws.column_dimensions[col].width = 18
 
     def readme(self) -> None:
-        if self.sample:
-            title = "BAG spec template - sample: demo_ss"
-            desc = (
-                "Example subsystem: AXI main crossbar, APB peripheral bus, "
-                "AHB-Lite always-on segment, three sub-wrappers."
-            )
-        else:
-            title = "BAG spec template"
-            desc = "Blank template. Fill the sheets top to bottom, then run bag check."
-        ws = self.sheet("README", title, desc)
+        ws = self.sheet("README", self.d.title, self.d.description)
         ws.column_dimensions["A"].width = 24
         ws.column_dimensions["B"].width = 110
         legend = [
@@ -293,26 +293,22 @@ class _Builder:
 
     def project(self) -> None:
         ws = self.sheet("Project", "Project", "Project-wide settings. One value per row.")
-        p = demo.PROJECT
-        header_note = (
-            "demo_ss_memmap.h from Memory_Map."
-            if self.sample
-            else "<project name>_memmap.h from Memory_Map."
-        )
+        name = self.project_value("Project name")
+        header_note = f"{name or '<project name>'}_memmap.h from Memory_Map."
         self.kv(ws, HDR_ROW, [
-            ("Project name", self.value(p, "Project name"), "Prefix for generated module and package names."),
+            ("Project name", self.project_value("Project name"), "Prefix for generated module and package names."),
             ("Spec schema version", SCHEMA_VERSION, "Must match the schema version the BAG release expects."),
-            ("Spec revision", self.value(p, "Spec revision"), "Free text; stamped into every generated file header."),
-            ("Author", self.value(p, "Author"), ""),
-            ("SystemVerilog standard", "IEEE 1800-2017", "Generated RTL stays inside the synthesizable subset."),
-            ("Output directory", self.value(p, "Output directory"), "Relative to the workbook."),
-            ("Generate RTL", self.value(p, "Generate RTL"), ""),
-            ("Generate C header", self.value(p, "Generate C header"), header_note),
-            ("Generate memory-map doc", self.value(p, "Generate memory-map doc"), "Markdown + HTML."),
-            ("Generate cocotb unit tests", self.value(p, "Generate cocotb unit tests"), "Per-config directed + random tests."),
-            ("Generate formal (SymbiYosys)", self.value(p, "Generate formal (SymbiYosys)"), "Decode and port-protocol properties."),
-            ("Lint tools", "slang, verilator, verible", "All must pass with zero un-waived warnings."),
-            ("Simulator", "verilator", "Pluggable; commercial simulators via the tool-abstraction layer."),
+            ("Spec revision", self.project_value("Spec revision"), "Free text; stamped into every generated file header."),
+            ("Author", self.project_value("Author"), ""),
+            ("SystemVerilog standard", self.project_value("SystemVerilog standard"), "Generated RTL stays inside the synthesizable subset."),
+            ("Output directory", self.project_value("Output directory"), "Relative to the workbook."),
+            ("Generate RTL", self.project_value("Generate RTL"), ""),
+            ("Generate C header", self.project_value("Generate C header"), header_note),
+            ("Generate memory-map doc", self.project_value("Generate memory-map doc"), "Markdown + HTML."),
+            ("Generate cocotb unit tests", self.project_value("Generate cocotb unit tests"), "Per-config directed + random tests."),
+            ("Generate formal (SymbiYosys)", self.project_value("Generate formal (SymbiYosys)"), "Decode and port-protocol properties."),
+            ("Lint tools", self.project_value("Lint tools"), "All must pass with zero un-waived warnings."),
+            ("Simulator", self.project_value("Simulator"), "Pluggable; commercial simulators via the tool-abstraction layer."),
         ])  # fmt: skip
         v = DataValidation(type="list", formula1=self.lref["YesNo"], allow_blank=False)
         ws.add_data_validation(v)
@@ -331,7 +327,7 @@ class _Builder:
             _in("Domain", 14, "Domain name used elsewhere in the spec. One clock per domain."),
             _in("Reset", 16, "Reset paired with this domain (from Resets sheet)."),
             _in("Notes", 40),
-        ], demo.CLOCKS)  # fmt: skip
+        ], "clocks")  # fmt: skip
         self.dv(ws, RST_REF, "E")
 
     def resets(self) -> None:
@@ -348,7 +344,7 @@ class _Builder:
             _in("Domain", 12, "Clock domain this reset applies to."),
             _in("Source", 22),
             _in("Notes", 40),
-        ], demo.RESETS)  # fmt: skip
+        ], "resets")  # fmt: skip
         self.dv(ws, self.lref["Polarity"], "B")
         self.dv(ws, self.lref["Assertion"], "C")
         self.dv(ws, self.lref["Assertion"], "D")
@@ -384,7 +380,7 @@ class _Builder:
             _drv("Slave-side ID width", 11, "AXI4 only: master-side ID width + clog2(# master ports).", id_m),
             _drv("Max parallel transfers", 10, "Crossbar: min(# master ports, # slave ports). Every other topology: 1.", '=IF(C{r}="crossbar",MIN(O{r},P{r}),1)'),
             _in("Notes", 30, ""),
-        ], demo.FABRICS)  # fmt: skip
+        ], "fabrics")  # fmt: skip
         self.dv(ws, self.lref["RegSlice"], "N")
         self.dv(ws, self.lref["Protocol"], "B")
         self.dv(ws, self.lref["Topology"], "C")
@@ -443,7 +439,7 @@ class _Builder:
             _in("Description", 24, ""),
             _in("Notes", 16, ""),
             *self.port_drv("in"),
-        ], demo.MASTERS)  # fmt: skip
+        ], "masters")  # fmt: skip
         self.dv(ws, self.lref["Protocol"], "B")
         self.dv(ws, DOM_REF, "H")
 
@@ -469,7 +465,7 @@ class _Builder:
             _in("Description", 24, ""),
             _in("Notes", 16, ""),
             *self.port_drv("out"),
-        ], demo.SLAVES)  # fmt: skip
+        ], "slaves")  # fmt: skip
         self.dv(ws, self.lref["Protocol"], "B")
         self.dv(ws, DOM_REF, "H")
         self.dv(ws, self.lref["MissResp"], "I")
@@ -494,7 +490,7 @@ class _Builder:
             _drv("Upstream domain", 10, "", "=" + fab_lookup("F", "C{r}")),
             _drv("Downstream domain", 10, "", "=" + fab_lookup("F", "D{r}")),
             _drv("CDC", 20, "", '=IF(K{r}=L{r},"none","async CDC "&K{r}&" -> "&L{r})'),
-        ], demo.BRIDGES)  # fmt: skip
+        ], "bridges")  # fmt: skip
         self.dv(ws, self.lref["Template"], "B")
         self.dv(ws, self.lref["YesNo"], "F")
 
@@ -563,7 +559,7 @@ class _Builder:
             _drv("Check", 20,
                  "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
                  "INDEX REPEATED | PRIORITY NOT INTEGER | PRIORITY MISSING | PRIORITY REPEATED", topo_check),
-        ], demo.TOPOLOGY, spare=30)  # fmt: skip
+        ], "topology", spare=30)  # fmt: skip
         self.check_format(ws, "L", last=TMAX)
 
     def access_rules(self) -> None:
@@ -582,7 +578,7 @@ class _Builder:
             _drv("Slave fabric", 12, "", "=" + fabric_of_dest("B{r}")),
             _drv("Check", 16, "ok | UNKNOWN NAME | NOT SAME FABRIC",
                  '=IF(OR(E{r}="?",F{r}="?"),"UNKNOWN NAME",IF(E{r}<>F{r},"NOT SAME FABRIC","ok"))'),
-        ], demo.ACCESS_RULES)  # fmt: skip
+        ], "access_rules")  # fmt: skip
         self.dv(ws, self.lref["RuleAccess"], "C")
         self.check_format(ws, "G")
 
@@ -619,7 +615,7 @@ class _Builder:
             _drv("End (dec)", 13, "Helper for checks.", "=J{r}+K{r}-1"),
             _drv("Check", 15, "UNKNOWN SLAVE | NOT CONNECTED | OVERLAP (same fabric) | SIZE NOT 2^n | MISALIGNED | WARN < 4 KB | ok",
                  mm_check),
-        ], demo.MEMORY_MAP)  # fmt: skip
+        ], "memory_map")  # fmt: skip
         self.dv(ws, self.lref["Access"], "F")
         self.dv(ws, self.lref["YesNo"], "G")
         self.check_format(ws, "M")
@@ -641,7 +637,7 @@ class _Builder:
             _in("Alias maps to (hex)", 14, "Address decoded instead."),
             _in("Alias enable", 16, "always | top-level input pin name"),
             _in("Notes", 40, ""),
-        ], demo.ADDRESS_DECODE)  # fmt: skip
+        ], "address_decode")  # fmt: skip
         self.dv(ws, self.lref["MissResp"], "C")
 
     def port_options(self) -> None:
@@ -665,7 +661,7 @@ class _Builder:
             _in("PSTRB", 11, "APB4 only"),
             _in("PSLVERR", 9, "APB only"),
             _in("Notes", 36, ""),
-        ], demo.PORT_OPTIONS)  # fmt: skip
+        ], "port_options")  # fmt: skip
         self.dv(ws, self.lref["RegSlice"], "D")
         for col in "EFGHIJK":
             self.dv(ws, self.lref["SigDrive"], col)
@@ -692,7 +688,7 @@ class _Builder:
             _in("Parent", 22, "Enclosing wrapper; - for the top. Nesting is allowed."),
             _in("Notes", 46, ""),
             _drv("Check", 18, "ok | UNKNOWN PARENT | SELF PARENT", sw_check),
-        ], demo.SUB_WRAPPERS, spare=SW_LAST - 8, fixed=[top_row])  # fmt: skip
+        ], "sub_wrappers", spare=SW_LAST - 8, fixed=[top_row])  # fmt: skip
         ws["A5"].fill = FILL_DRV
         ws["A5"].font = F_DRV
         self.dv(ws, f"={SW_RNG}", "B", first=FIRST + 1, last=SW_LAST)
@@ -716,7 +712,7 @@ class _Builder:
             _in("Notes", 46, ""),
             _drv("Kind", 18, "fabric | bridge | adapter | UNKNOWN", place_kind),
             _drv("Check", 18, "ok | UNKNOWN INSTANCE | UNKNOWN SUB-WRAPPER | PLACED TWICE", place_check),
-        ], demo.PLACEMENT, hdr_row=P_HDR, freeze=False, spare=15)  # fmt: skip
+        ], "placement", hdr_row=P_HDR, freeze=False, spare=15)  # fmt: skip
         self.dv(ws, f"={SW_RNG}", "B", first=P_HDR + 1, last=P_HDR + 40)
         self.check_format(ws, "F", first=P_HDR + 1, last=P_HDR + 40)
         ws.freeze_panes = "A5"
@@ -727,19 +723,18 @@ class _Builder:
             "Wrapper",
             "Top-level wrapper around the generated fabric. Sub-wrappers are defined on Hierarchy.",
         )
-        w = demo.WRAPPER
         end = self.kv(ws, HDR_ROW, [
-            ("Top module name", self.value(w, "Top module name"), "Also row 5 of the Hierarchy sheet."),
-            ("Port style", "flat", "flat (default) | sv-interface. Flat = one port per signal."),
-            ("Signal naming pattern", "{port}_{proto}_{signal}", "e.g. cpu0_axi_awaddr, uart0_apb_psel"),
-            ("Clock/reset ports", "one per domain", "clk_* / rst_* from the Clocks and Resets sheets."),
-            ("Parameter package", self.value(w, "Parameter package"), "Widths, base addresses and region sizes as localparams."),
-            ("File header", self.value(w, "File header"), "Text file prepended to every generated file (licence/copyright)."),
-            ("Extra top-level inputs", self.value(w, "Extra top-level inputs"), "Inputs referenced by Address_Decode alias enables."),
-            ("Adapter placement", "with fabric", "Default home for inserted adapters: with fabric | with port (top) | top."),
-            ("Adapter instance naming", "{from}_{type}_2_{to}",
+            ("Top module name", self.wrapper_value("Top module name"), "Also row 5 of the Hierarchy sheet."),
+            ("Port style", self.wrapper_value("Port style"), "flat (default) | sv-interface. Flat = one port per signal."),
+            ("Signal naming pattern", self.wrapper_value("Signal naming pattern"), "e.g. cpu0_axi_awaddr, uart0_apb_psel"),
+            ("Clock/reset ports", self.wrapper_value("Clock/reset ports"), "clk_* / rst_* from the Clocks and Resets sheets."),
+            ("Parameter package", self.wrapper_value("Parameter package"), "Widths, base addresses and region sizes as localparams."),
+            ("File header", self.wrapper_value("File header"), "Text file prepended to every generated file (licence/copyright)."),
+            ("Extra top-level inputs", self.wrapper_value("Extra top-level inputs"), "Inputs referenced by Address_Decode alias enables."),
+            ("Adapter placement", self.wrapper_value("Adapter placement"), "Default home for inserted adapters: with fabric | with port (top) | top."),
+            ("Adapter instance naming", self.wrapper_value("Adapter instance naming"),
              "type = pc (protocol), dw (width), cdc, iw (ID width), fifo, cut. e.g. main_xbar_dw_2_ddr0."),
-            ("Sub-wrapper port naming", "{instance}_{proto}_{signal}", "Ports created where a link crosses a sub-wrapper boundary."),
+            ("Sub-wrapper port naming", self.wrapper_value("Sub-wrapper port naming"), "Ports created where a link crosses a sub-wrapper boundary."),
         ])  # fmt: skip
         for rownum, ref in (
             (HDR_ROW + 2, self.lref["PortStyle"]),
@@ -757,7 +752,7 @@ class _Builder:
             cell.font, cell.fill, cell.border = F_HDR, FILL_HDR, BORDER
         ws.column_dimensions["D"].width = 16
         ws.column_dimensions["E"].width = 30
-        for i, row in enumerate(demo.EXPOSED_PORTS if self.sample else [], 1):
+        for i, row in enumerate(self.d.exposed_ports, 1):
             for c, val in enumerate(row, 1):
                 cell = ws.cell(start + i, c, val)
                 cell.font, cell.border, cell.fill = F_BASE, BORDER, FILL_IN
@@ -798,9 +793,9 @@ class _Builder:
         return wb
 
 
-def build_workbook(sample: bool = False) -> Workbook:
-    """Return the blank spec template, or the demo_ss sample when ``sample`` is true."""
-    return _Builder(sample).build()
+def build_workbook(sample: bool = False, data: SpecData | None = None) -> Workbook:
+    """The blank template, the demo_ss sample (``sample``), or a workbook for ``data``."""
+    return _Builder(SAMPLE if sample else data).build()
 
 
 def write_template(path: Path, sample: bool = False) -> None:
