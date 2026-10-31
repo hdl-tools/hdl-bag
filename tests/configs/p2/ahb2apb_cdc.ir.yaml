@@ -92,7 +92,7 @@ fabrics:
     protocol: APB4
     topology: decoder-mux
     data_width: 32
-    addr_width: 32
+    addr_width: 16
     domain: D_SLOW
     arbitration: single-master
     latency_mode: null
@@ -134,7 +134,11 @@ fabrics:
       - master: br
         miss: PSLVERR
         default_slave: null
-        aliases: []
+        aliases:
+          - base: '0x9000_8000'
+            size: '0x0000_1000'
+            to: '0x9000_1000'
+            enable: remap_i
 masters:
   - name: cpu
     protocol: AHB-Lite
@@ -297,7 +301,8 @@ wrapper:
   clock_reset_ports: one per domain
   package: ahb2apb_cdc_pkg
   file_header: header.txt
-  extra_inputs: []
+  extra_inputs:
+    - remap_i
   adapter_placement: with fabric
   adapter_naming: '{from}_{type}_2_{to}'
   subwrapper_port_naming: '{instance}_{proto}_{signal}'
@@ -320,4 +325,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb2apb_cdc.xlsx
-  sha256: de10c8d72d4d2058dd5756ac7659c539b0f23b47b136ceba4604c83afe7e0f9b
+  sha256: 0b996cd52b833e2df54b6929386c03966991de4f8e063a9776d5f8e48ae5c9df

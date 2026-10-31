@@ -139,16 +139,16 @@ AHB_SLAVE_NA = {**AHB_MASTER_NA, "lock": "n/a"}
 
 def apb4_min() -> Cfg:
     """Smallest legal design: one APB4 master and slave on a 12-bit fabric; default
-    pattern with no prefixes; an unused extra input and an unused clock domain; an
-    active-high reset with async assertion and deassertion (no synchronizer)."""
-    c = Cfg("apb4_min", extra_inputs=("spare_i",))
+    pattern with no prefixes; an APB-master alias on a pin; an unused extra input and an
+    unused clock domain; an active-high reset with async assertion and deassertion."""
+    c = Cfg("apb4_min", extra_inputs=("alias_i", "spare_i"))
     c.domain("D_A", "clk_a", "rst_a", polarity="active-high", deassertion="async")
     c.domain("D_UNUSED", "clk_u", "rst_u_n")
     c.fabric("apb", "APB4", 32, 12, "D_A")
     c.master("m0", "APB4", 32, 12, "D_A").slave("s0", "APB4", 32, 12, "D_A")
     c.link("m0", "apb", 0).link("apb", "s0", 0)
     c.region("s0", "regs", 0x000, 0x800)
-    c.decode("m0", "PSLVERR")
+    c.decode("m0", "PSLVERR", alias=(0x800, 0x100, 0x000, "alias_i"))
     c.option("m0", **APB4_NA).option("s0", **APB4_NA)
     return c
 
@@ -156,6 +156,7 @@ def apb4_min() -> Cfg:
 def apb3_wide() -> Cfg:
     """APB3 fabric, 8 slaves whose Port index, name and address orders all differ;
     misses go to a default slave at a non-zero index; PSLVERR tie-0 on two slaves;
+    denied accesses (an RO region, Access_Rules WO / RO) also go to the default slave;
     mixed slave address widths; the {proto}_{port}_{signal} pattern."""
     c = Cfg("apb3_wide", signal_pattern="{proto}_{port}_{signal}")
     c.domain("D_P", "clk_p", "rst_p_n")
@@ -167,11 +168,12 @@ def apb3_wide() -> Cfg:
     for name, index, slot, aw in plan:
         c.slave(name, "APB3", 32, aw, "D_P").link("apb", name, index)
         base = 0x4000_0000 + slot * 0x1_0000  # 64 KB slots: aligned for every width here
-        c.region(name, "regs", base, 0x1000)
+        c.region(name, "regs", base, 0x1000, access="RO" if name == "p1" else "RW")
         tie = {"pslverr": "tie-0"} if name in ("p2", "p6") else {}
         c.option(name, **APB3_NA, **tie)
     c.option("host", **APB3_NA)
     c.decode("host", "default-slave", default="p5")
+    c.access("host", "p4", "WO").access("host", "p0", "RO")
     return c
 
 
@@ -203,19 +205,21 @@ def apb4_rules() -> Cfg:
 
 
 def ahb_single() -> Cfg:
-    """One AHB-Lite master, four slaves with 12/16/24/32-bit addresses (truncation);
-    master HPROT tie-default and LOCK tie-0; one slave with PROT tie-default."""
+    """One AHB-Lite master, four slaves with 12/16/24/32-bit addresses (truncation, one
+    base with bit 12 set); a slave with two regions; master HPROT tie-default and LOCK
+    tie-0; one slave with PROT tie-default."""
     c = Cfg("ahb_single")
     c.domain("D_H", "clk_h", "rst_h_n")
     c.fabric("ahb", "AHB-Lite", 32, 32, "D_H")
     c.master("mcu", "AHB-Lite", 32, 32, "D_H", prefix="mcu_ahb").link("mcu", "ahb", 0)
     for i, (name, aw, base, size) in enumerate((
-        ("s12", 12, 0x1000_0000, 0x1000), ("s16", 16, 0x2000_0000, 0x1_0000),
+        ("s12", 12, 0x1000_3000, 0x1000), ("s16", 16, 0x2000_0000, 0x1_0000),
         ("s24", 24, 0x3000_0000, 0x10_0000), ("s32", 32, 0x8000_0000, 0x1000),
     )):  # fmt: skip
         c.slave(name, "AHB-Lite", 32, aw, "D_H").link("ahb", name, i)
         c.region(name, "mem", base, size)
         c.option(name, **AHB_SLAVE_NA, **({"prot": "tie-default"} if name == "s16" else {}))
+    c.region("s32", "mem2", 0x8001_0000, 0x1000)  # a second region on the same slave
     c.decode("mcu", "HRESP_ERROR")
     c.option("mcu", **AHB_MASTER_NA, prot="tie-default", lock="tie-0")
     return c
@@ -244,33 +248,36 @@ def ahb_rr() -> Cfg:
 
 def ahb_fixed() -> Cfg:
     """Three masters, fixed priority not equal to the Port index; aliases: always-on,
-    pin-enabled, and one pin shared by two masters; an unused pin; one master misses
-    to a default slave; a reset with sync assertion and async deassertion."""
-    c = Cfg("ahb_fixed", extra_inputs=("boot_a_i", "spare_i"))
+    pin-enabled on two distinct pins; an unused pin; one master misses to a default
+    slave; a secure-only slave; a reset with sync assertion and async deassertion."""
+    c = Cfg("ahb_fixed", extra_inputs=("boot_a_i", "boot_b_i", "spare_i"))
     c.domain("D_H", "clk_h", "rst_h_n", assertion="sync", deassertion="async")
     c.fabric("ahb", "AHB-Lite", 32, 32, "D_H", arb="fixed-priority")
-    for index, (name, prio) in enumerate((("m0", 2), ("m1", 0), ("m2", 1))):
+    # Priorities chosen so the fixed-priority order (m2, m0, m1) differs from the
+    # round-robin order from reset (m1, m2, m0).
+    for index, (name, prio) in enumerate((("m0", 1), ("m1", 2), ("m2", 0))):
         c.master(name, "AHB-Lite", 32, 32, "D_H").link(name, "ahb", index, prio)
         c.option(name, **AHB_MASTER_NA)
     for i, name in enumerate(("s0", "s1", "s2")):
         c.slave(name, "AHB-Lite", 32, 32, "D_H").link("ahb", name, i)
-        c.region(name, "mem", 0x2000_0000 + i * 0x1_0000, 0x1_0000)
+        c.region(name, "mem", 0x2000_0000 + i * 0x1_0000, 0x1_0000, secure=name == "s2")
         c.option(name, **AHB_SLAVE_NA)
     c.decode("m0", "HRESP_ERROR", alias=(0x0000_0000, 0x1000, 0x2000_0000, "always"))
     c.decode(
         "m1", "default-slave", default="s1", alias=(0x0000_0000, 0x1000, 0x2001_0000, "boot_a_i")
     )
-    c.decode("m2", "HRESP_ERROR", alias=(0x0001_0000, 0x1000, 0x2002_0000, "boot_a_i"))
+    c.decode("m2", "HRESP_ERROR", alias=(0x0001_0000, 0x1000, 0x2002_0000, "boot_b_i"))
     return c
 
 
 def ahb2apb_cdc() -> Cfg:
-    """AHB (64-bit, fast domain) to APB4 (32-bit, slow domain) through a CDC bridge
-    with pass-through N and a high window; active-low and active-high resets."""
-    c = Cfg("ahb2apb_cdc")
+    """AHB (64-bit, fast domain) to a 16-bit-address APB4 fabric (32-bit data, slow
+    domain) through a CDC bridge with pass-through N and a high window; an alias on the
+    bridge's own Address_Decode row (pin); active-low and active-high resets."""
+    c = Cfg("ahb2apb_cdc", extra_inputs=("remap_i",))
     c.domain("D_FAST", "clk_fast", "rst_fast_n")
     c.domain("D_SLOW", "clk_slow", "rst_slow", polarity="active-high")
-    c.fabric("ahb", "AHB-Lite", 64, 32, "D_FAST").fabric("apb", "APB4", 32, 32, "D_SLOW")
+    c.fabric("ahb", "AHB-Lite", 64, 32, "D_FAST").fabric("apb", "APB4", 32, 16, "D_SLOW")
     c.master("cpu", "AHB-Lite", 64, 32, "D_FAST").link("cpu", "ahb", 0)
     c.slave("mem", "AHB-Lite", 64, 16, "D_FAST").link("ahb", "mem", 0)
     c.bridge("br", 0x9000_0000, pass_through=False).link("ahb", "br", 1).link("br", "apb", 0)
@@ -279,7 +286,8 @@ def ahb2apb_cdc() -> Cfg:
     c.region("mem", "ram", 0x0000_0000, 0x1_0000)
     c.region("br", "periph", 0x9000_0000, 0x1_0000)
     c.region("uart", "regs", 0x9000_0000, 0x1000).region("gpio", "regs", 0x9000_1000, 0x1000)
-    c.decode("cpu", "HRESP_ERROR").decode("br", "PSLVERR")
+    c.decode("cpu", "HRESP_ERROR")
+    c.decode("br", "PSLVERR", alias=(0x9000_8000, 0x1000, 0x9000_1000, "remap_i"))
     c.option("cpu", **AHB_MASTER_NA).option("mem", **AHB_SLAVE_NA)
     c.option("br", **APB4_NA).option("uart", **APB4_NA).option("gpio", **APB4_NA)
     return c
@@ -343,13 +351,15 @@ def multi() -> Cfg:
     c.slave("aux_ram", "AHB-Lite", 32, 32, "D_S").link("ahb_s", "aux_ram", 0)
     c.region("ram", "mem", 0x0000_0000, 0x1_0000)
     c.region("br_y", "win", 0x4000_0000, 0x1_0000).region("br_n", "win", 0x6000_0000, 0x1_0000)
-    c.region("uart", "regs", 0x4000_0000, 0x1000).region("spi", "regs", 0x4000_1000, 0x1000)
+    c.region("uart", "regs", 0x4000_0000, 0x1000, access="RO")
+    c.region("spi", "regs", 0x4000_1000, 0x1000)
     c.region("legacy", "regs", 0x6000_0000, 0x1000)
     c.region("aux_ram", "mem", 0x8000_0000, 0x1_0000)
     for m in ("cpu", "dma"):
         c.decode(m, "HRESP_ERROR")
     c.decode("aux", "HRESP_ERROR", alias=(0x0000_0000, 0x1000, 0x8000_0000, "remap_i"))
     c.decode("br_y", "PSLVERR").decode("br_n", "PSLVERR")
+    c.access("dma", "br_n", "-")  # an Access_Rule on a bridge port
     for port in ("cpu", "dma", "aux"):
         c.option(port, **AHB_MASTER_NA)
     c.option("ram", **AHB_SLAVE_NA).option("aux_ram", **AHB_SLAVE_NA)

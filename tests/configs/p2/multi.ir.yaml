@@ -106,7 +106,10 @@ fabrics:
         end: '0x6000_FFFF'
         access: RW
         secure: false
-    access_rules: []
+    access_rules:
+      - master: dma
+        slave: br_n
+        access: none
     decode:
       - master: cpu
         miss: HRESP_ERROR
@@ -226,7 +229,7 @@ fabrics:
         region: regs
         base: '0x4000_0000'
         end: '0x4000_0FFF'
-        access: RW
+        access: RO
         secure: false
       - slave_port: 1
         slave: spi
@@ -474,7 +477,7 @@ memory_map:
     region: regs
     base: '0x4000_0000'
     size: '0x0000_1000'
-    access: RW
+    access: RO
     secure: false
     fabric: p4
   - slave: spi
@@ -580,4 +583,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: multi.xlsx
-  sha256: 1159c095f1b08929673d5a2335bffae823f6fbff7adf4e8037be11de47c0221f
+  sha256: 13026f98f4f2e462b6da9ee9485e53e2a7b1a9711c2925cecf4fcd34bc622563

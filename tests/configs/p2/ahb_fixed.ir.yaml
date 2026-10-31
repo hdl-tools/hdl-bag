@@ -46,13 +46,13 @@ fabrics:
     master_ports:
       - index: 0
         port: m0
-        priority: 2
+        priority: 1
       - index: 1
         port: m1
-        priority: 0
+        priority: 2
       - index: 2
         port: m2
-        priority: 1
+        priority: 0
     slave_ports:
       - index: 0
         port: s0
@@ -86,7 +86,7 @@ fabrics:
         base: '0x2002_0000'
         end: '0x2002_FFFF'
         access: RW
-        secure: false
+        secure: true
     access_rules: []
     decode:
       - master: m0
@@ -112,7 +112,7 @@ fabrics:
           - base: '0x0001_0000'
             size: '0x0000_1000'
             to: '0x2002_0000'
-            enable: boot_a_i
+            enable: boot_b_i
 masters:
   - name: m0
     protocol: AHB-Lite
@@ -261,7 +261,7 @@ memory_map:
     base: '0x2002_0000'
     size: '0x0001_0000'
     access: RW
-    secure: false
+    secure: true
     fabric: ahb
 hierarchy:
   top: ahb_fixed_top
@@ -280,6 +280,7 @@ wrapper:
   file_header: header.txt
   extra_inputs:
     - boot_a_i
+    - boot_b_i
     - spare_i
   adapter_placement: with fabric
   adapter_naming: '{from}_{type}_2_{to}'
@@ -306,4 +307,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_fixed.xlsx
-  sha256: 86faab3108fef478e8161f42baa8c5e6c73ef29b8b85e43bd18a85e321130be1
+  sha256: cbbb7ae1121870d23437a721d51a3f547e36cfa7e23c551c6533e8042a6b7bc9

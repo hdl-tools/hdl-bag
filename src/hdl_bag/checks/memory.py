@@ -41,6 +41,20 @@ def _hex(v: int) -> str:
     return "0x" + "_".join(parts)
 
 
+def _window_offset(ctx: Context, fabric: str) -> int:
+    """Window base of the pass-through N bridge feeding FABRIC (0 when there is none)."""
+    for row in ctx.raw.bridges:
+        name = ctx.text(row["Bridge"])
+        if (
+            name
+            and ctx.master_fabric.get(name) == fabric
+            and ctx.yes_no(row["Pass-through address"]) is False
+        ):
+            base = ctx.hexval(row["Window base (hex)"])
+            return base if isinstance(base, int) else 0
+    return 0
+
+
 def _pow2(v: int) -> bool:
     return v > 0 and v & (v - 1) == 0
 
@@ -99,9 +113,12 @@ def check_memory_map(ctx: Context) -> list[Region]:
         r = Region(row, target, rname, fabric, base, size, access, secure)
         frow = ctx.fabric_row(fabric)
         f_addr = ctx.integer(frow["Addr width (bits)"], minimum=1) if frow else None
-        if isinstance(f_addr, int) and r.end >= 1 << f_addr:
+        # A fabric behind a pass-through N bridge decodes offsets from the window base.
+        offset = _window_offset(ctx, fabric)
+        if isinstance(f_addr, int) and (r.base < offset or r.end - offset >= 1 << f_addr):
+            seen = f" (offsets from {_hex(offset)})" if offset else ""
             ctx.report("MM-ADDR-RANGE", row["Base (hex)"],
-                       f"{target} {r.span()} exceeds the {f_addr}-bit address space of {fabric}")  # fmt: skip
+                       f"{target} {r.span()} exceeds the {f_addr}-bit address space of {fabric}{seen}")  # fmt: skip
             continue
         if ctx.kinds[target] == "slave":
             s_addr = ctx.integer(ctx.defs[target]["Addr width (bits)"], minimum=1)

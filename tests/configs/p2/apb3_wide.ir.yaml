@@ -129,9 +129,15 @@ fabrics:
         region: regs
         base: '0x4007_0000'
         end: '0x4007_0FFF'
-        access: RW
+        access: RO
         secure: false
-    access_rules: []
+    access_rules:
+      - master: host
+        slave: p0
+        access: RO
+      - master: host
+        slave: p4
+        access: WO
     decode:
       - master: host
         miss: default-slave
@@ -384,7 +390,7 @@ memory_map:
     region: regs
     base: '0x4007_0000'
     size: '0x0000_1000'
-    access: RW
+    access: RO
     secure: false
     fabric: apb
 hierarchy:
@@ -437,4 +443,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb3_wide.xlsx
-  sha256: 725981dd18b1b7ea95fe4a0c3be15c20fda08ce2263bdfb410c71c9ef9471620
+  sha256: c82f84dc17788a01e95663da81ad474b290a2f4e4e524418b70d7f8a683223dd

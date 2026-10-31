@@ -77,7 +77,11 @@ fabrics:
       - master: m0
         miss: PSLVERR
         default_slave: null
-        aliases: []
+        aliases:
+          - base: '0x0000_0800'
+            size: '0x0000_0100'
+            to: '0x0000_0000'
+            enable: alias_i
 masters:
   - name: m0
     protocol: APB4
@@ -148,6 +152,7 @@ wrapper:
   package: apb4_min_pkg
   file_header: header.txt
   extra_inputs:
+    - alias_i
     - spare_i
   adapter_placement: with fabric
   adapter_naming: '{from}_{type}_2_{to}'
@@ -162,4 +167,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_min.xlsx
-  sha256: eeef5c9085156adbdea9d64c5c9850da367ea02a73d2d95d932ac4cf3a6bcc5e
+  sha256: 011bfba5ec11f2ac77c2e7ea5de7871a59a53d96c0bd17fae0eb18eb2c258c5c
