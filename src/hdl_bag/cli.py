@@ -26,5 +26,6 @@ def main() -> None:
 )  # fmt: skip
 def template(sample: bool, output: Path) -> None:
     """Write a blank spec workbook, or the demo_ss sample."""
+    output.parent.mkdir(parents=True, exist_ok=True)
     write_template(output, sample=sample)
     click.echo(f"wrote {output}")
