@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_ahb_lite_bus
+kind: fabric
+api_version: 1
+description: 'In-house single-layer AHB-Lite bus: arbiter (when several masters), decoder, response mux, default slave returning a 2-cycle HRESP ERROR.'
+protocols:
+  - AHB-Lite
+topologies:
+  - single-layer
+arbitration:
+  - single-master
+  - round-robin
+  - fixed-priority
+sources:
+  - rtl/inhouse/bag_ahb_lite_bus.sv
+licence: Apache-2.0
+qualification: unqualified

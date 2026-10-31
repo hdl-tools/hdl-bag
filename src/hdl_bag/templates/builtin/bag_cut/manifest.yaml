@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_cut
+kind: adapter
+api_version: 1
+description: Register slice (PULP axi_cut / axi_multicut). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+  - AXI4-Lite
+adapter_type: cut
+sources:
+  - bender:axi:axi_cut
+  - bender:axi:axi_multicut
+licence: SHL-0.51
+qualification: unqualified

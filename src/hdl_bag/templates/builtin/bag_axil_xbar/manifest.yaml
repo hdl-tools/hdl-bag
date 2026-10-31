@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_axil_xbar
+kind: fabric
+api_version: 1
+description: AXI4-Lite crossbar (PULP axi_lite_xbar). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4-Lite
+topologies:
+  - crossbar
+arbitration:
+  - round-robin
+sources:
+  - bender:axi:axi_lite_xbar
+licence: SHL-0.51
+qualification: unqualified

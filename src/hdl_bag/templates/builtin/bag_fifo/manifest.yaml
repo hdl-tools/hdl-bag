@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_fifo
+kind: adapter
+api_version: 1
+description: Per-port FIFO on every channel (PULP axi_fifo). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+  - AXI4-Lite
+adapter_type: fifo
+sources:
+  - bender:axi:axi_fifo
+licence: SHL-0.51
+qualification: unqualified

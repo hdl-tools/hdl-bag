@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_apb2axi
+kind: bridge
+api_version: 1
+description: 'In-house APB to AXI: single-beat transfers only.'
+upstream:
+  - APB4
+  - APB3
+downstream:
+  - AXI4
+  - AXI4-Lite
+sources:
+  - rtl/inhouse/bag_apb2axi.sv
+licence: Apache-2.0
+qualification: unqualified

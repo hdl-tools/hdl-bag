@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_iw
+kind: adapter
+api_version: 1
+description: AXI ID-width converter (PULP axi_iw_converter). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+adapter_type: iw
+sources:
+  - bender:axi:axi_iw_converter
+licence: SHL-0.51
+qualification: unqualified

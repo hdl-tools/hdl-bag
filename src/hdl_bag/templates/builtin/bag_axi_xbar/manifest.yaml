@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_axi_xbar
+kind: fabric
+api_version: 1
+description: AXI4 crossbar (PULP axi_xbar). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+topologies:
+  - crossbar
+arbitration:
+  - round-robin
+param_map:
+  n_master_ports: Cfg.NoSlvPorts
+  n_slave_ports: Cfg.NoMstPorts
+  max_mst_trans: Cfg.MaxMstTrans
+  max_slv_trans: Cfg.MaxSlvTrans
+  latency_mode: Cfg.LatencyMode
+  id_width_master_side: Cfg.AxiIdWidthSlvPorts
+  id_used_master_side: Cfg.AxiIdUsedSlvPorts
+  addr_width: Cfg.AxiAddrWidth
+  data_width: Cfg.AxiDataWidth
+  n_addr_rules: Cfg.NoAddrRules
+sources:
+  - bender:axi:axi_xbar
+licence: SHL-0.51
+qualification: unqualified

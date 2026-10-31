@@ -74,6 +74,9 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
         return (old, new) == ("0.2", "0.3")
     if (sheet, coord) == ("Wrapper", "C13"):
         return isinstance(old, str) and new == old.replace("cdc, fifo", "cdc, iw (ID width), fifo")
+    if sheet == "Fabrics" and coord[0] in "IJ" and coord[1:] in {"7", "8", "9"}:
+        # Max mst/slv trans do not apply to the APB and AHB fabrics (D16).
+        return (old, new) == (1, "n/a")
     if sheet == "Access_Rules":
         # New row 8; derived formulas extend one spare row further (to row 18).
         return coord in {"A8", "B8", "C8", "D8", "E18", "F18", "G18"} and old is None

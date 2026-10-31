@@ -43,18 +43,18 @@ RESETS: Final[list[list[Cell]]] = [
     ["rst_aon_n", "active-low", "async", "sync", "D_AON", "top port (POR)", "Power-on reset only"],
 ]
 
-# Fabric .. Mid-point register slice, Notes
+# Fabric .. Mid-point register slice, Notes. Settings that do not apply read n/a (D16).
 FABRICS: Final[list[list[Cell]]] = [
     ["main_xbar", "AXI4", "crossbar", 64, 32, "D_SYS", "round-robin", "CUT_ALL_AX", 8, 8,
      "bag_axi_xbar", "PULP axi_xbar", "n/a", "n/a", "Main system interconnect"],
     ["cfg_bus", "AXI4-Lite", "shared-bus", 32, 32, "D_SYS", "fixed-priority", "n/a", 4, 4,
      "bag_axil_shared_bus", "PULP axi_lite_mux + axi_lite_demux", 2, "cut",
      "Low-bandwidth config bus: area over bandwidth"],
-    ["periph_apb", "APB4", "decoder-mux", 32, 32, "D_PER", "single-master", "n/a", 1, 1,
+    ["periph_apb", "APB4", "decoder-mux", 32, 32, "D_PER", "single-master", "n/a", "n/a", "n/a",
      "bag_apb_mux", "in-house template", "n/a", "n/a", "Fed by br_main2per"],
-    ["ahb_bus", "AHB-Lite", "single-layer", 32, 32, "D_AON", "single-master", "n/a", 1, 1,
+    ["ahb_bus", "AHB-Lite", "single-layer", 32, 32, "D_AON", "single-master", "n/a", "n/a", "n/a",
      "bag_ahb_lite_bus", "in-house template", "n/a", "n/a", "Always-on segment"],
-    ["aon_apb", "APB4", "decoder-mux", 32, 32, "D_AON", "single-master", "n/a", 1, 1,
+    ["aon_apb", "APB4", "decoder-mux", 32, 32, "D_AON", "single-master", "n/a", "n/a", "n/a",
      "bag_apb_mux", "in-house template", "n/a", "n/a", "Fed by br_ahb2aon"],
 ]  # fmt: skip
 

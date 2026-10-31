@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: bag_cdc
+kind: adapter
+api_version: 1
+description: Asynchronous clock-domain crossing (PULP axi_cdc). PULP module and parameter names are verified at the pinned commit in Phase 3.
+protocols:
+  - AXI4
+  - AXI4-Lite
+adapter_type: cdc
+sources:
+  - bender:axi:axi_cdc
+licence: SHL-0.51
+qualification: unqualified
