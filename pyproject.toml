@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hdl-bag"
+version = "0.0.1"
+description = "BAG - Bus Architecture Generator: spec-based AMBA bus-fabric RTL generator"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "AUTHORS"]
+authors = [{ name = "The hdl-bag Authors" }]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "click>=8.1",
+    "jinja2>=3.1",
+    "openpyxl>=3.1",
+    "pydantic>=2.6",
+    "ruamel.yaml>=0.18",
+]
+
+[project.urls]
+Repository = "https://github.com/hdl-tools/hdl-bag"
+
+[project.scripts]
+bag = "hdl_bag.cli:main"
+hdl-bag = "hdl_bag.cli:main"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.10",
+    "pytest>=8",
+    "ruff>=0.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hdl_bag"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

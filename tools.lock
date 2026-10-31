@@ -1,0 +1,11 @@
+# Pinned tool versions for the hdl-bag tools image (tools/Dockerfile).
+# One KEY=VALUE per line; each key is passed to `docker build` as a build-arg.
+# Never float to "latest". Bump deliberately, one tool per PR.
+UBUNTU_VERSION=24.04
+PYTHON_VERSION=3.11
+UV_VERSION=0.9.26
+VERILATOR_VERSION=v5.052
+SLANG_VERSION=v12.0
+VERIBLE_VERSION=v0.0-4296-g0f262651
+OSS_CAD_SUITE_DATE=2026-10-01
+BENDER_VERSION=v0.32.1
