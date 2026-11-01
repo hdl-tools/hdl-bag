@@ -41,17 +41,20 @@ def _hex(v: int) -> str:
     return "0x" + "_".join(parts)
 
 
-def _window_offset(ctx: Context, fabric: str) -> int:
-    """Window base of the pass-through N bridge feeding FABRIC (0 when there is none)."""
+def _window_offset(ctx: Context, fabric: str, depth: int = 0) -> int:
+    """Offset FABRIC decodes from: the window base of the nearest pass-through N bridge on
+    its path (a pass-through Y bridge passes its upstream fabric's offset on); 0 for none.
+    DEPTH stops a malformed bridge loop (TOPO-BRIDGE-CYCLE reports it)."""
     for row in ctx.raw.bridges:
         name = ctx.text(row["Bridge"])
-        if (
-            name
-            and ctx.master_fabric.get(name) == fabric
-            and ctx.yes_no(row["Pass-through address"]) is False
-        ):
+        if not name or ctx.master_fabric.get(name) != fabric:
+            continue
+        if ctx.yes_no(row["Pass-through address"]) is False:
             base = ctx.hexval(row["Window base (hex)"])
             return base if isinstance(base, int) else 0
+        upstream = ctx.slave_fabric.get(name)
+        if upstream is not None and depth < len(ctx.raw.bridges):
+            return _window_offset(ctx, upstream, depth + 1)
     return 0
 
 

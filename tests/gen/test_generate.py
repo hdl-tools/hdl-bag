@@ -87,8 +87,9 @@ def test_byte_identical_across_processes(tmp_path: Path) -> None:
 def test_golden_writes_collateral_then_stops(tmp_path: Path) -> None:
     with pytest.raises(MissingRtl) as exc:
         generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
-    # Phase 3 PRs 3 and 4 gave the AXI fabrics and adapters RTL; the bridges follow.
-    assert exc.value.templates == ["bag_ahb2axi", "bag_axi2apb", "bag_axi2axil"]
+    # Phase 3 PRs 3-5 gave the AXI fabrics, adapters and PULP bridges RTL; PR 6 adds the
+    # in-house bridges.
+    assert exc.value.templates == ["bag_ahb2axi"]
     assert (tmp_path / "rtl/pkg/demo_ss_bus_pkg.sv").is_file()
     assert json.loads((tmp_path / MANIFEST).read_text())["top"] is None
     with pytest.raises(ValueError, match="no RTL was generated"):

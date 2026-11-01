@@ -58,7 +58,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     bridges = {b.name: b for b in spec.bridges}
     slaves = {s.name: s for s in spec.slaves}
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
-    span = _read_span(spec, master, fabric) if not write else 4
+    # Bytes the access covers, relative to addr: [lo, hi). A write covers its 4 bytes
+    # (added zero-strobe beats write nothing); a read can cover more (_read_cover).
+    lo, hi = _read_cover(spec, master, fabric, addr) if not write else (0, 4)
     nonsec = nonsec or prot_tied(spec, master)
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
@@ -93,8 +95,15 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             assert target is not None  # to_default implies a default slave
         if target in bridges:
             b = bridges[target]
-            offset += 0 if b.pass_through else b.window_base
+            # The nearest pass-through N window sets what the slaves behind it see; a
+            # pass-through Y bridge keeps the offset its upstream fabric has.
+            offset = offset if b.pass_through else b.window_base
             fabric, master = fabrics[b.downstream], b.name
+            if not write and fabric.protocol == "AXI4-Lite":
+                # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
+                lite = fabric.data_width // 8
+                lo = (addr + lo) // lite * lite - addr
+                hi = -(-(addr + hi) // lite) * lite - addr
             nonsec = nonsec or prot_tied(spec, b.name)
             masked = masked or pslverr_tied(spec, b.name)
             crossed.append(b.name)
@@ -105,9 +114,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
         # converters read all of it.
-        span_ = span if not crossed else 4
-        first = visible - visible % span_
-        words = {a // word for a in range(first, first + max(span_, word), word)}
+        # The access reaches every slave word its byte interval touches.
+        first = (visible + lo) // word * word
+        words = {a // word for a in range(first, visible + hi, word)}
         error = bool(words & {e // word for e in error_words(spec, target)})
         error = error and not masked
         return Outcome(
@@ -116,18 +125,24 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     raise AssertionError("bridge chain longer than the number of fabrics")
 
 
-def _read_span(spec: Spec, master: str, fabric: Any) -> int:
-    """Bytes a 32-bit read of MASTER fetches at the slave: AXI4 masters issue narrow (size 2)
-    transfers, but an AXI4-Lite beat is always full width, so a Lite master's read spans its
-    data width (and the fabric's, when that is AXI4-Lite and wider: Lite upsizers keep the
-    full width)."""
+def _read_cover(spec: Spec, master: str, fabric: Any, addr: int) -> tuple[int, int]:
+    """Bytes [lo, hi), relative to ADDR, a 32-bit read by MASTER covers on FABRIC.
+
+    AXI4 masters issue narrow (size 2) transfers: the 4 addressed bytes. An AXI4-Lite beat is
+    always full width: on an AXI4-Lite fabric (whose upsizers keep the full width) it covers
+    the whole aligned beat; behind a pc onto an AXI4 fabric it becomes an AXI4 transfer of
+    the Lite width, which covers from the address to the end of its aligned beat (AXI
+    unaligned-transfer rule). Width converters further on read all of what is covered.
+    """
     m = next(x for x in spec.masters if x.name == master)
     if m.protocol != "AXI4-Lite":
-        return 4
-    width = m.data_width
+        return 0, 4
+    beat = m.data_width // 8
     if fabric.protocol == "AXI4-Lite":
-        width = max(width, fabric.data_width)
-    return width // 8
+        beat = max(beat, fabric.data_width // 8)
+        start = addr // beat * beat
+        return start - addr, start + beat - addr
+    return 0, addr // beat * beat + beat - addr
 
 
 def error_words(spec: Spec, slave: str) -> set[int]:

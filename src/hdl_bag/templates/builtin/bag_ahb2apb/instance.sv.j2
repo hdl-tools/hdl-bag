@@ -9,7 +9,7 @@
       .HDataWidth({{ up.data_width }}),
       .PAddrWidth({{ dn.addr_width }}),
       .PDataWidth({{ dn.data_width }}),
-      .AddrOffset({{ lit(up.addr_width, 0 if bridge.pass_through else bridge.window_base) }}),
+      .AddrOffset({{ lit(up.addr_width, bridge_offset(bridge.name)) }}),
       .AsyncCdc  (1'b{{ 1 if bridge.cdc else 0 }})
   ) {{ name }} (
       .hclk_i     ({{ ctx.clk(up.domain) }}),

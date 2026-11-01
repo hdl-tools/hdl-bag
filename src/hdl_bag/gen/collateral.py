@@ -17,6 +17,7 @@ HTML put it in an HTML comment.
 import html
 from dataclasses import dataclass
 
+from hdl_bag.gen.decode import fabric_offset
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.ir.model import Spec
 
@@ -66,11 +67,12 @@ def memmap(spec: Spec) -> list[FabricMap]:
             for a in sorted(d.aliases, key=lambda a: a.base)
         ]  # fmt: skip
         notes = []
-        for b in spec.bridges:
-            if b.downstream == f.name and not b.pass_through:
-                notes.append(f"Reached through {b.name} with pass-through N: the fabric decodes "
-                             f"addresses relative to {_hex(b.window_base, aw)}; the table shows "
-                             "system addresses.")  # fmt: skip
+        offset = fabric_offset(spec, f)
+        if offset:
+            via = ", ".join(sorted(b.name for b in spec.bridges if b.downstream == f.name))
+            notes.append(f"Reached through {via}: the fabric decodes addresses relative to "
+                         f"{_hex(offset, aw)} (a pass-through N window); the table shows system "
+                         "addresses.")  # fmt: skip
         for d in sorted(f.decode, key=lambda d: d.master):
             miss = f"default slave {d.default_slave}" if d.default_slave else d.miss
             notes.append(f"{d.master}: unmapped or blocked accesses get {miss}.")

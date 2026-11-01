@@ -17,7 +17,7 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent))  # tests/configs: the shared DSL
 
 import dsl  # noqa: E402
-from dsl import AXI4_NA, AXIL_NA, Cfg  # noqa: E402
+from dsl import APB3_NA, APB4_NA, AXI4_NA, AXIL_NA, Cfg  # noqa: E402
 
 KB, MB = 0x400, 0x10_0000
 
@@ -214,11 +214,108 @@ def axil_adapters() -> Cfg:
     return c
 
 
+def bridges_pulp() -> Cfg:
+    """The PULP-backed bridges: AXI4 xbar -> bag_axi2apb (64 -> 32 and a CDC inside, FIFO 2,
+    pass-through N) -> APB4; xbar -> bag_axi2axil (64 -> 32, pass-through Y) -> AXI4-Lite xbar
+    -> bag_axi2apb with an AXI4-Lite upstream -> APB3 (two bridge hops)."""
+    c = Cfg("bridges_pulp", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_PER", "clk_per", "rst_per_n")
+    c.fabric("xbar", "AXI4", 64, 32, "D_SYS", "round-robin", latency="CUT_ALL_AX",
+             max_trans=(4, 4))  # fmt: skip
+    c.fabric("per", "APB4", 32, 32, "D_PER")
+    c.fabric("cfg", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", max_trans=(2, 2))
+    c.fabric("lp", "APB3", 32, 32, "D_SYS")
+    c.master("cpu", "AXI4", 64, 32, "D_SYS", id_width=4)
+    c.master("dbg", "AXI4-Lite", 64, 32, "D_SYS")
+    c.master("aux", "AXI4-Lite", 32, 32, "D_SYS")
+    c.slave("ram", "AXI4", 64, 32, "D_SYS")
+    c.slave("uart", "APB4", 32, 12, "D_PER").slave("gpio", "APB4", 32, 12, "D_PER")
+    c.slave("pmu", "AXI4-Lite", 32, 12, "D_SYS")
+    c.slave("tmr", "APB3", 32, 12, "D_SYS")
+    c.bridge("br_per", 0x4000_0000, pass_through=False, template="bag_axi2apb", fifo_depth=2)
+    c.bridge("br_cfg", 0x5000_0000, template="bag_axi2axil", fifo_depth=2)
+    c.bridge("br_lp", 0x5001_0000, template="bag_axi2apb")
+    c.link("cpu", "xbar", 0).link("dbg", "xbar", 1)
+    c.link("xbar", "ram", 0).link("xbar", "br_per", 1).link("xbar", "br_cfg", 2)
+    c.link("br_per", "per", 0).link("per", "uart", 0).link("per", "gpio", 1)
+    c.link("br_cfg", "cfg", 0).link("aux", "cfg", 1)
+    c.link("cfg", "pmu", 0).link("cfg", "br_lp", 1)
+    c.link("br_lp", "lp", 0).link("lp", "tmr", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("br_per", "win", 0x4000_0000, 64 * KB)
+    c.region("uart", "regs", 0x4000_0000, 4 * KB)
+    c.region("gpio", "regs", 0x4000_1000, 4 * KB, access="RO")
+    c.region("br_cfg", "win", 0x5000_0000, MB)
+    c.region("pmu", "regs", 0x5000_0000, 4 * KB)
+    c.region("br_lp", "win", 0x5001_0000, 64 * KB)
+    c.region("tmr", "regs", 0x5001_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("dbg", "SLVERR").decode("br_per", "PSLVERR")
+    c.decode("br_cfg", "DECERR").decode("aux", "DECERR").decode("br_lp", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA)
+    c.option("dbg", **AXIL_NA).option("aux", **AXIL_NA).option("pmu", **AXIL_NA)
+    c.option("br_cfg", **AXIL_NA)
+    for p in ("br_per", "uart", "gpio"):
+        c.option(p, **APB4_NA)
+    for p in ("br_lp", "tmr"):
+        c.option(p, **APB3_NA)
+    return c
+
+
+def bridges_pulp_cdc() -> Cfg:
+    """The bridge paths bridges_pulp leaves out, and chained pass-through windows:
+    bag_axi2axil widening (32 -> 64) with a CDC and pass-through N into a 24-bit AXI4-Lite
+    fabric; behind it bag_axi2apb from a 64-bit AXI4-Lite upstream (64 -> 32, FIFO 2, CDC,
+    pass-through N: N behind N) and bag_axi2apb with pass-through Y (Y behind N, so its
+    APB fabric decodes relative to the first window); bag_axi2apb at equal widths with a
+    FIFO and pass-through N straight from the AXI4 crossbar. Three clock domains."""
+    c = Cfg("bridges_pulp_cdc", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_AON", "clk_aon", "rst_aon_n")
+    c.domain("D_PER", "clk_per", "rst_per_n")
+    c.fabric("xbar", "AXI4", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY",
+             max_trans=(4, 4))  # fmt: skip
+    c.fabric("aon", "AXI4-Lite", 64, 24, "D_AON", "round-robin", max_trans=(2, 2))
+    c.fabric("per", "APB4", 32, 24, "D_PER")
+    c.fabric("led_apb", "APB4", 32, 24, "D_AON")
+    c.fabric("sys_apb", "APB4", 32, 32, "D_SYS")
+    c.master("cpu", "AXI4", 32, 32, "D_SYS", id_width=3)
+    c.slave("ram", "AXI4", 32, 32, "D_SYS")
+    c.slave("wdt", "AXI4-Lite", 64, 12, "D_AON")
+    c.slave("uart", "APB4", 32, 12, "D_PER").slave("led", "APB4", 32, 12, "D_AON")
+    c.slave("tmr", "APB4", 32, 12, "D_SYS")
+    c.bridge("br_aon", 0x4000_0000, pass_through=False, template="bag_axi2axil")
+    c.bridge("br_per", 0x4080_0000, pass_through=False, template="bag_axi2apb", fifo_depth=2)
+    c.bridge("br_led", 0x4090_0000, template="bag_axi2apb")
+    c.bridge("br_sys", 0x4200_0000, pass_through=False, template="bag_axi2apb", fifo_depth=1)
+    c.link("cpu", "xbar", 0)
+    c.link("xbar", "ram", 0).link("xbar", "br_aon", 1).link("xbar", "br_sys", 2)
+    c.link("br_aon", "aon", 0)
+    c.link("aon", "wdt", 0).link("aon", "br_per", 1).link("aon", "br_led", 2)
+    c.link("br_per", "per", 0).link("per", "uart", 0)
+    c.link("br_led", "led_apb", 0).link("led_apb", "led", 0)
+    c.link("br_sys", "sys_apb", 0).link("sys_apb", "tmr", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("br_aon", "win", 0x4000_0000, 16 * MB)
+    c.region("wdt", "regs", 0x4000_0000, 4 * KB)
+    c.region("br_per", "win", 0x4080_0000, 64 * KB)
+    c.region("uart", "regs", 0x4080_0000, 4 * KB)
+    c.region("br_led", "win", 0x4090_0000, 64 * KB)
+    c.region("led", "regs", 0x4090_1000, 4 * KB)  # not at the window base: offset visible
+    c.region("br_sys", "win", 0x4200_0000, 64 * KB)
+    c.region("tmr", "regs", 0x4200_0000, 4 * KB)
+    c.decode("cpu", "SLVERR").decode("br_aon", "DECERR").decode("br_per", "PSLVERR")
+    c.decode("br_led", "PSLVERR").decode("br_sys", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA)
+    c.option("br_aon", **AXIL_NA).option("wdt", **AXIL_NA)
+    for p in ("br_per", "uart", "br_led", "led", "br_sys", "tmr"):
+        c.option(p, **APB4_NA)
+    return c
+
+
 BUILT: dict[str, Callable[[], Cfg]] = {
     f.__name__: f
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
               axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one, axi_adapters,
-              axil_adapters)
+              axil_adapters, bridges_pulp, bridges_pulp_cdc)
 }  # fmt: skip
 
 
