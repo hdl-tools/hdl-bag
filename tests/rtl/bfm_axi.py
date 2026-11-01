@@ -20,6 +20,7 @@ from typing import Any
 
 import cocotb
 from cocotb.triggers import RisingEdge
+from cocotb.types import LogicArray
 from cocotbext.axi import (
     AxiBus,
     AxiLiteBus,
@@ -32,19 +33,53 @@ from cocotbext.axi import (
 )
 
 
+class _Absent:
+    """An inert 1-bit stand-in for a signal the port does not have (an AXI4 port without
+    IDs: cocotbext-axi requires the ID signals). Writes are kept, reads give them back."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._value = LogicArray.from_unsigned(0, 1)
+
+    @property
+    def value(self) -> LogicArray:
+        return self._value
+
+    @value.setter
+    def value(self, value: Any) -> None:
+        try:
+            bit = int(value) & 1
+        except ValueError:  # X / Z driven while idle
+            bit = 0
+        self._value = LogicArray.from_unsigned(bit, 1)
+
+    def __len__(self) -> int:
+        return 1
+
+    def setimmediatevalue(self, value: Any) -> None:
+        self.value = value
+
+
 class _Entity:
     """Stands in for the DUT: attribute <axi signal> is the wrapper port carrying it."""
 
-    def __init__(self, dut: Any, signals: dict[str, str]) -> None:
+    def __init__(self, dut: Any, signals: dict[str, str], absent: tuple[str, ...]) -> None:
         self._log = dut._log
         self._name = dut._name
         for sig, port in signals.items():
             setattr(self, sig, getattr(dut, port))
+        for sig in absent:
+            setattr(self, sig, _Absent(sig))
+
+
+AXI4_IDS = ("awid", "bid", "arid", "rid")
 
 
 def bus(dut: Any, signals: dict[str, str], lite: bool) -> Any:
-    """cocotbext-axi bus for one wrapper port; SIGNALS maps AXI names to port names."""
-    entity = _Entity(dut, signals)
+    """cocotbext-axi bus for one wrapper port; SIGNALS maps AXI names to port names. An AXI4
+    port without IDs gets inert ID stand-ins."""
+    absent = () if lite else tuple(s for s in AXI4_IDS if s not in signals)
+    entity = _Entity(dut, signals, absent)
     return (AxiLiteBus if lite else AxiBus).from_entity(entity)
 
 
@@ -64,10 +99,10 @@ class AxiPortMaster:
         self.lite = lite
 
     def _user(self, user: int) -> dict[str, int]:
-        return {} if self.lite else {"user": user}
+        return {} if self.lite else {"user": user, "size": 2}
 
     async def write(self, addr: int, data: int, prot: int = 0, user: int = 0) -> int:
-        extra = {} if self.lite else {"user": user, "wuser": user}
+        extra = {} if self.lite else {"user": user, "wuser": user, "size": 2}
         resp = await self.master.write(addr, data.to_bytes(4, "little"), prot=AxiProt(prot),
                                        **extra)  # fmt: skip
         return int(resp.resp)

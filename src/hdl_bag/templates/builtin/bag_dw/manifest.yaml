@@ -3,12 +3,20 @@
 name: bag_dw
 kind: adapter
 api_version: 1
-description: Data-width converter (PULP axi_dw_converter). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'Data-width converter: bag_axi_dw (PULP axi_dw_converter) / bag_axil_dw (axi_lite_dw_converter). PULP limits: WRAP bursts (and multi-beat FIXED bursts on downsizing) are answered with SLVERR; an AXI4-Lite converter reads and writes the whole wider word (the extra halves with WSTRB = 0).'
 protocols:
   - AXI4
   - AXI4-Lite
 adapter_type: dw
 sources:
   - bender:axi:axi_dw_converter
+  - bender:axi:axi_lite_dw_converter
+  - rtl/inhouse/bag_axi_dw.sv
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
+  - rtl/inhouse/bag_axil_dw.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

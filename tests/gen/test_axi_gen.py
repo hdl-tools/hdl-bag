@@ -198,3 +198,19 @@ def test_miss_response_table_by_port_index() -> None:
     root = Path(__file__).parents[1] / "configs" / "p3"
     text = package(load(root / "axi_xbar_rules.ir.yaml"), "// header\n")
     assert "localparam logic [2:0][1:0] XbarMissResp = '{2'b11, 2'b11, 2'b10};" in text
+
+
+def test_slave_side_pc_carries_the_fabric_slave_id() -> None:
+    """An AXI4-Lite slave behind pc: the AXI4 buses on the fabric side of the pc carry the
+    fabric's slave-side ID (the pc reflects IDs), so B/R return to the right master."""
+    from hdl_bag.ir import load
+
+    spec = load(Path(__file__).parents[1] / "configs" / "p3" / "axi_adapters.ir.yaml")
+    xbar = next(f for f in spec.fabrics if f.name == "xbar")
+    assert xbar.id_width is not None
+    insts = {i.name: i for i in build_netlist(spec).instances}
+    pc, dw = insts["xbar_pc_2_pmu"], insts["xbar_dw_2_pmu"]
+    assert pc.up is not None and pc.down is not None and dw.up is not None
+    assert pc.down.protocol == "AXI4-Lite" and pc.down.id_width == 0
+    assert pc.up.id_width == xbar.id_width.slave_side and "bid" in pc.up.signals
+    assert dw.up.id_width == xbar.id_width.slave_side  # the fabric slot

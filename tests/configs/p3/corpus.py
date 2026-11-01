@@ -152,10 +152,72 @@ def axi_shared_rr() -> Cfg:
                    (0, "none"), 4, 4)  # fmt: skip
 
 
+def axi_adapters() -> Cfg:
+    """AXI4 crossbar with every adapter kind and direction (D9 chain order): cdc + dw down
+    on a master in another domain, pc (Lite -> AXI4) + dw up, fifo + multicut on a master;
+    dw up + fifo + cut on a slave, iw down (remap) and iw up, pc (AXI4 -> Lite) + dw down,
+    cdc on a slave in another domain."""
+    c = Cfg("axi_adapters", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_CPU", "clk_cpu", "rst_cpu_n")
+    c.domain("D_PER", "clk_per", "rst_per_n")
+    c.fabric("xbar", "AXI4", 64, 32, "D_SYS", "round-robin", latency="CUT_SLV_AX",
+             max_trans=(4, 4))  # fmt: skip
+    # USER (4 bits) on every AXI4 port, so it crosses cdc, dw, iw, fifo and cut.
+    c.master("cpu", "AXI4", 128, 32, "D_CPU", id_width=4, user=4)
+    c.master("dbg", "AXI4-Lite", 32, 32, "D_SYS")
+    c.master("dma", "AXI4", 64, 32, "D_SYS", id_width=3, user=4)
+    c.slave("ddr", "AXI4", 128, 32, "D_SYS", user=4)
+    c.slave("sram", "AXI4", 64, 20, "D_SYS", id_width=2, user=4)  # narrower ID: remap
+    c.slave("wide", "AXI4", 64, 20, "D_SYS", id_width=8, user=4)  # wider ID: prepend
+    c.slave("pmu", "AXI4-Lite", 32, 12, "D_SYS")
+    c.slave("per", "AXI4", 64, 16, "D_PER", user=4)
+    for i, m in enumerate(("cpu", "dbg", "dma")):
+        c.link(m, "xbar", i).decode(m, "DECERR")
+    for i, s_ in enumerate(("ddr", "sram", "wide", "pmu", "per")):
+        c.link("xbar", s_, i)
+    c.region("ddr", "mem", 0x8000_0000, 16 * MB)
+    c.region("sram", "mem", 0x1000_0000, MB)
+    c.region("wide", "mem", 0x1010_0000, MB)
+    c.region("pmu", "regs", 0x4000_0000, 4 * KB)
+    c.region("per", "regs", 0x4001_0000, 64 * KB)
+    c.option("cpu", **AXI4_NA).option("dbg", **AXIL_NA)
+    c.option("dma", fifo=2, slice="multicut-2", **AXI4_NA)
+    c.option("ddr", fifo=4, slice="cut", **AXI4_NA)
+    for s_ in ("sram", "wide", "per"):
+        c.option(s_, **AXI4_NA)
+    c.option("pmu", **AXIL_NA)
+    return c
+
+
+def axil_adapters() -> Cfg:
+    """AXI4-Lite crossbar with adapters: pc (AXI4 -> Lite) on a master, dw down on a 64-bit
+    Lite master, cdc on a Lite master in another domain with a cut; dw up on a 64-bit Lite
+    slave with a fifo, pc (Lite -> AXI4) on an AXI4 slave."""
+    c = Cfg("axil_adapters", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_AON", "clk_aon", "rst_aon_n")
+    c.fabric("cfg", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY",
+             max_trans=(2, 2))  # fmt: skip
+    c.master("cpu", "AXI4", 32, 32, "D_SYS", id_width=4)
+    c.master("dsp", "AXI4-Lite", 64, 32, "D_SYS")
+    c.master("aon", "AXI4-Lite", 32, 32, "D_AON")
+    c.slave("buf", "AXI4-Lite", 64, 16, "D_SYS")
+    c.slave("mem", "AXI4", 32, 16, "D_SYS")
+    for i, m in enumerate(("cpu", "dsp", "aon")):
+        c.link(m, "cfg", i).decode(m, "SLVERR" if i == 1 else "DECERR")
+    c.link("cfg", "buf", 0).link("cfg", "mem", 1)
+    c.region("buf", "regs", 0x2000_0000, 16 * KB)
+    c.region("mem", "mem", 0x2001_0000, 64 * KB)
+    c.option("cpu", **AXI4_NA).option("dsp", **AXIL_NA)
+    c.option("aon", slice="cut", **AXIL_NA)
+    c.option("buf", fifo=2, **AXIL_NA).option("mem", **AXI4_NA)
+    return c
+
+
 BUILT: dict[str, Callable[[], Cfg]] = {
     f.__name__: f
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
-              axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one)
+              axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one, axi_adapters,
+              axil_adapters)
 }  # fmt: skip
 
 

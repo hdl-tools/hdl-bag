@@ -1,0 +1,607 @@
+schema: '0.3'
+project:
+  name: axi_adapters
+  revision: p3
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/axi_adapters
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_cpu
+    mhz: 100
+    source: top port
+    domain: D_CPU
+    reset: rst_cpu_n
+  - name: clk_per
+    mhz: 100
+    source: top port
+    domain: D_PER
+    reset: rst_per_n
+  - name: clk_sys
+    mhz: 100
+    source: top port
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_cpu_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_CPU
+  - name: rst_per_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_PER
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: xbar
+    protocol: AXI4
+    topology: crossbar
+    data_width: 64
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: CUT_SLV_AX
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+      - index: 1
+        port: dbg
+        priority: null
+      - index: 2
+        port: dma
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ddr
+        priority: null
+      - index: 1
+        port: sram
+        priority: null
+      - index: 2
+        port: wide
+        priority: null
+      - index: 3
+        port: pmu
+        priority: null
+      - index: 4
+        port: per
+        priority: null
+    id_width:
+      master_side: 4
+      slave_side: 6
+    max_parallel: 3
+    addr_rules:
+      - slave_port: 1
+        slave: sram
+        region: mem
+        base: '0x1000_0000'
+        end: '0x100F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 2
+        slave: wide
+        region: mem
+        base: '0x1010_0000'
+        end: '0x101F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: pmu
+        region: regs
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 4
+        slave: per
+        region: regs
+        base: '0x4001_0000'
+        end: '0x4001_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: ddr
+        region: mem
+        base: '0x8000_0000'
+        end: '0x80FF_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: cpu
+        miss: DECERR
+        default_slave: null
+        aliases: []
+      - master: dbg
+        miss: DECERR
+        default_slave: null
+        aliases: []
+      - master: dma
+        miss: DECERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: AXI4
+    fabric: xbar
+    data_width: 128
+    addr_width: 32
+    id_width: 4
+    user_width: 4
+    domain: D_CPU
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dbg
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dma
+    protocol: AXI4
+    fabric: xbar
+    data_width: 64
+    addr_width: 32
+    id_width: 3
+    user_width: 4
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: ddr
+    protocol: AXI4
+    fabric: xbar
+    data_width: 128
+    addr_width: 32
+    id_width: 6
+    id_width_auto: true
+    user_width: 4
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: per
+    protocol: AXI4
+    fabric: xbar
+    data_width: 64
+    addr_width: 16
+    id_width: 6
+    id_width_auto: true
+    user_width: 4
+    domain: D_PER
+    error_response: SLVERR
+    wait_states: 0
+  - name: pmu
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: sram
+    protocol: AXI4
+    fabric: xbar
+    data_width: 64
+    addr_width: 20
+    id_width: 2
+    id_width_auto: false
+    user_width: 4
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: wide
+    protocol: AXI4
+    fabric: xbar
+    data_width: 64
+    addr_width: 20
+    id_width: 8
+    id_width_auto: false
+    user_width: 4
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+bridges: []
+adapters:
+  - name: cpu_cdc_2_xbar
+    type: cdc
+    port: cpu
+    fabric: xbar
+    chain_index: 0
+    template: bag_cdc
+    params:
+      from: D_CPU
+      to: D_SYS
+    placed_in: axi_adapters_top
+    rtl_name: u_cpu_cdc_2_xbar
+  - name: cpu_dw_2_xbar
+    type: dw
+    port: cpu
+    fabric: xbar
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 128
+      to: 64
+    placed_in: axi_adapters_top
+    rtl_name: u_cpu_dw_2_xbar
+  - name: dbg_pc_2_xbar
+    type: pc
+    port: dbg
+    fabric: xbar
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4-Lite
+      to: AXI4
+    placed_in: axi_adapters_top
+    rtl_name: u_dbg_pc_2_xbar
+  - name: dbg_dw_2_xbar
+    type: dw
+    port: dbg
+    fabric: xbar
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 32
+      to: 64
+    placed_in: axi_adapters_top
+    rtl_name: u_dbg_dw_2_xbar
+  - name: xbar_dw_2_ddr
+    type: dw
+    port: ddr
+    fabric: xbar
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 64
+      to: 128
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_dw_2_ddr
+  - name: xbar_fifo_2_ddr
+    type: fifo
+    port: ddr
+    fabric: xbar
+    chain_index: 1
+    template: bag_fifo
+    params:
+      depth: 4
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_fifo_2_ddr
+  - name: xbar_cut_2_ddr
+    type: cut
+    port: ddr
+    fabric: xbar
+    chain_index: 2
+    template: bag_cut
+    params:
+      stages: 1
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_cut_2_ddr
+  - name: dma_fifo_2_xbar
+    type: fifo
+    port: dma
+    fabric: xbar
+    chain_index: 0
+    template: bag_fifo
+    params:
+      depth: 2
+    placed_in: axi_adapters_top
+    rtl_name: u_dma_fifo_2_xbar
+  - name: dma_cut_2_xbar
+    type: cut
+    port: dma
+    fabric: xbar
+    chain_index: 1
+    template: bag_cut
+    params:
+      stages: 2
+    placed_in: axi_adapters_top
+    rtl_name: u_dma_cut_2_xbar
+  - name: xbar_cdc_2_per
+    type: cdc
+    port: per
+    fabric: xbar
+    chain_index: 0
+    template: bag_cdc
+    params:
+      from: D_SYS
+      to: D_PER
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_cdc_2_per
+  - name: xbar_pc_2_pmu
+    type: pc
+    port: pmu
+    fabric: xbar
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4
+      to: AXI4-Lite
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_pc_2_pmu
+  - name: xbar_dw_2_pmu
+    type: dw
+    port: pmu
+    fabric: xbar
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 64
+      to: 32
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_dw_2_pmu
+  - name: xbar_iw_2_sram
+    type: iw
+    port: sram
+    fabric: xbar
+    chain_index: 0
+    template: bag_iw
+    params:
+      from: 6
+      to: 2
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_iw_2_sram
+  - name: xbar_iw_2_wide
+    type: iw
+    port: wide
+    fabric: xbar
+    chain_index: 0
+    template: bag_iw
+    params:
+      from: 6
+      to: 8
+    placed_in: axi_adapters_top
+    rtl_name: u_xbar_iw_2_wide
+port_options:
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dbg
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: ddr
+    fifo_depth: 4
+    slice: cut
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dma
+    fifo_depth: 2
+    slice: multicut-2
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: per
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: pmu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: sram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: wide
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+memory_map:
+  - slave: sram
+    region: mem
+    base: '0x1000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: wide
+    region: mem
+    base: '0x1010_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: pmu
+    region: regs
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: per
+    region: regs
+    base: '0x4001_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: ddr
+    region: mem
+    base: '0x8000_0000'
+    size: '0x0100_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+hierarchy:
+  top: axi_adapters_top
+  wrappers: []
+  placement:
+    - instance: cpu_cdc_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_cpu_cdc_2_xbar
+    - instance: cpu_dw_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_cpu_dw_2_xbar
+    - instance: dbg_dw_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_dbg_dw_2_xbar
+    - instance: dbg_pc_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_dbg_pc_2_xbar
+    - instance: dma_cut_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_dma_cut_2_xbar
+    - instance: dma_fifo_2_xbar
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_dma_fifo_2_xbar
+    - instance: xbar
+      kind: fabric
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar
+    - instance: xbar_cdc_2_per
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_cdc_2_per
+    - instance: xbar_cut_2_ddr
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_cut_2_ddr
+    - instance: xbar_dw_2_ddr
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_dw_2_ddr
+    - instance: xbar_dw_2_pmu
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_dw_2_pmu
+    - instance: xbar_fifo_2_ddr
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_fifo_2_ddr
+    - instance: xbar_iw_2_sram
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_iw_2_sram
+    - instance: xbar_iw_2_wide
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_iw_2_wide
+    - instance: xbar_pc_2_pmu
+      kind: adapter
+      wrapper: axi_adapters_top
+      rtl_name: u_xbar_pc_2_pmu
+wrapper:
+  top: axi_adapters_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: axi_adapters_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: dbg
+      exposed: true
+      prefix: null
+    - port: ddr
+      exposed: true
+      prefix: null
+    - port: dma
+      exposed: true
+      prefix: null
+    - port: per
+      exposed: true
+      prefix: null
+    - port: pmu
+      exposed: true
+      prefix: null
+    - port: sram
+      exposed: true
+      prefix: null
+    - port: wide
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: axi_adapters.xlsx
+  sha256: 481c350bf56fbabb13d7cbd7f507bf818a8e7fdccaf499051890041c2fcf0241

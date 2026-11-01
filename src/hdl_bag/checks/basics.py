@@ -3,11 +3,14 @@
 """Project and Wrapper settings, name definitions, clocks and resets."""
 
 import re
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from hdl_bag.checks.context import Context, Kind
 from hdl_bag.reader.model import Cell
 from hdl_bag.template import SCHEMA_VERSION
+
+if TYPE_CHECKING:
+    from hdl_bag.checks import CheckResult
 
 LINT_TOOLS: Final = ("slang", "verilator", "verible")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
@@ -230,3 +233,42 @@ def check_domain_ref(ctx: Context, cell: Cell) -> str | None:
         ctx.report("REF-UNKNOWN", cell, f"domain {domain} is not defined on Clocks")
         return None
     return domain
+
+
+def check_cdc_resets(ctx: Context, result: "CheckResult") -> None:
+    """Both sides of every clock-domain crossing (a cdc adapter, or a bridge whose fabrics
+    are in different domains) need async assertion and sync deassertion: the crossing's
+    gray-coded FIFOs (PULP axi_cdc) or 4-phase handshake (in-house bridges) hold pointers
+    in both domains, which must be reset together and leave reset cleanly in each clock.
+    That the two resets assert together (one source, no warm reset of one side) cannot be
+    seen in the workbook; it is the integrator's contract (docs).
+    """
+    from hdl_bag.ir.resolve import resolve
+
+    spec = resolve(result)
+    fabrics = {f.name: f for f in spec.fabrics}
+    crossings: list[tuple[str, str, str]] = []  # (name, domain, domain)
+    for a in spec.adapters:
+        if a.type == "cdc":
+            crossings.append((a.name, str(a.params["from"]), str(a.params["to"])))
+    for b in spec.bridges:
+        up, down = fabrics[b.upstream].domain, fabrics[b.downstream].domain
+        if up != down:
+            crossings.append((b.name, up, down))
+    resets = {r.domain: r for r in spec.resets}
+    rows = {ctx.text(r["Reset"]): r for r in ctx.raw.resets}
+    reported: set[str] = set()
+    for name, *domains in sorted(crossings):
+        for domain, other in (domains, domains[::-1]):
+            r = resets[domain]
+            if r.name in reported or (r.assertion, r.deassertion) == ("async", "sync"):
+                continue
+            reported.add(r.name)
+            column = "Assertion" if r.assertion != "async" else "Deassertion"
+            ctx.report(
+                "CLK-CDC-RESET",
+                rows[r.name][column],
+                f"reset {r.name} ({r.assertion} assertion, {r.deassertion} deassertion) "
+                f"resets one side of the clock-domain crossing {name} ({domain} -> {other}); "
+                "a crossing needs async assertion and sync deassertion on both sides",
+            )

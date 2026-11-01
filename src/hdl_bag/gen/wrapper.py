@@ -249,6 +249,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         fabric=fab,
         bridge=inst.bridge,
         adapter=inst.adapter,
+        spec=scope.spec,
         tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
     )

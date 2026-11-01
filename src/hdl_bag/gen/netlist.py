@@ -142,7 +142,10 @@ def build_netlist(spec: Spec) -> Netlist:
             # port address. iw (slaves only) takes the slave to the fabric's slave-side ID.
             proto = Protocol(f.protocol) if a.type == "pc" else cur.protocol
             idw, uw = cur.id_width, cur.user_width
-            if a.type == "iw" and f.id_width:
+            # On a slave chain the fabric side of an iw, or of a pc up to AXI4 (it reflects
+            # IDs), carries the fabric's slave-side ID, which B/R route back on.
+            to_axi4 = a.type == "pc" and proto == Protocol.AXI4 and cur.is_slave
+            if (a.type == "iw" or to_axi4) and f.id_width:
                 idw = f.id_width.slave_side
             if proto != Protocol.AXI4:  # pc down to AXI4-Lite drops ID and USER
                 idw, uw = 0, 0

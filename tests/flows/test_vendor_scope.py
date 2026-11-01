@@ -162,3 +162,40 @@ def test_vendored_design_lints_and_compiles(tmp_path: Path) -> None:
     assert all(is_third_party(f.file) for f in report.third_party)
     built = compile_design(sources, "vendor_top", tmp_path, incdirs=incdirs)
     assert built.ok, built.format()
+
+
+UNOPTFLAT_OUT = """\
+%Warning-UNOPTFLAT: rtl/top.sv:365:9: Signal unoptimizable: Circular combinational logic: 'top.a_wready'
+                    ... For warning description see https://verilator.org/warn/UNOPTFLAT?v=5.052
+                    rtl/top.sv:365:9:      Example path: top.a_wready
+                    rtl/vendor/pulp/axi/src/axi_dw_downsizer.sv:703:3:      Example path: ALWAYS
+                    rtl/top.sv:365:9:      Example path: top.a_wready
+%Warning-UNOPTFLAT: rtl/top.sv:20:9: Signal unoptimizable: Circular combinational logic: 'top.loop'
+                    rtl/top.sv:20:9:      Example path: top.loop
+                    rtl/inhouse/bag_x.sv:5:3:      Example path: ASSIGNW
+%Warning-UNOPTFLAT: rtl/top.sv:30:9: Signal unoptimizable: Circular combinational logic: 'top.mixed'
+                    rtl/top.sv:30:9:      Example path: top.mixed
+                    rtl/vendor/pulp/axi/src/axi_cut.sv:10:3:      Example path: ALWAYS
+                    rtl/inhouse/bag_y.sv:8:3:      Example path: ASSIGNW
+%Warning-UNOPTFLAT: rtl/top.sv:40:9: Signal unoptimizable: Circular combinational logic: 'top.gen'
+                    rtl/top.sv:40:9:      Example path: top.gen
+                    rtl/vendor/pulp/axi/src/axi_cut.sv:10:3:      Example path: ALWAYS
+                    rtl/sub.sv:12:3:      Example path: ASSIGNW
+%Warning-UNUSEDSIGNAL: rtl/top.sv:7:9: Signal is not used: 'spare'
+"""
+
+
+def test_unoptflat_through_vendored_rtl_is_third_party() -> None:
+    found = Verilator().parse(UNOPTFLAT_OUT, Path("/run"))
+    vendor_loop, own_loop, wrapper_loop, generated_loop, unused = found
+    assert vendor_loop.file == "rtl/vendor/pulp/axi/src/axi_dw_downsizer.sv"
+    assert "seen at rtl/top.sv" in vendor_loop.message
+    assert own_loop.file == "rtl/top.sv"  # no vendored node: our own loop, judged
+    # Through vendored RTL and the fixed in-house wrappers only: attributed to the vendor.
+    assert wrapper_loop.file == "rtl/vendor/pulp/axi/src/axi_cut.sv"
+    # Through another generated module (rtl/sub.sv): the generator's wiring, judged.
+    assert generated_loop.file == "rtl/top.sv"
+    assert unused.rule == "UNUSEDSIGNAL" and unused.file == "rtl/top.sv"
+    ours, theirs = split_third_party(found)
+    assert theirs == [vendor_loop, wrapper_loop]
+    assert ours == [own_loop, generated_loop, unused]

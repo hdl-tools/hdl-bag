@@ -3,12 +3,19 @@
 name: bag_fifo
 kind: adapter
 api_version: 1
-description: Per-port FIFO on every channel (PULP axi_fifo). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'Per-port FIFO on every channel: bag_axi_fifo / bag_axil_fifo around PULP axi_fifo.'
 protocols:
   - AXI4
   - AXI4-Lite
 adapter_type: fifo
 sources:
   - bender:axi:axi_fifo
+  - rtl/inhouse/bag_axi_fifo.sv
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
+  - rtl/inhouse/bag_axil_fifo.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

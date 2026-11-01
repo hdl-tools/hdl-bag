@@ -6,6 +6,8 @@ import os
 import shutil
 from pathlib import Path
 
+from hdl_bag.flows.compile import BUILD_FLAGS
+
 REPO = Path(__file__).parents[2]
 RTL_TESTS = Path(__file__).parent
 
@@ -36,7 +38,7 @@ def run_cocotb(
         hdl_toplevel=top,
         parameters=params or {},
         build_dir=build_dir,
-        build_args=["-Wno-fatal"],
+        build_args=["-Wno-fatal", *BUILD_FLAGS],
         always=True,
     )
     path = os.pathsep.join([str(module.parent), str(RTL_TESTS), os.environ.get("PYTHONPATH", "")])

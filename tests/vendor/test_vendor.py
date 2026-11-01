@@ -137,3 +137,21 @@ def test_file_list_include_dirs(tmp_path: Path) -> None:
     out = Outputs(tmp_path, (), "top", "p.f")
     assert sources(out) == [Path("rtl/pkg/p.sv"), Path("rtl/top.sv")]
     assert include_dirs(out) == [Path("rtl/vendor/pulp/axi/include")]
+
+
+def test_every_template_brings_the_headers_its_rtl_includes() -> None:
+    """An in-house source's `include must come with the template's vendored closure."""
+    reg = builtin_registry()
+    for name in reg.names():
+        m = reg.get(name)
+        assert m is not None
+        if not m.rtl:
+            continue
+        src = resolve_sources(list(m.sources))
+        have = {h.split("/include/", 1)[1] for h in src.headers}
+        for rel in src.files:
+            if "/vendor/pulp/" in rel:
+                continue
+            text = (files("hdl_bag") / rel).read_text(encoding="utf-8")
+            for inc in re.findall(r'`include\s+"([^"]+)"', text):
+                assert inc in have, f"{name}: {rel} includes {inc}, which no source brings"
