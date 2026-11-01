@@ -32,6 +32,9 @@ class Manifest(BaseModel):
     arbitration: tuple[Arbitration, ...] = ()
     adapter_type: AdapterType | None = None
     data_widths: tuple[int, ...] = ()  # empty = the protocol's legal widths
+    # bridge: AXI ID width the bridge drives on an AXI4 downstream bus (it is a master
+    # there); the checks' fabric ID-width derivation assumes the same value.
+    down_id_width: int | None = None
     param_map: dict[str, str] = {}  # BAG parameter -> backing-IP parameter
     port_map: dict[str, str] = {}  # standard bus signal -> backing-IP port / struct field
     sources: tuple[str, ...] = ()  # Bender target "bender:<pkg>:<module>" or repo file paths

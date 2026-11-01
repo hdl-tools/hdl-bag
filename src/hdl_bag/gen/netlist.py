@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from hdl_bag.ir.model import Adapter, Bridge, Fabric, PortOption, Spec
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, Protocol, port_signals, tie_value
+from hdl_bag.templates import builtin_registry
 
 # Port_Options field -> optional-signal column
 _OPTION_COLUMNS = {
@@ -105,6 +106,7 @@ def build_netlist(spec: Spec) -> Netlist:
         ends[(s.name, s.fabric)] = bus
 
     instances: list[Instance] = []
+    registry = builtin_registry()
     for b in spec.bridges:
         up_f, down_f = fabrics[b.upstream], fabrics[b.downstream]
         # A bridge's Port_Options apply to its downstream (master) end, as the checks
@@ -113,8 +115,10 @@ def build_netlist(spec: Spec) -> Netlist:
         up = _bus(f"{b.upstream}_2_{b.name}", b.upstream_protocol, up_f.addr_width,
                   b.upstream_width, up_f.id_width.slave_side if up_f.id_width else None, 0,
                   up_f.domain, True, None)  # fmt: skip
+        manifest = registry.get(b.template)
+        down_id = manifest.down_id_width if manifest else None
         down = _bus(f"{b.name}_2_{b.downstream}", b.downstream_protocol, down_f.addr_width,
-                    b.downstream_width, None, 0, down_f.domain, False, opt)  # fmt: skip
+                    b.downstream_width, down_id, 0, down_f.domain, False, opt)  # fmt: skip
         ends[(b.name, b.upstream)] = up
         ends[(b.name, b.downstream)] = down
         wrapper, rtl = place(b.name)
@@ -133,12 +137,18 @@ def build_netlist(spec: Spec) -> Netlist:
         """The bus that reaches fabric F's slot for PORT, inserting its adapters."""
         cur = ends[(port, f.name)]
         for a in chains.get((port, f.name), []):
-            # Each adapter converts one property towards the fabric's (D9). Adapters have
-            # RTL from Phase 3; until then this only names and orders the buses.
+            # Each adapter converts one property towards the fabric's (D9). Every adapter
+            # bus has the fabric's address width; the port-end adapter fits a narrower
+            # port address. iw (slaves only) takes the slave to the fabric's slave-side ID.
             proto = Protocol(f.protocol) if a.type == "pc" else cur.protocol
+            idw, uw = cur.id_width, cur.user_width
+            if a.type == "iw" and f.id_width:
+                idw = f.id_width.slave_side
+            if proto != Protocol.AXI4:  # pc down to AXI4-Lite drops ID and USER
+                idw, uw = 0, 0
             nxt = _bus(a.name, proto, f.addr_width,
-                       f.data_width if a.type == "dw" else cur.data_width, cur.id_width,
-                       cur.user_width, f.domain if a.type == "cdc" else cur.domain,
+                       f.data_width if a.type == "dw" else cur.data_width, idw,
+                       uw, f.domain if a.type == "cdc" else cur.domain,
                        cur.is_slave, options.get(port))  # fmt: skip
             wrapper, rtl = place(a.name)
             up, down = (nxt, cur) if cur.is_slave else (cur, nxt)
