@@ -18,6 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.decode import bridge_offset, decode_tables, fabric_offset
+from hdl_bag.gen.external import opaque_module, opaque_ports
 from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, plan, problems
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, camel, environment, lit
@@ -253,6 +254,8 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         bridge_offset=lambda name: bridge_offset(scope.spec, name),
         tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
+        opaque_module=lambda f: opaque_module(scope.spec, f),
+        opaque_ports=lambda i: opaque_ports(scope.spec, i),
     )
 
 

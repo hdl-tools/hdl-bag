@@ -15,7 +15,8 @@ from hdl_bag.cli import main
 from hdl_bag.gen import MANIFEST, MissingRtl, generate, load_outputs, sources
 from hdl_bag.gen.decode import decode_tables
 from hdl_bag.gen.render import camel, ir_sha256, lit
-from hdl_bag.ir import Spec, dump, load
+from hdl_bag.ir import load
+from hdl_bag.templates import builtin_registry
 
 TESTS = Path(__file__).parents[1]
 CONFIG = TESTS / "configs" / "p2" / "ahb2apb_pt.ir.yaml"
@@ -92,18 +93,26 @@ def test_golden_generates_fully(tmp_path: Path) -> None:
     assert load_outputs(tmp_path).files == out.files
 
 
-def _without_rtl() -> Spec:
-    """demo_ss with aon_apb on bag_external, the one template still without RTL."""
-    spec = load(GOLDEN_IR)
-    fabrics = tuple(f.model_copy(update={"template": "bag_external"}) if f.name == "aon_apb"
-                    else f for f in spec.fabrics)  # fmt: skip
-    return spec.model_copy(update={"fabrics": fabrics})
+@pytest.fixture
+def no_apb_rtl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every built-in template has RTL since Phase 3 PR 7; mark bag_apb_mux as having none
+    so the MissingRtl path can still be tested."""
+    import hdl_bag.gen as gen
+    from hdl_bag.templates.registry import Registry
+
+    reg = builtin_registry()
+    manifests = []
+    for name in reg.names():
+        m = reg.get(name)
+        assert m is not None
+        manifests.append(m.model_copy(update={"rtl": False}) if name == "bag_apb_mux" else m)
+    monkeypatch.setattr(gen, "builtin_registry", lambda: Registry(manifests))
 
 
-def test_missing_rtl_writes_collateral_then_stops(tmp_path: Path) -> None:
+def test_missing_rtl_writes_collateral_then_stops(tmp_path: Path, no_apb_rtl: None) -> None:
     with pytest.raises(MissingRtl) as exc:
-        generate(_without_rtl(), tmp_path, GOLDEN_IR.parent)
-    assert exc.value.templates == ["bag_external"]  # Phase 3 PR 7 wires it
+        generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
+    assert exc.value.templates == ["bag_apb_mux"]
     assert (tmp_path / "rtl/pkg/demo_ss_bus_pkg.sv").is_file()
     assert json.loads((tmp_path / MANIFEST).read_text())["top"] is None
     with pytest.raises(ValueError, match="no RTL was generated"):
@@ -146,18 +155,20 @@ def test_render_helpers() -> None:
     assert camel("br_ahb2aon") == "BrAhb2aon"
 
 
-def test_cli_generate_and_missing_rtl(tmp_path: Path) -> None:
+def test_cli_generate_and_missing_rtl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     ok = runner.invoke(main, ["generate", str(CONFIG), "-o", str(tmp_path / "ok")])
     assert ok.exit_code == 0, ok.output
     assert "top demo_ss_bus_top" in ok.output
-    dump(_without_rtl(), tmp_path / "external.ir.yaml")
-    for extra in GOLDEN_IR.parent.glob("*.txt"):  # files the IR names (header)
-        (tmp_path / extra.name).write_bytes(extra.read_bytes())
-    bad = runner.invoke(main, ["generate", str(tmp_path / "external.ir.yaml"), "-o",
-                               str(tmp_path / "bad")])  # fmt: skip
+    import hdl_bag.cli as cli
+
+    def missing(*_: object, **__: object) -> None:
+        raise MissingRtl(["bag_apb_mux"])
+
+    monkeypatch.setattr(cli, "generate", missing)
+    bad = runner.invoke(main, ["generate", str(GOLDEN_IR), "-o", str(tmp_path / "bad")])
     assert bad.exit_code == 1
-    assert "no RTL yet for template(s): bag_external" in bad.output
+    assert "no RTL yet for template(s): bag_apb_mux" in bad.output
 
 
 def test_generated_lines_fit_100_columns(tmp_path: Path) -> None:

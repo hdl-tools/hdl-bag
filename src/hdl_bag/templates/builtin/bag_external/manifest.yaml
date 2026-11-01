@@ -3,7 +3,7 @@
 name: bag_external
 kind: fabric
 api_version: 1
-description: 'Opaque user-supplied fabric: BAG generates its ports and wrapper wiring only; no fabric RTL, tests or formal.'
+description: 'Opaque user-supplied fabric: BAG instantiates a module <project>_<fabric> in its wrapper, with ports clk_i, rst_ni and, per attached port, the bus signals named by the Wrapper signal pattern with {port} = <fabric>_<port> (after the port adapters), and writes a stub of it (rtl/ext/<module>.sv: outputs tied to zero) for lint and elaboration. The user replaces the stub with the fabric RTL. No fabric RTL, tests or formal from BAG; the memory map and decode tables are still generated.'
 protocols:
   - AXI4
   - AXI4-Lite
