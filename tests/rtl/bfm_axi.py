@@ -15,6 +15,7 @@ proxy entity that maps AXI signal names to the wrapper's port handles; a signal 
 Port_Options row ties off is absent, and cocotbext-axi treats it as optional.
 """
 
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -135,6 +136,7 @@ class Seen:
     write: bool
     prot: int
     user: int = 0
+    cache: int | None = None  # AxCACHE (None on AXI4-Lite)
 
 
 class _Target:
@@ -143,10 +145,11 @@ class _Target:
     def __init__(self, word: int, err_addrs: set[int]) -> None:
         self.word = word
         self.err_words = {a // word for a in err_addrs}
+        self.err_exact: set[int] = set()  # accesses starting at exactly these addresses
         self.mem: dict[int, int] = {}
 
     def _check(self, addr: int) -> None:
-        if addr // self.word in self.err_words:
+        if addr // self.word in self.err_words or addr in self.err_exact:
             raise ValueError(f"slave error at {addr:#x}")
 
     async def write(self, addr: int, data: bytes) -> None:
@@ -172,6 +175,19 @@ class AxiPortSlave:
         )
         self.log: list[Seen] = []
 
+    def pause(self, seed: int, ratio: float = 0.4) -> None:
+        """Random back-pressure: AWREADY, WREADY and ARREADY low, BVALID and RVALID delayed,
+        each channel independently (so W can be taken before AW and the other way round)."""
+        rng = random.Random(seed)
+
+        def gen() -> Any:
+            while True:
+                yield rng.random() < ratio
+
+        w, r = self.slave.write_if, self.slave.read_if
+        for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
+            ch.set_pause_generator(gen())
+
     def stall(self, on: bool) -> None:
         """Hold the AW and AR channels not ready (requests queue up in the fabric)."""
         self.slave.write_if.aw_channel.pause = on
@@ -188,6 +204,8 @@ class AxiPortSlave:
                 if int(getattr(ch, f"{pre}valid").value) and int(getattr(ch, f"{pre}ready").value):
                     prot = getattr(ch, f"{pre}prot", None)
                     user = getattr(ch, f"{pre}user", None)
+                    cache = getattr(ch, f"{pre}cache", None)
                     self.log.append(Seen(int(getattr(ch, f"{pre}addr").value), write,
                                          int(prot.value) if prot is not None else 0,
-                                         int(user.value) if user is not None else 0))  # fmt: skip
+                                         int(user.value) if user is not None else 0,
+                                         int(cache.value) if cache is not None else None))  # fmt: skip

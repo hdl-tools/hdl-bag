@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from hdl_bag.gen import MissingRtl, generate
+from hdl_bag.gen import generate
 from hdl_bag.gen.decode import decode_tables, fabric_offset
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.render import GenerateError, lit
@@ -334,9 +334,4 @@ def test_multi_tie_and_golden_byte_identical_across_processes(tmp_path: Path) ->
                          for p in out.rglob("*") if p.is_file()})  # fmt: skip
         trees.append(tree)
     assert trees[0] == trees[1] == trees[2]
-    assert "golden/rtl/pkg/demo_ss_bus_pkg.sv" in trees[0]  # written before MissingRtl
-
-
-def test_golden_still_stops_on_missing_rtl(tmp_path: Path) -> None:
-    with pytest.raises(MissingRtl):
-        generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
+    assert "golden/rtl/demo_ss_bus_top.sv" in trees[0]

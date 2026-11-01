@@ -523,7 +523,11 @@ def render_harness(netlist: Netlist, header: str) -> str:
         params = [f".AddrWidth({bus.addr_width})", f".DataWidth({bus.data_width})"]
         if bus.protocol == Protocol.AXI4:
             params += [f".IdWidth({max(bus.id_width, 1)})", f".UserWidth({max(bus.user_width, 1)})"]
-        body.append(f"  {interface_name(spec, bus)} #({', '.join(params)}) {ifc} ();")
+        line = f"  {interface_name(spec, bus)} #({', '.join(params)}) {ifc} ();"
+        if len(line) > 100:  # one parameter per line (the 100-column style limit)
+            inner = ",\n".join(f"      {p}" for p in params)
+            line = f"  {interface_name(spec, bus)} #(\n{inner}\n  ) {ifc} ();"
+        body.append(line)
         for sig in interface_signals(bus.protocol):
             drives_in = towards_slave(sig, bus.is_slave) != bus.is_slave
             into_wrapper = sig in bus.signals and drives_in

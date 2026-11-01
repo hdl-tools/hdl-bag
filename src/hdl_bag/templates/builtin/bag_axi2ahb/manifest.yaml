@@ -3,13 +3,19 @@
 name: bag_axi2ahb
 kind: bridge
 api_version: 1
-description: 'In-house AXI to AHB-Lite: IDs serialized, responses in order, INCR bursts mapped, others split.'
+description: 'In-house AXI4/AXI4-Lite to AHB-Lite: IDs serialized (one transaction at a time, responses in order), INCR bursts mapped to AHB undefined-length INCR (restarted at 1 KB boundaries), WRAP and FIXED bursts split into single transfers, writes with partial strobes split into byte writes. Inside the bridge (D10) PULP axi_dw_converter, axi_fifo (FIFO depth) and axi_cdc come first. HRESP ERROR returns as SLVERR; exclusive accesses get OKAY (the exclusive fails); USER is not carried. A read stays open until all its beats are issued (4-entry R buffer), so the master must not make RREADY wait for a later write. PULP limits when the widths differ: WRAP bursts and non-modifiable bursts that need splitting get SLVERR.'
 upstream:
   - AXI4
   - AXI4-Lite
 downstream:
   - AHB-Lite
 sources:
+  - bender:axi:axi_cdc
+  - bender:axi:axi_dw_converter
+  - bender:axi:axi_fifo
   - rtl/inhouse/bag_axi2ahb.sv
-licence: Apache-2.0
+  - rtl/inhouse/bag_axi2ahb_core.sv
+  - rtl/inhouse/bag_axi_from_flat.sv
+licence: SHL-0.51
 qualification: unqualified
+rtl: true

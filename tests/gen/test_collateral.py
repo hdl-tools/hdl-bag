@@ -2,7 +2,6 @@
 # Copyright 2026 The hdl-bag Authors
 """C header and documents checked against the IR (parsed back, not compared to the code)."""
 
-import contextlib
 import os
 import re
 import shutil
@@ -13,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from hdl_bag import __version__
-from hdl_bag.gen import MissingRtl, generate
+from hdl_bag.gen import generate
 from hdl_bag.gen.collateral import c_header
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import Spec, load
@@ -30,8 +29,7 @@ FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_ma
 
 
 def _generate(spec: Spec, src: Path, root: Path) -> Path:
-    with contextlib.suppress(MissingRtl):  # the collateral is written before RTL stops
-        generate(spec, root, src.parent)
+    generate(spec, root, src.parent)
     return root
 
 

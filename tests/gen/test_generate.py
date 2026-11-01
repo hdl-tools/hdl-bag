@@ -15,7 +15,7 @@ from hdl_bag.cli import main
 from hdl_bag.gen import MANIFEST, MissingRtl, generate, load_outputs, sources
 from hdl_bag.gen.decode import decode_tables
 from hdl_bag.gen.render import camel, ir_sha256, lit
-from hdl_bag.ir import load
+from hdl_bag.ir import Spec, dump, load
 
 TESTS = Path(__file__).parents[1]
 CONFIG = TESTS / "configs" / "p2" / "ahb2apb_pt.ir.yaml"
@@ -84,12 +84,26 @@ def test_byte_identical_across_processes(tmp_path: Path) -> None:
     assert trees[0] == trees[1]
 
 
-def test_golden_writes_collateral_then_stops(tmp_path: Path) -> None:
+def test_golden_generates_fully(tmp_path: Path) -> None:
+    # Phase 3 PR 6 gave the last templates demo_ss uses (the in-house bridges) RTL.
+    out = generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
+    assert out.top == "demo_ss_bus_top"
+    assert json.loads((tmp_path / MANIFEST).read_text())["top"] == "demo_ss_bus_top"
+    assert load_outputs(tmp_path).files == out.files
+
+
+def _without_rtl() -> Spec:
+    """demo_ss with aon_apb on bag_external, the one template still without RTL."""
+    spec = load(GOLDEN_IR)
+    fabrics = tuple(f.model_copy(update={"template": "bag_external"}) if f.name == "aon_apb"
+                    else f for f in spec.fabrics)  # fmt: skip
+    return spec.model_copy(update={"fabrics": fabrics})
+
+
+def test_missing_rtl_writes_collateral_then_stops(tmp_path: Path) -> None:
     with pytest.raises(MissingRtl) as exc:
-        generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
-    # Phase 3 PRs 3-5 gave the AXI fabrics, adapters and PULP bridges RTL; PR 6 adds the
-    # in-house bridges.
-    assert exc.value.templates == ["bag_ahb2axi"]
+        generate(_without_rtl(), tmp_path, GOLDEN_IR.parent)
+    assert exc.value.templates == ["bag_external"]  # Phase 3 PR 7 wires it
     assert (tmp_path / "rtl/pkg/demo_ss_bus_pkg.sv").is_file()
     assert json.loads((tmp_path / MANIFEST).read_text())["top"] is None
     with pytest.raises(ValueError, match="no RTL was generated"):
@@ -137,6 +151,22 @@ def test_cli_generate_and_missing_rtl(tmp_path: Path) -> None:
     ok = runner.invoke(main, ["generate", str(CONFIG), "-o", str(tmp_path / "ok")])
     assert ok.exit_code == 0, ok.output
     assert "top demo_ss_bus_top" in ok.output
-    bad = runner.invoke(main, ["generate", str(GOLDEN_IR), "-o", str(tmp_path / "bad")])
+    dump(_without_rtl(), tmp_path / "external.ir.yaml")
+    for extra in GOLDEN_IR.parent.glob("*.txt"):  # files the IR names (header)
+        (tmp_path / extra.name).write_bytes(extra.read_bytes())
+    bad = runner.invoke(main, ["generate", str(tmp_path / "external.ir.yaml"), "-o",
+                               str(tmp_path / "bad")])  # fmt: skip
     assert bad.exit_code == 1
-    assert "no RTL yet for template(s): bag_ahb2axi" in bad.output
+    assert "no RTL yet for template(s): bag_external" in bad.output
+
+
+def test_generated_lines_fit_100_columns(tmp_path: Path) -> None:
+    """The sv-interface flat harness wraps an interface instance that would overflow (a long
+    project name with AXI4 ID/USER parameters)."""
+    src = TESTS / "configs" / "p3" / "bridges_inhouse_cdc.ir.yaml"
+    generate(load(src), tmp_path, src.parent, style="sv-interface")
+    skip = {"vendor", "inhouse"}  # copied RTL, linted on its own
+    files = [p for p in (tmp_path / "rtl").rglob("*.sv") if not skip & set(p.parts)]
+    long = [(p.name, n) for p in files
+            for n, line in enumerate(p.read_text().splitlines(), 1) if len(line) > 100]  # fmt: skip
+    assert not long

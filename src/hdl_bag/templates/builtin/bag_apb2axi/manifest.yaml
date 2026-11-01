@@ -3,7 +3,7 @@
 name: bag_apb2axi
 kind: bridge
 api_version: 1
-description: 'In-house APB to AXI: single-beat transfers only.'
+description: 'In-house APB to AXI4/AXI4-Lite: single-beat transfers only (one narrow AXI transfer of the APB width, ID 0, AxCACHE 0b0011), PSTRB to WSTRB; SLVERR/DECERR return as PSLVERR. One transfer at a time through a 4-phase handshake (a bag_sync CDC when the domains differ); FIFO depth has no effect.'
 upstream:
   - APB4
   - APB3
@@ -12,6 +12,10 @@ downstream:
   - AXI4-Lite
 down_id_width: 1
 sources:
+  - rtl/inhouse/bag_sync.sv
+  - rtl/inhouse/bag_hs_apb_slv.sv
+  - rtl/inhouse/bag_hs_axi_mst.sv
   - rtl/inhouse/bag_apb2axi.sv
 licence: Apache-2.0
 qualification: unqualified
+rtl: true
