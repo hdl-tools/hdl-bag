@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: apb3_wide
   revision: p2
@@ -336,6 +336,7 @@ port_options:
     lock: n/a
     pstrb: n/a
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: p2
     region: regs
@@ -443,4 +444,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb3_wide.xlsx
-  sha256: c82f84dc17788a01e95663da81ad474b290a2f4e4e524418b70d7f8a683223dd
+  sha256: 38005b1eba8ec33aa5cd92aaf782ab792f0a5f018cf0e0ad0ccdfbd994253ade

@@ -18,11 +18,11 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.decode import bridge_offset, decode_tables, fabric_offset
-from hdl_bag.gen.external import opaque_module, opaque_ports
+from hdl_bag.gen.external import exposed_name, opaque_module, opaque_ports
 from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, plan, problems
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, camel, environment, lit
-from hdl_bag.ir.model import Spec
+from hdl_bag.ir.model import Spec, UserPort
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import (
     PROTO_TOKEN,
@@ -219,6 +219,21 @@ class InstanceContext:
     def clk(self, domain: str) -> str:
         return self.scope.clock(domain)
 
+    def user(self, u: UserPort) -> str:
+        """The connection of user port U of an opaque instance (D41)."""
+        if u.connection == "expose":
+            return exposed_name(u)  # a port of this module, routed from the top
+        if u.connection == "extra-input":
+            assert u.target is not None
+            self.scope.inputs_used.add(u.target)
+            return u.target
+        if u.connection == "tie":
+            return lit(u.width, u.tie or 0)
+        if u.connection == "open":
+            return self.scope.sink(f"{self.inst.rtl_name}_{u.port}", u.width)
+        assert u.target is not None
+        return self.clk(u.target) if u.connection == "clock" else self.rst(u.target)
+
     def rst(self, domain: str) -> str:
         return self.scope.reset(domain)
 
@@ -256,6 +271,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         lit=lit,
         opaque_module=lambda f: opaque_module(scope.spec, f),
         opaque_ports=lambda i: opaque_ports(scope.spec, i),
+        user_ports=lambda i: [u for u in scope.spec.user_ports if u.instance == i.name],
     )
 
 
@@ -285,6 +301,11 @@ def _port_decls(scope: Scope, netlist: Netlist) -> list[str]:
         else:
             modport = "to_slave" if bus.is_slave else "to_master"
             rows.append((f"{interface_name(spec, bus)}.{modport}", 0, scope.port_prefix(bus)))
+    exposed = [u for u in spec.user_ports if u.connection == "expose"]
+    for k, u in enumerate(exposed):
+        if k == 0:
+            comments[len(rows)] = "user ports of user-supplied fabrics (User_Ports)"
+        rows.append((u.direction, u.width, exposed_name(u)))
     out = []
     scope.reserved.update(name for _, _, name in rows)
     for n, (direction, w, name) in enumerate(rows):
@@ -355,6 +376,15 @@ class _Sub:
 
     clocks: list[tuple[str, str]]  # (domain, clock port)
     inputs: list[str]
+    user: list[tuple[str, int, str]]  # exposed user ports below: (direction, width, name)
+
+
+def _exposed_below(spec: Spec, p: Plan, wrapper: str) -> list[tuple[str, int, str]]:
+    """Exposed user ports (D41) of opaque instances in WRAPPER's subtree, as ports."""
+    homes = {i.name: i.wrapper for w in p.wrappers() for i in p.instances[w]}
+    return [(u.direction, u.width, exposed_name(u)) for u in spec.user_ports
+            if u.connection == "expose" and u.instance in homes
+            and wrapper in p.path_up(homes[u.instance])]  # fmt: skip
 
 
 def _sub_rows(scope: Scope, sub: _Sub, crossings: list[Boundary]) -> list[str]:
@@ -363,6 +393,7 @@ def _sub_rows(scope: Scope, sub: _Sub, crossings: list[Boundary]) -> list[str]:
     for domain, clock in sub.clocks:
         rows += [("input", 1, clock), ("input", 1, reset_net(domain))]
     rows += [("input", 1, x) for x in sub.inputs]
+    rows += sub.user
     for b in crossings:
         comments[len(rows)] = f"{b.bus.name}: {b.bus.protocol}"
         rows += [(b.direction(s), scope.width(b.bus, s), boundary_port(scope.spec, b.bus, s))
@@ -377,6 +408,7 @@ def _instantiate_child(parent: Scope, name: str, sub: _Sub, crossings: list[Boun
     for x in sub.inputs:
         parent.inputs_used.add(x)
         conns.append((x, x))
+    conns += [(name, name) for _, _, name in sub.user]
     for b in crossings:
         conns += [(boundary_port(parent.spec, b.bus, s), parent.ref(b.bus, s)) for s in b.signals()]
     lines = [f"  // sub-wrapper {name}", f"  {name} u_{name} ("]
@@ -416,6 +448,7 @@ def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str,
             scope = Scope(spec, "flat", {}, boundary={b.bus.name: b for b in p.boundaries[w]})
             scope.reserved |= fixed | {boundary_port(spec, b.bus, s)
                                        for b in p.boundaries[w] for s in b.signals()}  # fmt: skip
+            scope.reserved |= {name for _, _, name in _exposed_below(spec, p, w)}
         scopes[w] = scope
     bodies = {w: [render_instance(scopes[w], i) for i in p.instances[w]] for w in p.wrappers()}
 
@@ -429,6 +462,7 @@ def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str,
             subs[w] = _Sub(
                 sorted((d, clock_of[d]) for d in scope.domains),
                 [x for x in spec.wrapper.extra_inputs if x in scope.inputs_used],
+                _exposed_below(spec, p, w),
             )
             ports = _sub_rows(scope, subs[w], p.boundaries[w])
             modules.append((w, _module(w, header, ports, scope, [*children, *bodies[w]])))
@@ -518,6 +552,7 @@ def render_harness(netlist: Netlist, header: str) -> str:
     conns = [c.name for c in sorted(spec.clocks, key=lambda c: c.name)]
     conns += [r.name for r in sorted(spec.resets, key=lambda r: r.name)]
     conns += list(spec.wrapper.extra_inputs)
+    conns += [exposed_name(u) for u in spec.user_ports if u.connection == "expose"]
     for bus in netlist.ports:
         if bus.name not in external:
             continue

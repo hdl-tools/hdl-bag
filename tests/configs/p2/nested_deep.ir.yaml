@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: nested_deep
   revision: p2
@@ -339,6 +339,7 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: tcm
     region: mem
@@ -451,4 +452,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: nested_deep.xlsx
-  sha256: e576c4a969123a5d85edd2183a4f250f3b77d6a85709dfc8f4a44bffcab6194e
+  sha256: 0a0af187b32744934c2bb8b5c3deaa9e67693c571f5e504e97dc9b1d783e7fb9

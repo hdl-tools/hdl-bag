@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: demo_ss
   revision: r4
@@ -234,6 +234,7 @@ port_options:
     lock: n/a
     pstrb: tie-default
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: itcm0
     region: mem

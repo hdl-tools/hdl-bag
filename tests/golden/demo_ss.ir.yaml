@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: demo_ss
   revision: r4
@@ -942,6 +942,7 @@ port_options:
     lock: n/a
     pstrb: tie-default
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: itcm0
     region: mem
@@ -1221,4 +1222,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: demo_ss.xlsx
-  sha256: 5e51f2be4d3fa3b402dc9eae25c79ff29f61943476e76fae3476478267220a53
+  sha256: daa49f6e4c1afde33891de0dcabd99921c01f2e71fe3110d8427ee8d976d4c5a

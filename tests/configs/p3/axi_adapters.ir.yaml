@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axi_adapters
   revision: p3
@@ -465,6 +465,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: sram
     region: mem
@@ -604,4 +605,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_adapters.xlsx
-  sha256: b906692d7a65a49cde314a434cff0c736231a8c8a26b0af7c64629c0c38b9f25
+  sha256: bb6ee28958d03c085fbdb98c280c1643ffc8d80ab983ecf2663f766ed2b28723

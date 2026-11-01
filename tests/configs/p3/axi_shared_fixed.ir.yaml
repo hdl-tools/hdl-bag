@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axi_shared_fixed
   revision: p3
@@ -233,6 +233,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: s0
     region: regs
@@ -296,4 +297,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_shared_fixed.xlsx
-  sha256: c920a258cb70fb032d7bab0f43e53feba84fbca4bd026e442f12be7e2169a70c
+  sha256: 2f4f58bcb150d2432a47257ee6e786d794f57b8c45e9b0061cde9c5d462374d2

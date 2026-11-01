@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: multi
   revision: p2
@@ -458,6 +458,7 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: ram
     region: mem
@@ -583,4 +584,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: multi.xlsx
-  sha256: 13026f98f4f2e462b6da9ee9485e53e2a7b1a9711c2925cecf4fcd34bc622563
+  sha256: 52c54303009ab6e6ce41ab53d5f7e532b68c85194c16f33382ccf6218fe60d9f

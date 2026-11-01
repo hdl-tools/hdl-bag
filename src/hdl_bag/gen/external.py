@@ -12,6 +12,10 @@ a generated fabric would take, and the user supplies that module's RTL. The port
   fabric is the slave end, on a slave's attachment the master end. The widths are those
   of the bus at the fabric (after the port's adapters: protocol, width, CDC, ID, ...).
 
+* Then the user ports declared on User_Ports (D41), named as declared and connected as
+  declared: exposed at the top as <fabric>_<port>, an extra input, a constant, a clock,
+  a conditioned reset, or left open.
+
 BAG also writes a stub, ``rtl/ext/<module>.sv``, with the same name and ports (outputs
 tied to zero, inputs unused) so the generated design lints and elaborates; replace that
 file (or its file-list entry) with the fabric's RTL.
@@ -20,7 +24,7 @@ file (or its file-list entry) with the fabric's RTL.
 from dataclasses import dataclass
 
 from hdl_bag.gen.netlist import Bus, Instance
-from hdl_bag.ir.model import Fabric, Spec
+from hdl_bag.ir.model import Fabric, Spec, UserPort
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, signal_width, towards_slave
 
@@ -33,6 +37,11 @@ class OpaquePort:
     direction: str  # "input" / "output", as the fabric sees it
     width: int
     port: str  # the attached master, slave or bridge
+
+
+def exposed_name(u: UserPort) -> str:
+    """Top-level (and sub-wrapper) port of an exposed user port: <instance>_<port>."""
+    return f"{u.instance}_{u.port}"
 
 
 def opaque_module(spec: Spec, fabric: Fabric) -> str:
@@ -81,12 +90,18 @@ def render_stub(spec: Spec, inst: Instance, header: str) -> str:
             rows.append(f"    // {p.port}: {p.bus.protocol} {role} attachment")
             last = p.port
         rows.append(_decl(p.direction, p.width, p.name))
+    users = [u for u in spec.user_ports if u.instance == fab.name]
+    if users:
+        rows.append("    // user ports (User_Ports)")
+        rows += [_decl(u.direction, u.width, u.port) for u in users]
     decls = [r for r in rows if not r.lstrip().startswith("//")]
     for r in rows:
         sep = "," if not r.lstrip().startswith("//") and r is not decls[-1] else ""
         lines.append(r + sep)
     inputs = ["clk_i", "rst_ni", *(p.name for p in ports if p.direction == "input")]
+    inputs += [u.port for u in users if u.direction == "input"]
     body = [f"  assign {p.name} = '0;" for p in ports if p.direction == "output"]
+    body += [f"  assign {u.port} = '0;" for u in users if u.direction == "output"]
     body += ["", "  logic unused;", "  assign unused = ^{"]
     body += [f"      {n}{',' if k < len(inputs) - 1 else ''}" for k, n in enumerate(inputs)]
     body += ["  };"]

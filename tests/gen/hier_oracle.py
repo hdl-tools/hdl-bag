@@ -178,6 +178,25 @@ def check(spec: Spec, rtl: Path) -> list[str]:
                 local = f"{name}_{s}"
             nodes[(name, s)].append((lca, local))
 
+    # Exposed user ports of user-supplied fabrics (D41): a top-level port <inst>_<port>,
+    # the same port on every sub-wrapper from the instance's home up, and one net down to
+    # the instance's pin.
+    homes = {p.instance: (p.wrapper, p.rtl_name) for p in spec.hierarchy.placement}
+    for u in spec.user_ports:
+        if u.connection != "expose":
+            continue
+        name = f"{u.instance}_{u.port}"
+        home, rtl_name = homes.get(u.instance, (top, f"u_{u.instance}"))
+        for w in up(home)[:-1]:
+            expected[w][name] = (u.direction, u.width)
+        nodes[(f"user {u.instance}", u.port)] = [(w, name) for w in up(home)]
+        # Leaf instances pad pin names into a column: ".irq_o    (noc_irq_o)".
+        block = re.search(rf"^  \w+ {rtl_name} \((.*?)\n  \);", mods[home].body, re.M | re.S)
+        pins = dict(re.findall(r"\.(\w+)\s*\((.+?)\)", block[1])) if block else {}
+        pin = pins.get(u.port)
+        if pin != name:
+            errs.append(f"{home}.{rtl_name}.{u.port} is connected to {pin}, expected {name}")
+
     fixed = [c.name for c in spec.clocks] + [f"bag_rst_{c.domain}_n" for c in spec.clocks]
     fixed += list(spec.wrapper.extra_inputs)
 

@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: apb4_rules
   revision: p2
@@ -213,6 +213,7 @@ port_options:
     lock: n/a
     pstrb: tie-default
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: ro0
     region: regs
@@ -287,4 +288,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_rules.xlsx
-  sha256: 69625ed026df26ff36d3aa1a5e7a7f31534bef5561de58f3177ec47fa60a0af8
+  sha256: 514d7a923c98f0d1bf98d1d2175b0c1b1a873f067c20c5e4ca0688f1b0fee060
