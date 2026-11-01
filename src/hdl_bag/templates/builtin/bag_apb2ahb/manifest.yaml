@@ -3,13 +3,16 @@
 name: bag_apb2ahb
 kind: bridge
 api_version: 1
-description: 'In-house APB to AHB-Lite: single-beat transfers only.'
+description: 'In-house APB to AHB-Lite: single-beat transfers only (one AHB transfer of the APB width; AHB-Lite has no write strobes, so a partial PSTRB write becomes one byte write per set strobe); HRESP ERROR returns as PSLVERR. One transfer at a time through a 4-phase handshake (a bag_sync CDC when the domains differ); FIFO depth has no effect.'
 upstream:
   - APB4
   - APB3
 downstream:
   - AHB-Lite
 sources:
+  - rtl/inhouse/bag_sync.sv
+  - rtl/inhouse/bag_hs_apb_slv.sv
   - rtl/inhouse/bag_apb2ahb.sv
 licence: Apache-2.0
 qualification: unqualified
+rtl: true

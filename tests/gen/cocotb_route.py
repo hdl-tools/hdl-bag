@@ -136,23 +136,59 @@ def _tie(spec: Spec, port: str, sig: str) -> int:
     return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
 
 
+def _attributes(m: Any, prot: int, nonsec: bool,
+                bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
+    """(privileged, non-secure, instruction, AxCACHE[1:0]) of an access as it leaves the last
+    bridge: each bridge maps them to its downstream protocol."""
+    templates = {b.name: b.template for b in SPEC.bridges}
+    downstream = {b.name: next(f.protocol for f in SPEC.fabrics if f.name == b.downstream)
+                  for b in SPEC.bridges}  # fmt: skip
+
+    def from_ahb(h: int, ns: int) -> tuple[int, int, int, int]:
+        return h >> 1 & 1, ns, 1 - (h & 1), h >> 2 & 3
+
+    def from_prot(p: int, cache: int) -> tuple[int, int, int, int]:
+        return p & 1, p >> 1 & 1, p >> 2 & 1, cache
+
+    tied = prot_tied(SPEC, m.name)
+    if m.protocol == "AHB-Lite":
+        attrs = from_ahb(_tie(SPEC, m.name, "hprot") if tied else prot, 1 if tied else int(nonsec))
+    elif m.protocol == "APB3":  # no PPROT: a bridge takes 3'b010 (non-secure, D28)
+        attrs = from_prot(0b010, 0b11)
+    else:  # AXI masters leave AxCACHE at 0b0011 (cocotbext-axi; the tie default)
+        sig = "awprot" if m.protocol in AXI else "pprot"
+        attrs = from_prot(_tie(SPEC, m.name, sig) if tied else prot, 0b11)
+    for b in bridges:
+        priv, ns, instr, cache = attrs
+        cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
+        if downstream[b] == "AXI4-Lite":
+            cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
+        attrs = (priv, ns, instr, cache)
+        if prot_tied(SPEC, b):  # the bridge's downstream end has its PROT tied
+            if downstream[b] == "AHB-Lite":
+                attrs = from_ahb(_tie(SPEC, b, "hprot"), 1)
+            else:  # a PROT tie leaves the cache attributes alone
+                tie = _tie(SPEC, b, "awprot" if downstream[b] in AXI else "pprot")
+                attrs = from_prot(tie, attrs[3])
+    return attrs
+
+
 def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,
                    bridges: tuple[str, ...]) -> int | None:  # fmt: skip
-    """PROT the slave should log (AHB: HPROT | HNONSEC << 4, APB: PPROT); None: not seen."""
+    """PROT the slave should log (AXI: AxPROT, AHB: HPROT | HNONSEC << 4, APB: PPROT); None:
+    not seen."""
     s = next(x for x in SPEC.slaves if x.name == slave)
     if prot_tied(SPEC, slave) or s.protocol == "APB3":
         return None  # the slave has no PROT signals
-    if m.protocol in AXI and s.protocol in AXI and not bridges:
-        return _tie(SPEC, m.name, "awprot") if prot_tied(SPEC, m.name) else prot
-    if m.protocol == "AHB-Lite":
-        hprot = _tie(SPEC, m.name, "hprot") if prot_tied(SPEC, m.name) else prot
-        ns = 1 if prot_tied(SPEC, m.name) else int(nonsec)
-        if not bridges:
-            return hprot | ns << 4
-        if prot_tied(SPEC, bridges[-1]):
-            return _tie(SPEC, bridges[-1], "pprot")
-        return (1 - (hprot & 1)) << 2 | ns << 1 | (hprot >> 1 & 1)  # bag_ahb2apb PPROT
-    return _tie(SPEC, m.name, "pprot") if prot_tied(SPEC, m.name) else prot
+    priv, ns, instr, cache = _attributes(m, prot, nonsec, bridges)
+    if s.protocol == "AHB-Lite":
+        return cache << 2 | priv << 1 | (1 - instr) | ns << 4
+    return priv | ns << 1 | instr << 2
+
+
+def _expected_cache(m: Any, prot: int, nonsec: bool, bridges: tuple[str, ...]) -> int:
+    """AxCACHE an AXI4 slave should log ({2'b00, modifiable, bufferable})."""
+    return _attributes(m, prot, nonsec, bridges)[3]
 
 
 async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data: int,
@@ -178,7 +214,7 @@ async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data
 
 
 # A default-slave master's own errors (D32) come from its guard, which answers DECERR.
-AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3, "PSLVERR": 2}
+AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3, "PSLVERR": 2, "HRESP_ERROR": 2}
 
 
 def _to_lite(m: Any) -> bool:
@@ -188,21 +224,20 @@ def _to_lite(m: Any) -> bool:
     return bool(m.protocol == "AXI4" and fabric.protocol == "AXI4-Lite")
 
 
-# Bridges whose response translation the model knows: PULP axi_lite_to_apb turns PSLVERR
-# into SLVERR, and their axi_to_axi_lite reports every write error as SLVERR.
-PULP_BRIDGES = ("bag_axi2apb", "bag_axi2axil")
-
-
 def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
-    """The exact AXI response an AXI master must get; None where a bridge without a model
-    of its response translation is crossed."""
-    templates = {b.name: b.template for b in SPEC.bridges}
-    if m.protocol not in AXI or any(templates[b] not in PULP_BRIDGES for b in exp.bridges):
+    """The exact AXI response an AXI master must get (None for other masters). An error from
+    beyond a bridge into AHB or APB is SLVERR (those protocols have one error response);
+    PULP axi_to_axi_lite (AXI4 onto AXI4-Lite) reports every write error as SLVERR."""
+    if m.protocol not in AXI:
         return None
     if exp.slave is None:
         code = 0 if exp.masked else AXI_RESP[exp.miss]
     else:
         code = 2 if exp.slave_error else 0
+    protocols = {f.name: f.protocol for f in SPEC.fabrics}
+    bridges = {b.name: b for b in SPEC.bridges}
+    if any(protocols[bridges[b].downstream] not in AXI for b in exp.bridges):
+        return 2 if code else 0
     through_lite = _to_lite(m) or bool(exp.bridges)
     return 2 if code and write and through_lite else code
 
@@ -287,6 +322,12 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             want = _expected_prot(m, exp.slave, prot, exp.nonsec, exp.bridges)
                             assert want is None or seen.prot == want, (
                                 f"{where}: {exp.slave} saw PROT {seen.prot:#b}, expected {want:#b}"
+                            )
+                            cache = getattr(seen, "cache", None)  # AXI4 slaves only
+                            want_cache = _expected_cache(m, prot, exp.nonsec, exp.bridges)
+                            assert cache is None or cache == want_cache, (
+                                f"{where}: {exp.slave} saw AxCACHE {cache:#b}, "
+                                f"expected {want_cache:#b}"
                             )
                             errors += exp.slave_error
                             if write and not exp.slave_error:

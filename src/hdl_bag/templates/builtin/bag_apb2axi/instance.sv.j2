@@ -1,0 +1,71 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_apb2axi. Context: hdl_bag.gen.wrapper.render_instance. "up" is the
+    bridge's slave port on the upstream fabric, "down" its master port downstream.
+    An APB3 upstream has no PPROT (tied non-secure, D28) and no PSTRB (all ones).
+    An AXI4-Lite downstream leaves the AXI4-only outputs unconnected. -#}
+{% set up = inst.up %}
+{% set dn = inst.down %}
+  // {{ bridge.name }}: {{ bridge.upstream }} ({{ up.protocol }}) -> {{ bridge.downstream }} ({{ dn.protocol }})
+  bag_apb2axi #(
+      .PAddrWidth({{ up.addr_width }}),
+      .PDataWidth({{ up.data_width }}),
+      .AAddrWidth({{ dn.addr_width }}),
+      .ADataWidth({{ dn.data_width }}),
+      .AddrOffset({{ lit(up.addr_width, bridge_offset(bridge.name)) }}),
+      .AsyncCdc  (1'b{{ 1 if bridge.cdc else 0 }})
+  ) {{ name }} (
+      .pclk_i      ({{ ctx.clk(up.domain) }}),
+      .prst_ni     ({{ ctx.rst(up.domain) }}),
+      .psel_i      ({{ ctx.i(up, "psel", 0, 1) }}),
+      .penable_i   ({{ ctx.i(up, "penable", 0, 1) }}),
+      .pwrite_i    ({{ ctx.i(up, "pwrite", 0, 1) }}),
+      .paddr_i     ({{ ctx.i(up, "paddr", 0, up.addr_width) }}),
+      .pprot_i     ({{ ctx.i(up, "pprot", 2, 3) }}),
+      .pwdata_i    ({{ ctx.i(up, "pwdata", 0, up.data_width) }}),
+      .pstrb_i     ({{ ctx.i(up, "pstrb", 2 ** (up.data_width // 8) - 1, up.data_width // 8) }}),
+      .pready_o    ({{ ctx.o(up, "pready", 1) }}),
+      .prdata_o    ({{ ctx.o(up, "prdata", up.data_width) }}),
+      .pslverr_o   ({{ ctx.o(up, "pslverr", 1) }}),
+      .aclk_i      ({{ ctx.clk(dn.domain) }}),
+      .arst_ni     ({{ ctx.rst(dn.domain) }}),
+      .m_awid_o    ({{ ctx.o(dn, "awid", 1) }}),
+      .m_awaddr_o  ({{ ctx.o(dn, "awaddr", dn.addr_width) }}),
+      .m_awlen_o   ({{ ctx.o(dn, "awlen", 8) }}),
+      .m_awsize_o  ({{ ctx.o(dn, "awsize", 3) }}),
+      .m_awburst_o ({{ ctx.o(dn, "awburst", 2) }}),
+      .m_awlock_o  ({{ ctx.o(dn, "awlock", 1) }}),
+      .m_awcache_o ({{ ctx.o(dn, "awcache", 4) }}),
+      .m_awprot_o  ({{ ctx.o(dn, "awprot", 3) }}),
+      .m_awqos_o   ({{ ctx.o(dn, "awqos", 4) }}),
+      .m_awregion_o({{ ctx.o(dn, "awregion", 4) }}),
+      .m_awvalid_o ({{ ctx.o(dn, "awvalid", 1) }}),
+      .m_awready_i ({{ ctx.i(dn, "awready", 0, 1) }}),
+      .m_wdata_o   ({{ ctx.o(dn, "wdata", dn.data_width) }}),
+      .m_wstrb_o   ({{ ctx.o(dn, "wstrb", dn.data_width // 8) }}),
+      .m_wlast_o   ({{ ctx.o(dn, "wlast", 1) }}),
+      .m_wvalid_o  ({{ ctx.o(dn, "wvalid", 1) }}),
+      .m_wready_i  ({{ ctx.i(dn, "wready", 0, 1) }}),
+      .m_bid_i     ({{ ctx.i(dn, "bid", 0, 1) }}),
+      .m_bresp_i   ({{ ctx.i(dn, "bresp", 0, 2) }}),
+      .m_bvalid_i  ({{ ctx.i(dn, "bvalid", 0, 1) }}),
+      .m_bready_o  ({{ ctx.o(dn, "bready", 1) }}),
+      .m_arid_o    ({{ ctx.o(dn, "arid", 1) }}),
+      .m_araddr_o  ({{ ctx.o(dn, "araddr", dn.addr_width) }}),
+      .m_arlen_o   ({{ ctx.o(dn, "arlen", 8) }}),
+      .m_arsize_o  ({{ ctx.o(dn, "arsize", 3) }}),
+      .m_arburst_o ({{ ctx.o(dn, "arburst", 2) }}),
+      .m_arlock_o  ({{ ctx.o(dn, "arlock", 1) }}),
+      .m_arcache_o ({{ ctx.o(dn, "arcache", 4) }}),
+      .m_arprot_o  ({{ ctx.o(dn, "arprot", 3) }}),
+      .m_arqos_o   ({{ ctx.o(dn, "arqos", 4) }}),
+      .m_arregion_o({{ ctx.o(dn, "arregion", 4) }}),
+      .m_arvalid_o ({{ ctx.o(dn, "arvalid", 1) }}),
+      .m_arready_i ({{ ctx.i(dn, "arready", 0, 1) }}),
+      .m_rid_i     ({{ ctx.i(dn, "rid", 0, 1) }}),
+      .m_rdata_i   ({{ ctx.i(dn, "rdata", 0, dn.data_width) }}),
+      .m_rresp_i   ({{ ctx.i(dn, "rresp", 0, 2) }}),
+      .m_rlast_i   ({{ ctx.i(dn, "rlast", 1, 1) }}),
+      .m_rvalid_i  ({{ ctx.i(dn, "rvalid", 0, 1) }}),
+      .m_rready_o  ({{ ctx.o(dn, "rready", 1) }})
+  );

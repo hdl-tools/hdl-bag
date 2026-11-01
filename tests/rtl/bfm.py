@@ -139,6 +139,21 @@ def wrapper_port(
     return Port(dut, 0, sigs, tied or {})
 
 
+async def bridge_clocks(up: Any, up_ns: int, down: Any, down_ns: int, cdc: bool) -> Any:
+    """Start a bridge's clocks; returns the downstream side's clock signal. Without a CDC
+    both sides run from UP; with one, DOWN gets its own clock 3 ns out of phase (so a 1:1
+    ratio still exercises the synchronizers)."""
+    from cocotb.clock import Clock
+    from cocotb.triggers import Timer
+
+    Clock(up, up_ns, unit="ns").start()
+    if not cdc:
+        return up
+    await Timer(3, unit="ns")
+    Clock(down, down_ns, unit="ns").start()
+    return down
+
+
 # ---------------------------------------------------------------------------- APB
 
 
@@ -156,22 +171,30 @@ class ApbMaster:
         for n in ("psel", "penable", "pwrite", "paddr", "pwdata", "pstrb", "pprot"):
             self.p[n] = 0
 
-    async def _xfer(self, addr: int, write: int, data: int, strb: int, prot: int) -> ApbResult:
-        await RisingEdge(self.clk)
+    async def run(self, ops: list[tuple[int, int, int, int, int]]) -> list[ApbResult]:
+        """Transfers (addr, write, data, strb, prot) back to back: each SETUP follows the
+        previous ACCESS directly (PSEL stays high), as APB allows."""
         p = self.p
-        p["paddr"], p["pwrite"], p["pwdata"], p["pstrb"], p["pprot"] = addr, write, data, strb, prot
-        p["psel"], p["penable"] = 1, 0
+        results = []
         await RisingEdge(self.clk)
-        p["penable"] = 1
-        while True:
-            await ReadOnly()
-            if p["pready"]:
-                result = ApbResult(p["prdata"], bool(p["pslverr"]))
-                break
+        for addr, write, data, strb, prot in ops:
+            p["paddr"], p["pwrite"], p["pwdata"] = addr, write, data
+            p["pstrb"], p["pprot"] = strb, prot
+            p["psel"], p["penable"] = 1, 0
             await RisingEdge(self.clk)
-        await RisingEdge(self.clk)
+            p["penable"] = 1
+            while True:
+                await ReadOnly()
+                if p["pready"]:
+                    results.append(ApbResult(p["prdata"], bool(p["pslverr"])))
+                    break
+                await RisingEdge(self.clk)
+            await RisingEdge(self.clk)
         p["psel"], p["penable"] = 0, 0
-        return result
+        return results
+
+    async def _xfer(self, addr: int, write: int, data: int, strb: int, prot: int) -> ApbResult:
+        return (await self.run([(addr, write, data, strb, prot)]))[0]
 
     async def write(self, addr: int, data: int, *, strb: int = 0xF, prot: int = 0) -> bool:
         return (await self._xfer(addr, 1, data, strb, prot)).err
@@ -188,6 +211,8 @@ class Access:
     strb: int = 0
     prot: int = 0  # APB: PPROT; AHB: HPROT | HNONSEC << 4
     size: int = 0  # AHB HSIZE
+    trans: int = 0  # AHB HTRANS
+    burst: int = 0  # AHB HBURST
 
 
 @dataclass
@@ -363,7 +388,8 @@ class AhbSlave:
     port: Port
     data_width: int = 32
     max_wait: int = 2
-    err_addrs: set[int] = field(default_factory=set)
+    err_addrs: set[int] = field(default_factory=set)  # by data word
+    err_exact: set[int] = field(default_factory=set)  # transfers at exactly these addresses
     mem: dict[int, int] = field(default_factory=dict)
     log: list[Access] = field(default_factory=list)
     trace: list[tuple[int, int]] | None = None  # shared (slave id, address) order of accesses
@@ -412,12 +438,19 @@ class AhbSlave:
             if p["hready"] and valid:
                 addr = p["haddr"]
                 beat = Access(
-                    addr, bool(p["hwrite"]), 0, 0, p["hprot"] | p["hnonsec"] << 4, p["hsize"]
+                    addr,
+                    bool(p["hwrite"]),
+                    0,
+                    0,
+                    p["hprot"] | p["hnonsec"] << 4,
+                    p["hsize"],
+                    p["htrans"],
+                    p["hburst"],
                 )
                 self.log.append(beat)
                 if self.trace is not None:
                     self.trace.append((self.ident, addr))
-                if (addr & ~(nbytes - 1)) in self.err_addrs:
+                if (addr & ~(nbytes - 1)) in self.err_addrs or addr in self.err_exact:
                     out, err_phase = (0, self._junk(), 1), 1
                 else:
                     waits = random.randint(0, self.max_wait)

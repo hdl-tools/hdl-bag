@@ -1,0 +1,705 @@
+schema: '0.3'
+project:
+  name: bridges_inhouse_cdc
+  revision: p3
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/bridges_inhouse_cdc
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_aon
+    mhz: 100
+    source: top port
+    domain: D_AON
+    reset: rst_aon_n
+  - name: clk_per
+    mhz: 100
+    source: top port
+    domain: D_PER
+    reset: rst_per_n
+  - name: clk_sys
+    mhz: 100
+    source: top port
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_aon_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_AON
+  - name: rst_per_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_PER
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: ahb
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 64
+    addr_width: 24
+    domain: D_PER
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_ahb
+        priority: null
+    slave_ports:
+      - index: 0
+        port: sram
+        priority: null
+      - index: 1
+        port: br_aon
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: sram
+        region: mem
+        base: '0x4000_0000'
+        end: '0x4000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_aon
+        region: win
+        base: '0x4010_0000'
+        end: '0x4010_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_ahb
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: aon
+    protocol: AXI4
+    topology: crossbar
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 2
+    max_slv_trans: 2
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: br_aon
+        priority: null
+    slave_ports:
+      - index: 0
+        port: wdt
+        priority: null
+    id_width:
+      master_side: 1
+      slave_side: 1
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: wdt
+        region: regs
+        base: '0x4010_1000'
+        end: '0x4010_1FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_aon
+        miss: DECERR
+        default_slave: null
+        aliases: []
+  - name: dbg_apb
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 32
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: dbg
+        priority: null
+    slave_ports:
+      - index: 0
+        port: br_lite
+        priority: null
+      - index: 1
+        port: br_rom
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: br_lite
+        region: win
+        base: '0x5000_0000'
+        end: '0x5000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_rom
+        region: win
+        base: '0x6000_0000'
+        end: '0x6000_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: dbg
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: lite
+    protocol: AXI4-Lite
+    topology: crossbar
+    data_width: 64
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 2
+    max_slv_trans: 2
+    midpoint: null
+    template: bag_axil_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: br_lite
+        priority: null
+    slave_ports:
+      - index: 0
+        port: pmu
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: pmu
+        region: regs
+        base: '0x5000_0000'
+        end: '0x5000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_lite
+        miss: DECERR
+        default_slave: null
+        aliases: []
+  - name: rom_ahb
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 64
+    addr_width: 32
+    domain: D_PER
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_rom
+        priority: null
+    slave_ports:
+      - index: 0
+        port: rom
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: rom
+        region: mem
+        base: '0x6000_0000'
+        end: '0x6000_FFFF'
+        access: RO
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_rom
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: xbar
+    protocol: AXI4
+    topology: crossbar
+    data_width: 32
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ram
+        priority: null
+      - index: 1
+        port: br_ahb
+        priority: null
+    id_width:
+      master_side: 3
+      slave_side: 3
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 1
+        slave: br_ahb
+        region: win
+        base: '0x4000_0000'
+        end: '0x401F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: ram
+        region: mem
+        base: '0x8000_0000'
+        end: '0x800F_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: cpu
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: AXI4
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: 3
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dbg
+    protocol: APB4
+    fabric: dbg_apb
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_AON
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: pmu
+    protocol: AXI4-Lite
+    fabric: lite
+    data_width: 64
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: ram
+    protocol: AXI4
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: 3
+    id_width_auto: true
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: rom
+    protocol: AHB-Lite
+    fabric: rom_ahb
+    data_width: 64
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: sram
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 64
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: HRESP_ERROR
+    wait_states: 0
+  - name: wdt
+    protocol: AXI4
+    fabric: aon
+    data_width: 32
+    addr_width: 12
+    id_width: 1
+    id_width_auto: true
+    user_width: 0
+    domain: D_AON
+    error_response: SLVERR
+    wait_states: 0
+bridges:
+  - name: br_ahb
+    template: bag_axi2ahb
+    upstream: xbar
+    downstream: ahb
+    window_base: '0x4000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AHB-Lite
+    upstream_width: 32
+    downstream_width: 64
+    cdc: true
+  - name: br_aon
+    template: bag_ahb2axi
+    upstream: ahb
+    downstream: aon
+    window_base: '0x4010_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: AXI4
+    upstream_width: 64
+    downstream_width: 32
+    cdc: true
+  - name: br_lite
+    template: bag_apb2axi
+    upstream: dbg_apb
+    downstream: lite
+    window_base: '0x5000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: APB4
+    downstream_protocol: AXI4-Lite
+    upstream_width: 32
+    downstream_width: 64
+    cdc: true
+  - name: br_rom
+    template: bag_apb2ahb
+    upstream: dbg_apb
+    downstream: rom_ahb
+    window_base: '0x6000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: APB4
+    downstream_protocol: AHB-Lite
+    upstream_width: 32
+    downstream_width: 64
+    cdc: true
+adapters: []
+port_options:
+  - port: br_ahb
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_aon
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_lite
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_rom
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: dbg
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: pmu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: ram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: rom
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: sram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: wdt
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+memory_map:
+  - slave: sram
+    region: mem
+    base: '0x4000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: br_ahb
+    region: win
+    base: '0x4000_0000'
+    size: '0x0020_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: br_aon
+    region: win
+    base: '0x4010_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: wdt
+    region: regs
+    base: '0x4010_1000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: aon
+  - slave: br_lite
+    region: win
+    base: '0x5000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: dbg_apb
+  - slave: pmu
+    region: regs
+    base: '0x5000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: lite
+  - slave: br_rom
+    region: win
+    base: '0x6000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: dbg_apb
+  - slave: rom
+    region: mem
+    base: '0x6000_0000'
+    size: '0x0001_0000'
+    access: RO
+    secure: false
+    fabric: rom_ahb
+  - slave: ram
+    region: mem
+    base: '0x8000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+hierarchy:
+  top: bridges_inhouse_cdc_top
+  wrappers: []
+  placement:
+    - instance: ahb
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_ahb
+    - instance: aon
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_aon
+    - instance: br_ahb
+      kind: bridge
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_br_ahb
+    - instance: br_aon
+      kind: bridge
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_br_aon
+    - instance: br_lite
+      kind: bridge
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_br_lite
+    - instance: br_rom
+      kind: bridge
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_br_rom
+    - instance: dbg_apb
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_dbg_apb
+    - instance: lite
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_lite
+    - instance: rom_ahb
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_rom_ahb
+    - instance: xbar
+      kind: fabric
+      wrapper: bridges_inhouse_cdc_top
+      rtl_name: u_xbar
+wrapper:
+  top: bridges_inhouse_cdc_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: bridges_inhouse_cdc_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br_ahb
+      exposed: false
+      prefix: null
+    - port: br_aon
+      exposed: false
+      prefix: null
+    - port: br_lite
+      exposed: false
+      prefix: null
+    - port: br_rom
+      exposed: false
+      prefix: null
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: dbg
+      exposed: true
+      prefix: null
+    - port: pmu
+      exposed: true
+      prefix: null
+    - port: ram
+      exposed: true
+      prefix: null
+    - port: rom
+      exposed: true
+      prefix: null
+    - port: sram
+      exposed: true
+      prefix: null
+    - port: wdt
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: bridges_inhouse_cdc.xlsx
+  sha256: e18166ccd69ae6fbf98c1110b1355d6495ed370bf2e7db88a6161fc8f2a9297a

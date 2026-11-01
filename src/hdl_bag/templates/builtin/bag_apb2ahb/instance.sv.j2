@@ -1,0 +1,43 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_apb2ahb. Context: hdl_bag.gen.wrapper.render_instance. "up" is the
+    bridge's slave port on the upstream fabric, "down" its master port downstream.
+    An APB3 upstream has no PPROT (tied non-secure, D28) and no PSTRB (all ones). -#}
+{% set up = inst.up %}
+{% set dn = inst.down %}
+  // {{ bridge.name }}: {{ bridge.upstream }} ({{ up.protocol }}) -> {{ bridge.downstream }} ({{ dn.protocol }})
+  bag_apb2ahb #(
+      .PAddrWidth({{ up.addr_width }}),
+      .PDataWidth({{ up.data_width }}),
+      .HAddrWidth({{ dn.addr_width }}),
+      .HDataWidth({{ dn.data_width }}),
+      .AddrOffset({{ lit(up.addr_width, bridge_offset(bridge.name)) }}),
+      .AsyncCdc  (1'b{{ 1 if bridge.cdc else 0 }})
+  ) {{ name }} (
+      .pclk_i     ({{ ctx.clk(up.domain) }}),
+      .prst_ni    ({{ ctx.rst(up.domain) }}),
+      .psel_i     ({{ ctx.i(up, "psel", 0, 1) }}),
+      .penable_i  ({{ ctx.i(up, "penable", 0, 1) }}),
+      .pwrite_i   ({{ ctx.i(up, "pwrite", 0, 1) }}),
+      .paddr_i    ({{ ctx.i(up, "paddr", 0, up.addr_width) }}),
+      .pprot_i    ({{ ctx.i(up, "pprot", 2, 3) }}),
+      .pwdata_i   ({{ ctx.i(up, "pwdata", 0, up.data_width) }}),
+      .pstrb_i    ({{ ctx.i(up, "pstrb", 2 ** (up.data_width // 8) - 1, up.data_width // 8) }}),
+      .pready_o   ({{ ctx.o(up, "pready", 1) }}),
+      .prdata_o   ({{ ctx.o(up, "prdata", up.data_width) }}),
+      .pslverr_o  ({{ ctx.o(up, "pslverr", 1) }}),
+      .hclk_i     ({{ ctx.clk(dn.domain) }}),
+      .hrst_ni    ({{ ctx.rst(dn.domain) }}),
+      .haddr_o    ({{ ctx.o(dn, "haddr", dn.addr_width) }}),
+      .hburst_o   ({{ ctx.o(dn, "hburst", 3) }}),
+      .hmastlock_o({{ ctx.o(dn, "hmastlock", 1) }}),
+      .hprot_o    ({{ ctx.o(dn, "hprot", 4) }}),
+      .hnonsec_o  ({{ ctx.o(dn, "hnonsec", 1) }}),
+      .hsize_o    ({{ ctx.o(dn, "hsize", 3) }}),
+      .htrans_o   ({{ ctx.o(dn, "htrans", 2) }}),
+      .hwdata_o   ({{ ctx.o(dn, "hwdata", dn.data_width) }}),
+      .hwrite_o   ({{ ctx.o(dn, "hwrite", 1) }}),
+      .hrdata_i   ({{ ctx.i(dn, "hrdata", 0, dn.data_width) }}),
+      .hready_i   ({{ ctx.i(dn, "hready", 1, 1) }}),
+      .hresp_i    ({{ ctx.i(dn, "hresp", 0, 1) }})
+  );

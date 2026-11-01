@@ -3,7 +3,7 @@
 name: bag_ahb2axi
 kind: bridge
 api_version: 1
-description: 'In-house AHB-Lite to AXI: one outstanding transfer, AXI ID width 1, HPROT mapped to AxPROT/AxCACHE.'
+description: 'In-house AHB-Lite to AXI4/AXI4-Lite: one outstanding transfer, AXI ID width 1; each AHB beat becomes single-beat AXI transfers (a 64-bit beat into a 32-bit AXI bus becomes two). HPROT maps to AxPROT and AxCACHE; SLVERR/DECERR return as the two-cycle HRESP ERROR. One transfer at a time through a 4-phase handshake (a bag_sync CDC when the domains differ); FIFO depth has no effect.'
 upstream:
   - AHB-Lite
 downstream:
@@ -11,6 +11,9 @@ downstream:
   - AXI4-Lite
 down_id_width: 1
 sources:
+  - rtl/inhouse/bag_sync.sv
+  - rtl/inhouse/bag_hs_axi_mst.sv
   - rtl/inhouse/bag_ahb2axi.sv
 licence: Apache-2.0
 qualification: unqualified
+rtl: true
