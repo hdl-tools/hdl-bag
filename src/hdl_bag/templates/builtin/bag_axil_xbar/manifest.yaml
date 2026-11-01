@@ -3,7 +3,7 @@
 name: bag_axil_xbar
 kind: fabric
 api_version: 1
-description: AXI4-Lite crossbar (PULP axi_lite_xbar). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'AXI4-Lite crossbar: per-master guards (bag_axil_guard) in front of PULP axi_lite_xbar, which steers on the route bits the guards write above the address.'
 protocols:
   - AXI4-Lite
 topologies:
@@ -11,6 +11,14 @@ topologies:
 arbitration:
   - round-robin
 sources:
+  - rtl/inhouse/bag_addr_decode.sv
+  - rtl/inhouse/bag_axil_err_slv.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_guard.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
+  - rtl/inhouse/bag_axil_xbar.sv
   - bender:axi:axi_lite_xbar
+  - bender:axi:axi_lite_demux
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

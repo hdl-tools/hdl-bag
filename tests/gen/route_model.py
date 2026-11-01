@@ -35,6 +35,7 @@ class Outcome:
     slave_error: bool = False  # the slave answers with an error that reaches the master
     nonsec: bool = False  # the non-secure bit as the slave sees it
     bridges: tuple[str, ...] = ()  # bridges crossed on the way
+    miss: str | None = None  # fabric error: the failing fabric's miss response (DECERR, ...)
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -81,7 +82,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             target = None if denied else region.slave
         if target is None:
             if decode.miss != "default-slave" or decode.default_slave is None:
-                return Outcome(None, masked=masked, bridges=tuple(crossed))
+                return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
             target = decode.default_slave
         if target in bridges:
             b = bridges[target]

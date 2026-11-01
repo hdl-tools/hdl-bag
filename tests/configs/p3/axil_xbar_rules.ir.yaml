@@ -1,0 +1,334 @@
+schema: '0.3'
+project:
+  name: axil_xbar_rules
+  revision: p3
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/axil_xbar_rules
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_sys
+    mhz: 100
+    source: top port
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: xbar
+    protocol: AXI4-Lite
+    topology: crossbar
+    data_width: 32
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: CUT_ALL_AX
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint: null
+    template: bag_axil_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: dma
+        priority: null
+      - index: 1
+        port: cpu
+        priority: null
+      - index: 2
+        port: dbg
+        priority: null
+    slave_ports:
+      - index: 0
+        port: regs
+        priority: null
+      - index: 1
+        port: mem
+        priority: null
+      - index: 2
+        port: rom
+        priority: null
+    id_width: null
+    max_parallel: 3
+    addr_rules:
+      - slave_port: 2
+        slave: rom
+        region: code
+        base: '0x0001_0000'
+        end: '0x0001_FFFF'
+        access: RO
+        secure: false
+      - slave_port: 0
+        slave: regs
+        region: csr
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: regs
+        region: log
+        base: '0x4000_1000'
+        end: '0x4000_1FFF'
+        access: WO
+        secure: false
+      - slave_port: 1
+        slave: mem
+        region: lo
+        base: '0x8000_0000'
+        end: '0x800F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: mem
+        region: sec
+        base: '0x8010_0000'
+        end: '0x8010_FFFF'
+        access: RW
+        secure: true
+    access_rules:
+      - master: cpu
+        slave: regs
+        access: RO
+      - master: dma
+        slave: rom
+        access: none
+    decode:
+      - master: cpu
+        miss: DECERR
+        default_slave: null
+        aliases:
+          - base: '0x0000_0000'
+            size: '0x0001_0000'
+            to: '0x0001_0000'
+            enable: boot_remap_i
+      - master: dbg
+        miss: default-slave
+        default_slave: regs
+        aliases: []
+      - master: dma
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dbg
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 24
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: dma
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: mem
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: regs
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: rom
+    protocol: AXI4-Lite
+    fabric: xbar
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+bridges: []
+adapters: []
+port_options:
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: dbg
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: dma
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: mem
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: regs
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: rom
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+memory_map:
+  - slave: rom
+    region: code
+    base: '0x0001_0000'
+    size: '0x0001_0000'
+    access: RO
+    secure: false
+    fabric: xbar
+  - slave: regs
+    region: csr
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: regs
+    region: log
+    base: '0x4000_1000'
+    size: '0x0000_1000'
+    access: WO
+    secure: false
+    fabric: xbar
+  - slave: mem
+    region: lo
+    base: '0x8000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: mem
+    region: sec
+    base: '0x8010_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: true
+    fabric: xbar
+hierarchy:
+  top: axil_xbar_rules_top
+  wrappers: []
+  placement:
+    - instance: xbar
+      kind: fabric
+      wrapper: axil_xbar_rules_top
+      rtl_name: u_xbar
+wrapper:
+  top: axil_xbar_rules_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: axil_xbar_rules_pkg
+  file_header: header.txt
+  extra_inputs:
+    - boot_remap_i
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: dbg
+      exposed: true
+      prefix: null
+    - port: dma
+      exposed: true
+      prefix: null
+    - port: mem
+      exposed: true
+      prefix: null
+    - port: regs
+      exposed: true
+      prefix: null
+    - port: rom
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: axil_xbar_rules.xlsx
+  sha256: e48391776db71459d75b0b5d304c780a40fc68d8f8973703ba8867e50f878fcf

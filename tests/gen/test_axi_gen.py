@@ -188,3 +188,13 @@ def test_axi_interfaces(spec: Spec) -> None:
     assert "IdWidth" not in lite and "UserWidth" not in lite and "awid" not in lite
     assert "interface axi_gen_axi_if" in full
     assert "IdWidth" in full and "UserWidth" in full and "awid" in full and "awuser" in full
+
+
+def test_miss_response_table_by_port_index() -> None:
+    """MissResp follows the Port index: dma (0) SLVERR, cpu (1) DECERR, dbg (2, default
+    slave) the unused DECERR filler."""
+    from hdl_bag.ir import load
+
+    root = Path(__file__).parents[1] / "configs" / "p3"
+    text = package(load(root / "axi_xbar_rules.ir.yaml"), "// header\n")
+    assert "localparam logic [2:0][1:0] XbarMissResp = '{2'b11, 2'b11, 2'b10};" in text

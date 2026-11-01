@@ -13,7 +13,10 @@ from hdl_bag.flows import lint
 HERE = Path(__file__).parent
 REPO = HERE.parents[1]
 INHOUSE = Path(str(files("hdl_bag") / "rtl" / "inhouse"))
-LIBRARY = sorted(INHOUSE.glob("*.sv"))
+# Stand-alone in-house blocks. The AXI blocks (bag_axi*, bag_prio_arb) build on the
+# vendored PULP RTL and are linted and simulated inside generated designs instead
+# (tests/gen/test_corpus.py).
+LIBRARY = sorted(p for p in INHOUSE.glob("*.sv") if not p.stem.startswith(("bag_axi", "bag_prio")))
 TB = HERE / "tb"
 
 pytestmark = pytest.mark.eda

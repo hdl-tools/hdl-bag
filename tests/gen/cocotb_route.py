@@ -9,9 +9,12 @@ The config comes from BAG_IR.
   matters, with random PROT attribute bits; the reference model says which slave must
   see the access, at which address and with which PROT, whether it answers with an
   error, or what the fabric answers. Data written is read back.
-* Arbitration: on every AHB-Lite fabric with several masters, all masters request the
-  same slave in the same cycle; fixed priority serves them in priority order,
-  round-robin serves each once.
+* Arbitration: on every AHB-Lite fabric and AXI shared bus with several masters, all
+  masters request the same slave in the same cycle; fixed priority serves them in
+  priority order, round-robin serves each once. (An AXI crossbar serves each once.)
+
+AHB-Lite and APB ports use the in-house BFMs (bfm.py); AXI4 and AXI4-Lite ports use
+cocotbext-axi through bfm_axi.py, which offers the same interface.
 """
 
 import os
@@ -21,8 +24,9 @@ from typing import Any
 
 import cocotb
 from bfm import AHB_M, AHB_S, APB, AhbMaster, AhbSlave, ApbMaster, ApbSlave, Beat, Port
+from bfm_axi import AxiPortMaster, AxiPortSlave, bus
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, Combine
+from cocotb.triggers import ClockCycles, Combine, RisingEdge
 from route_model import error_words, probes, prot_tied, route
 
 from hdl_bag.ir import Spec, load
@@ -31,6 +35,24 @@ from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port
 
 SPEC = load(Path(os.environ["BAG_IR"]))
 COLUMNS = {"prot": "PROT", "lock": "LOCK / excl", "pstrb": "PSTRB", "pslverr": "PSLVERR"}
+AXI = ("AXI4", "AXI4-Lite")
+
+
+def _axi_bus(dut: Any, spec: Spec, name: str, proto: str, slave: bool, idw: int | None,
+             uw: int) -> Any:  # fmt: skip
+    """cocotbext-axi bus for an AXI wrapper port; Port_Options-tied signals are absent."""
+    prefix = next((p.prefix for p in spec.wrapper.ports if p.port == name), None)
+    protocol = Protocol(proto)
+    opt = next((o for o in spec.port_options if o.port == name), None)
+    tied: set[str] = set()
+    for fld in ("prot", "qos", "region", "cache", "lock"):
+        if opt is not None and getattr(opt, fld) in ("tie-0", "tie-default"):
+            tied |= set(OPTIONAL_SIGNAL_NAMES[fld.upper() if fld != "lock" else "LOCK / excl"])
+    present = port_signals(protocol, slave, has_id=bool(idw), has_user=uw > 0)
+    signals = {s: flat_signal_name(spec.wrapper.signal_pattern, name, PROTO_TOKEN[protocol],
+                                   s, prefix)
+               for s in present if s not in tied}  # fmt: skip
+    return bus(dut, signals, proto == "AXI4-Lite")
 
 
 def _port(dut: Any, spec: Spec, name: str, proto: str, slave: bool, aw: int, dw: int) -> Port:
@@ -64,8 +86,22 @@ async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str,
         getattr(dut, r.name).value = 0 if r.polarity == "active-low" else 1
     for x in SPEC.wrapper.extra_inputs:
         getattr(dut, x).value = 0
+    resets = {r.domain: r for r in SPEC.resets}
+
+    def reset_of(domain: str) -> tuple[Any, bool]:
+        r = resets[domain]
+        return getattr(dut, r.name), r.polarity != "active-low"
+
     slaves: dict[str, Any] = {}
     for s in SPEC.slaves:
+        if s.protocol in AXI:
+            axi = _axi_bus(dut, SPEC, s.name, s.protocol, True, s.id_width, s.user_width)
+            rst, level = reset_of(s.domain)
+            axi_slave = AxiPortSlave(clocks[s.domain], axi, s.protocol == "AXI4-Lite",
+                                     s.data_width, error_words(SPEC, s.name), rst, level)  # fmt: skip
+            axi_slave.start()
+            slaves[s.name] = axi_slave
+            continue
         port = _port(dut, SPEC, s.name, s.protocol, True, s.addr_width, s.data_width)
         model = (AhbSlave if s.protocol == "AHB-Lite" else ApbSlave)(
             clocks[s.domain], port, data_width=s.data_width, max_wait=1,
@@ -74,6 +110,12 @@ async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str,
         slaves[s.name] = model
     masters: dict[str, Any] = {}
     for m in SPEC.masters:
+        if m.protocol in AXI:
+            axi = _axi_bus(dut, SPEC, m.name, m.protocol, False, m.id_width, m.user_width)
+            rst, level = reset_of(m.domain)
+            masters[m.name] = AxiPortMaster(clocks[m.domain], axi, m.protocol == "AXI4-Lite",
+                                            rst, level)  # fmt: skip
+            continue
         port = _port(dut, SPEC, m.name, m.protocol, False, m.addr_width, m.data_width)
         cls = AhbMaster if m.protocol == "AHB-Lite" else ApbMaster
         masters[m.name] = cls(clocks[m.domain], port)
@@ -91,7 +133,7 @@ def _tie(spec: Spec, port: str, sig: str) -> int:
     """Value a Port_Options-tied PROT signal carries (D28: security bits non-secure)."""
     opt = next(o for o in spec.port_options if o.port == port)
     default = {"hprot": 0b0011, "pprot": 0}.get(sig, 0) if opt.prot == "tie-default" else 0
-    return default | {"hnonsec": 1, "pprot": 0b010}.get(sig, 0)
+    return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
 
 
 def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,
@@ -100,6 +142,8 @@ def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,
     s = next(x for x in SPEC.slaves if x.name == slave)
     if prot_tied(SPEC, slave) or s.protocol == "APB3":
         return None  # the slave has no PROT signals
+    if m.protocol in AXI and s.protocol in AXI and not bridges:
+        return _tie(SPEC, m.name, "awprot") if prot_tied(SPEC, m.name) else prot
     if m.protocol == "AHB-Lite":
         hprot = _tie(SPEC, m.name, "hprot") if prot_tied(SPEC, m.name) else prot
         ns = 1 if prot_tied(SPEC, m.name) else int(nonsec)
@@ -112,17 +156,37 @@ def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,
 
 
 async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data: int,
-                  nonsec: bool, prot: int) -> tuple[bool, int]:  # fmt: skip
-    """One 32-bit access; returns (error, read data on the access's lanes)."""
+                  nonsec: bool, prot: int, user: int = 0) -> tuple[bool, int, int]:  # fmt: skip
+    """One 32-bit access; returns (error, read data on the access's lanes, AXI response
+    code: 0 OKAY, 2 SLVERR, 3 DECERR; AHB / APB report 2 for any error)."""
     if proto == "AHB-Lite":
         shift = 8 * (addr % (dw // 8)) if dw > 32 else 0
         beat = Beat(addr, write, data << shift, size=2, prot=prot, nonsec=int(nonsec))
         result = (await master.run([beat]))[0]
-        return result.err, (result.data >> shift) & 0xFFFF_FFFF
+        return result.err, (result.data >> shift) & 0xFFFF_FFFF, 2 * int(result.err)
+    if proto in AXI:
+        if write:
+            code = await master.write(addr, data, prot=prot, user=user)
+            return code != 0, 0, code
+        r = await master.read(addr, prot=prot, user=user)
+        return r.err, r.data, r.resp
     if write:
-        return await master.write(addr, data, prot=prot), 0
+        err = await master.write(addr, data, prot=prot)
+        return err, 0, 2 * int(err)
     r = await master.read(addr, prot=prot)
-    return r.err, r.data
+    return r.err, r.data, 2 * int(r.err)
+
+
+AXI_RESP = {"SLVERR": 2, "DECERR": 3}
+
+
+def _expected_resp(m: Any, exp: Any) -> int | None:
+    """The exact AXI response an AXI master must get; None where bridges translate it."""
+    if m.protocol not in AXI or exp.bridges:
+        return None
+    if exp.slave is None:
+        return 0 if exp.masked else AXI_RESP[exp.miss]
+    return 2 if exp.slave_error else 0
 
 
 def _pin_sets() -> list[dict[str, bool]]:
@@ -157,14 +221,20 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             prot = (random.getrandbits(3) & ~0b010) | int(nonsec) << 1
                         exp = route(SPEC, m.name, addr, write, nonsec, pins)
                         before = {n: len(s.log) for n, s in slaves.items()}
-                        err, got = await _access(masters[m.name], m.protocol, m.data_width,
-                                                 addr, write, data, nonsec, prot)  # fmt: skip
+                        user = random.getrandbits(m.user_width) if m.user_width else 0
+                        err, got, resp = await _access(masters[m.name], m.protocol,
+                                                       m.data_width, addr, write, data, nonsec,
+                                                       prot, user)  # fmt: skip
+                        want_resp = _expected_resp(m, exp)
                         where = f"{m.name} {'W' if write else 'R'} {addr:#x} nonsec={nonsec} pins={pins}"
                         grew = {n for n, s in slaves.items() if len(s.log) != before[n]}
                         if exp.slave is None:
                             assert err == (not exp.masked) and not grew, (
                                 f"{where}: expected {'a masked' if exp.masked else 'an'} error, "
                                 f"got err={err} at {grew}"
+                            )
+                            assert want_resp is None or resp == want_resp, (
+                                f"{where}: response {resp}, expected {want_resp} ({exp.miss})"
                             )
                         else:
                             assert err == exp.slave_error and grew == {exp.slave}, (
@@ -176,6 +246,16 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: {exp.slave} saw {seen.addr:#x} write={seen.write}, "
                                 f"expected {exp.address:#x}"
                             )
+                            assert want_resp is None or resp == want_resp, (
+                                f"{where}: response {resp}, expected {want_resp}"
+                            )
+                            s_uw = next(x.user_width for x in SPEC.slaves if x.name == exp.slave)
+                            if m.user_width and s_uw and not exp.bridges:
+                                want_user = user & ((1 << s_uw) - 1)
+                                assert seen.user == want_user, (
+                                    f"{where}: {exp.slave} saw USER {seen.user:#x}, "
+                                    f"expected {want_user:#x}"
+                                )
                             want = _expected_prot(m, exp.slave, prot, exp.nonsec, exp.bridges)
                             assert want is None or seen.prot == want, (
                                 f"{where}: {exp.slave} saw PROT {seen.prot:#b}, expected {want:#b}"
@@ -190,6 +270,14 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
 
+def _reach(region: Any, ports: list[Any]) -> list[Any]:
+    """The PORTS that can address REGION (16 bytes per port) and write it directly."""
+    widths = {m.name: m.addr_width for m in SPEC.masters}
+    return [p for p in ports if region.base + 16 * len(ports) < 1 << widths[p.port]
+            and route(SPEC, p.port, region.base, True, False, {}).slave == region.slave
+            and not route(SPEC, p.port, region.base, True, False, {}).bridges]  # fmt: skip
+
+
 @cocotb.test(timeout_time=5, timeout_unit="ms")
 async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
@@ -198,20 +286,258 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
                  if any(m.name == p.port for m in SPEC.masters)]  # fmt: skip
         if f.protocol != "AHB-Lite" or len(ports) < 2:
             continue
-        # A slave every master can write directly, at a distinct word per master.
-        region = next(r for r in SPEC.memory_map if r.fabric == f.name and all(
-            route(SPEC, p.port, r.base, True, False, {}).slave == r.slave
-            and not route(SPEC, p.port, r.base, True, False, {}).bridges for p in ports))  # fmt: skip
+        # The region the most masters can address and write directly; those masters
+        # write it at a distinct word each.
+        regions = [r for r in SPEC.memory_map if r.fabric == f.name]
+        candidates = ports
+        region = max(regions, key=lambda r: len(_reach(r, candidates)))
+        ports = _reach(region, ports)
+        if len(ports) < 2:
+            continue
         width = next(s.addr_width for s in SPEC.slaves if s.name == region.slave)
         addrs = {p.port: region.base + 16 * i for i, p in enumerate(ports)}
         visible = {(a & ((1 << width) - 1)): p for p, a in addrs.items()}
         n = len(slaves[region.slave].log)
         await Combine(*(cocotb.start_soon(_access(masters[p], "AHB-Lite", 32, a, True, i, False, 3))
                         for i, (p, a) in enumerate(addrs.items())))  # fmt: skip
-        order = [visible[e.addr] for e in slaves[region.slave].log[n:]]
+        order = [visible[e.addr] for e in slaves[region.slave].log[n:] if e.write]
         if f.arbitration == "fixed-priority":
             want = [p.port for p in sorted(ports, key=lambda p: p.priority or 0)]
             assert order == want, f"{f.name}: served {order}, priority order {want}"
         else:
             assert sorted(order) == sorted(addrs), f"{f.name}: served {order}"
         dut._log.info("%s (%s): served %s", f.name, f.arbitration, order)
+
+
+def _private_words(m: Any, index: int, count: int) -> list[int]:
+    """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
+    read back without errors."""
+    for r in sorted(SPEC.memory_map, key=lambda r: r.base):
+        words = [r.base + 0x100 * index + 4 * k for k in range(count)]
+        if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
+            continue
+        ok = True
+        for a in words:
+            wr = route(SPEC, m.name, a, True, False, {})
+            rd = route(SPEC, m.name, a, False, False, {})
+            # Both reach one slave word without error (a denied write that a default slave
+            # takes would not read back).
+            ok &= wr.slave is not None and not wr.slave_error and not wr.masked
+            ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
+        if ok:
+            return words
+    return []
+
+
+@cocotb.test(timeout_time=20, timeout_unit="ms")
+async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
+    """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
+    rotates IDs): every write lands and every read returns that master's own data."""
+    masters, _, _ = await _bring_up(dut)
+
+    async def traffic(m: Any, words: list[int]) -> int:
+        data = {a: random.getrandbits(32) for a in words}
+        if m.protocol in AXI:
+            writes = [cocotb.start_soon(masters[m.name].write(a, d)) for a, d in data.items()]
+            await Combine(*writes)
+            assert not any(w.result() for w in writes), f"{m.name}: write error"
+            reads = [cocotb.start_soon(masters[m.name].read(a)) for a in data]
+            await Combine(*reads)
+            got = [r.result() for r in reads]
+        else:
+            prot = 3 if m.protocol == "AHB-Lite" else 0  # secure (APB: PPROT[1] = non-secure)
+            for a, d in data.items():
+                err, _, _ = await _access(masters[m.name], m.protocol, m.data_width, a, True,
+                                          d, False, prot)  # fmt: skip
+                assert not err, f"{m.name}: write error at {a:#x}"
+            got = []
+            for a in data:
+                err, value, _ = await _access(masters[m.name], m.protocol, m.data_width, a,
+                                              False, 0, False, prot)  # fmt: skip
+                got.append(type("R", (), {"err": err, "data": value})())
+        for (a, d), r in zip(data.items(), got, strict=True):
+            assert not r.err and r.data == d, f"{m.name} {a:#x}: read {r.data:#x}, wrote {d:#x}"
+        return len(data)
+
+    plans = {m.name: (m, _private_words(m, i, 8)) for i, m in enumerate(SPEC.masters)}
+    tasks = [cocotb.start_soon(traffic(m, words)) for m, words in plans.values() if words]
+    await Combine(*tasks)
+    total = sum(t.result() for t in tasks)
+    assert total > 0
+    dut._log.info("concurrent traffic: %d words over %d masters", total, len(tasks))
+
+
+# --------------------------------------------------------------------------- AXI fabrics
+
+
+def _contention(f: Any) -> tuple[Any, list[Any]] | None:
+    """A slave region on AXI fabric F that several masters write directly, and those
+    masters (by Port index)."""
+    ports = [p for p in sorted(f.master_ports, key=lambda p: p.index)
+             if any(m.name == p.port for m in SPEC.masters)]  # fmt: skip
+    regions = [r for r in SPEC.memory_map if r.fabric == f.name and not r.secure]
+    if len(ports) < 2 or not regions:
+        return None
+    region = max(regions, key=lambda r: len(_reach(r, ports)))
+    ports = _reach(region, ports)
+    return (region, ports) if len(ports) >= 2 else None
+
+
+async def _writes(masters: dict[str, Any], jobs: list[tuple[str, int]]) -> None:
+    """Start every (master, address) write in the same cycle and wait for all."""
+    tasks = [cocotb.start_soon(masters[p].write(a, i)) for i, (p, a) in enumerate(jobs)]
+    await Combine(*tasks)
+    assert not any(t.result() for t in tasks), "unexpected write error"
+
+
+async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int, str],
+                  jobs: list[tuple[str, int]]) -> list[str]:  # fmt: skip
+    """Run JOBS against SLAVE held stalled for 20 cycles; the masters in the order served."""
+    n = len(slave.log)
+    slave.stall(True)
+    task = cocotb.start_soon(_writes(masters, jobs))
+    await ClockCycles(clk, 20)
+    slave.stall(False)
+    await task
+    return [owner[e.addr] for e in slave.log[n:] if e.write]
+
+
+@cocotb.test(timeout_time=10, timeout_unit="ms")
+async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
+    """AXI fabrics with several masters on one slave, with the slave stalled so every
+    request is waiting when it opens:
+
+    * rounds: one write per master, three times; fixed priority serves them in priority
+      order every round, round robin serves each once per round;
+    * starvation: the first-served master keeps four writes queued against one write of
+      the last-served one; fixed priority serves the low master last, round robin
+      serves it no later than second;
+    * lock: a low-priority write is presented while the slave is stalled, then a higher-
+      priority one arrives; the grant must not change before the handshake.
+    """
+    masters, slaves, clocks = await _bring_up(dut)
+    tested = 0
+    for f in SPEC.fabrics:
+        if f.protocol not in AXI or (found := _contention(f)) is None:
+            continue
+        region, ports = found
+        slave = slaves[region.slave]
+        clk = clocks[f.domain]
+        width = next(s.addr_width for s in SPEC.slaves if s.name == region.slave)
+        base = {p.port: region.base + 0x40 * i for i, p in enumerate(ports)}
+        owner = {(a + 4 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(8)}
+        fixed = f.arbitration == "fixed-priority"
+        by_prio = [p.port for p in sorted(ports, key=lambda p: p.priority or 0)]
+
+        for rnd in range(3):
+            order = await _served(
+                masters, slave, clk, owner, [(p.port, base[p.port] + 4 * rnd) for p in ports]
+            )
+            if fixed:
+                assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
+            else:
+                assert sorted(order) == sorted(base), f"{f.name} round {rnd}: {order}"
+        first = by_prio[0] if fixed else order[0]
+        last = by_prio[-1] if fixed else order[-1]
+        # Starvation needs every request waiting at the arbiter when the slave opens; a
+        # shared-bus mid-point instead absorbs requests during the stall, as they arrive.
+        mid = f.midpoint
+        buffered = mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
+        if not buffered:
+            jobs = [(first, base[first] + 4 * (4 + k)) for k in range(4)]
+            jobs.append((last, base[last] + 16))
+            order = await _served(masters, slave, clk, owner, jobs)
+            pos = order.index(last)
+            if fixed:
+                assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"
+            else:
+                assert pos <= 1, f"{f.name}: round robin starved {last}: {order}"
+        if fixed:
+            n = len(slave.log)
+            slave.stall(True)
+            low = cocotb.start_soon(masters[last].write(base[last] + 28, 1))
+            await ClockCycles(clk, 10)
+            high = cocotb.start_soon(masters[first].write(base[first] + 28, 2))
+            await ClockCycles(clk, 10)
+            slave.stall(False)
+            await Combine(low, high)
+            order = [owner[e.addr] for e in slave.log[n:] if e.write]
+            assert order == [last, first], f"{f.name}: grant changed under a stall: {order}"
+        tested += 1
+        dut._log.info("%s (%s): arbitration checked over %s", f.name, f.arbitration,
+                      [p.port for p in ports])  # fmt: skip
+    if tested == 0:
+        dut._log.info("no AXI fabric with contention")
+
+
+@cocotb.test(timeout_time=10, timeout_unit="ms")
+async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
+    """With the slave's AR stalled, a master can issue exactly as many reads as the shared
+    bus's mid-point holds: FIFO depth + 2 per register slice (each cut is a 2-entry spill
+    register). AXI4-Lite guards also cap a master at Max mst trans outstanding."""
+    masters, slaves, clocks = await _bring_up(dut)
+    for f in SPEC.fabrics:
+        if f.protocol not in AXI or f.topology != "shared-bus" or f.midpoint is None:
+            continue
+        stages = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}[f.midpoint.slice]
+        buffered = f.midpoint.fifo_depth + 2 * stages
+        # The master with the widest ID, so per-ID limits do not bind.
+        names = [p.port for p in f.master_ports if any(m.name == p.port for m in SPEC.masters)]
+        m = max((x for x in SPEC.masters if x.name in names), key=lambda x: x.id_width or 0)
+        words = _private_words(m, 0, buffered + 4)
+        if not words:
+            continue
+        exp = route(SPEC, m.name, words[0], False, False, {})
+        assert exp.slave is not None
+        expected = buffered
+        if f.protocol == "AXI4-Lite":
+            expected = min(buffered, f.max_mst_trans or buffered)
+        else:
+            expected = min(buffered, (f.max_mst_trans or buffered) << (m.id_width or 0))
+        ar = masters[m.name].bus.read.ar
+        clk = clocks[f.domain]
+        slave = slaves[exp.slave]
+        slave.stall(True)
+        reads = [cocotb.start_soon(masters[m.name].read(a)) for a in words]
+        accepted = 0
+        for _ in range(200):
+            await RisingEdge(clk)
+            accepted += int(ar.arvalid.value) and int(ar.arready.value)
+        slave.stall(False)
+        await Combine(*reads)
+        assert accepted == expected, (
+            f"{f.name}: {accepted} reads accepted with the slave stalled, expected {expected} "
+            f"(FIFO {f.midpoint.fifo_depth}, {f.midpoint.slice})"
+        )
+        dut._log.info("%s: mid-point held %d reads", f.name, accepted)
+
+
+@cocotb.test(timeout_time=10, timeout_unit="ms")
+async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
+    """Every AXI4 master: a 4-beat INCR burst writes and reads back through the fabric; a
+    4-beat burst to an unmapped or denied address is answered with the master's error on
+    every beat (the read returns all four beats, so RLAST came last)."""
+    masters, _, _ = await _bring_up(dut)
+    checked = 0
+    for i, m in enumerate(SPEC.masters):
+        if m.protocol != "AXI4":
+            continue
+        words = _private_words(m, i, 4)
+        if words:
+            data = bytes(random.getrandbits(8) for _ in range(16))
+            assert await masters[m.name].burst_write(words[0], data) == 0
+            r = await masters[m.name].burst_read(words[0], 16)
+            assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst"
+            checked += 1
+        miss = next((a for a in probes(SPEC) if a + 16 < 1 << m.addr_width and all(
+            route(SPEC, m.name, a + 4 * k, w, False, {}).slave is None
+            and not route(SPEC, m.name, a + 4 * k, w, False, {}).bridges
+            for k in range(4) for w in (True, False))), None)  # fmt: skip
+        if miss is not None:
+            want = AXI_RESP[route(SPEC, m.name, miss, True, False, {}).miss or "DECERR"]
+            code = await masters[m.name].burst_write(miss, bytes(16))
+            assert code == want, f"{m.name} burst write to {miss:#x}: {code}, expected {want}"
+            r = await masters[m.name].burst_read(miss, 16)
+            assert r.resp == want, f"{m.name} burst read to {miss:#x}: {r.resp}, expected {want}"
+            checked += 1
+    dut._log.info("AXI4 bursts: %d checks", checked)
