@@ -253,7 +253,7 @@ class Context:
         return master_side, master_side + (0 if n <= 1 else math.ceil(math.log2(n)))
 
     def adapters(self) -> list[Adapter]:
-        """Adapters between ports and fabrics, in chain order per port (D9, D10, D24)."""
+        """Adapters between ports and fabrics, in chain order per port (D9, D10, D24, D33)."""
         pattern = self.adapter_pattern()
         opts = self.port_options()
         out: list[Adapter] = []
@@ -273,6 +273,12 @@ class Context:
                     frow["Data width (bits)"], 1
                 ):
                     types.append("dw")
+                # D33: width conversion stays on the AXI4 side of the protocol adapter, so
+                # an AXI4 port on an AXI4-Lite fabric converts width before it becomes Lite
+                # (a narrow AXI4 access never turns into a full-width Lite access).
+                if p_proto == Protocol.AXI4 and "pc" in types and "dw" in types:
+                    types.remove("dw")
+                    types.insert(types.index("pc"), "dw")
                 if kind == "slave" and p_proto == f_proto == Protocol.AXI4:
                     want = self.integer(
                         prow["ID width (bits)"], 1, required=False, tokens=("auto",)
@@ -287,7 +293,7 @@ class Context:
                 if cut:
                     types.append("cut")
             if side == "slave":
-                types.reverse()  # fabric -> cut -> fifo -> iw -> dw -> pc -> cdc -> slave
+                types.reverse()  # fabric -> cut -> fifo -> iw -> dw|pc -> pc|dw -> cdc -> slave
             for t in types:
                 name = pattern.format(**{"from": frm, "type": t, "to": to})
                 out.append(Adapter(type=t, name=name, port=port, fabric=fabric))

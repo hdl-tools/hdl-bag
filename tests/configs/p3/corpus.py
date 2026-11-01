@@ -190,18 +190,19 @@ def axi_adapters() -> Cfg:
 
 
 def axil_adapters() -> Cfg:
-    """AXI4-Lite crossbar with adapters: pc (AXI4 -> Lite) on a master, dw down on a 64-bit
-    Lite master, cdc on a Lite master in another domain with a cut; dw up on a 64-bit Lite
-    slave with a fifo, pc (Lite -> AXI4) on an AXI4 slave."""
+    """AXI4-Lite crossbar with adapters: a 64-bit AXI4 master (dw down on the AXI4 side,
+    then pc: D33), dw down on a 64-bit Lite master, cdc on a Lite master in another domain
+    with a cut; dw up on a 64-bit Lite slave with a fifo, a 64-bit AXI4 slave (pc, then dw
+    up on the AXI4 side: D33)."""
     c = Cfg("axil_adapters", phase=3)
     c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_AON", "clk_aon", "rst_aon_n")
     c.fabric("cfg", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY",
              max_trans=(2, 2))  # fmt: skip
-    c.master("cpu", "AXI4", 32, 32, "D_SYS", id_width=4)
+    c.master("cpu", "AXI4", 64, 32, "D_SYS", id_width=4)
     c.master("dsp", "AXI4-Lite", 64, 32, "D_SYS")
     c.master("aon", "AXI4-Lite", 32, 32, "D_AON")
     c.slave("buf", "AXI4-Lite", 64, 16, "D_SYS")
-    c.slave("mem", "AXI4", 32, 16, "D_SYS")
+    c.slave("mem", "AXI4", 64, 16, "D_SYS")
     for i, m in enumerate(("cpu", "dsp", "aon")):
         c.link(m, "cfg", i).decode(m, "SLVERR" if i == 1 else "DECERR")
     c.link("cfg", "buf", 0).link("cfg", "mem", 1)
