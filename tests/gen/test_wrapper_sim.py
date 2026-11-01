@@ -25,7 +25,7 @@ def test_generated_design(config: str, style: str) -> None:
     root = REPO / "out" / "gen" / f"{config}_{style}"
     out = generate(load(CONFIGS / f"{config}.ir.yaml"), root, CONFIGS, style)
     files = sources(out)
-    for report in (lint(files, out.top, root), compile_design(files, out.top, root)):
+    for report in (lint(files, out.top, root), compile_design(files, out.top, root, build=False)):
         assert report.ok, report.format()
     run_cocotb(
         [root / f for f in files], out.top, Path(__file__).parent / "cocotb_wrapper_ahb2apb_pt.py",
@@ -55,5 +55,5 @@ def test_hierarchy_variant_lints_and_compiles(variant: str, style: str) -> None:
     root = REPO / "out" / "gen" / f"var_{variant}_{style}"
     out = generate(build(variant), root, CONFIGS, style)
     files = sources(out)
-    for report in (lint(files, out.top, root), compile_design(files, out.top, root)):
+    for report in (lint(files, out.top, root), compile_design(files, out.top, root, build=False)):
         assert report.ok, report.format()

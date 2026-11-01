@@ -101,7 +101,8 @@ def test_gate_lint_and_compile(config: str, style: str) -> None:
     files, inc = sources(out), include_dirs(out)
     for report in (
         lint(files, out.top, root, incdirs=inc),
-        compile_design(files, out.top, root, incdirs=inc),
+        # Elaboration is the gate; test_route_simulation builds and runs the C++ model.
+        compile_design(files, out.top, root, incdirs=inc, build=False),
     ):
         assert report.ok, report.format()
 

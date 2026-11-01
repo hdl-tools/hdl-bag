@@ -199,3 +199,11 @@ def test_unoptflat_through_vendored_rtl_is_third_party() -> None:
     ours, theirs = split_third_party(found)
     assert theirs == [vendor_loop, wrapper_loop]
     assert ours == [own_loop, generated_loop, unused]
+
+
+def test_elaboration_only_compile_skips_the_cpp_build() -> None:
+    full = VerilatorBuild("obj").command([Path("a.sv")], "a", [])
+    elab = VerilatorBuild("obj", build=False)
+    cmd = elab.command([Path("a.sv")], "a", [])
+    assert "--build" in full and "--build" not in cmd and "--cc" in cmd
+    assert elab.name == "verilator-elaborate"
