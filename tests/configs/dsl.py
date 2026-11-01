@@ -101,9 +101,9 @@ class Cfg:
         return self._expose(name, prefix, True)
 
     def bridge(self, name: str, window: int, pass_through: bool = True,
-               template: str = "bag_ahb2apb") -> "Cfg":  # fmt: skip
-        self.data.bridges.append([name, template, _hex(window), "Y" if pass_through else "N", 0,
-                                  None])  # fmt: skip
+               template: str = "bag_ahb2apb", fifo_depth: int = 0) -> "Cfg":  # fmt: skip
+        self.data.bridges.append([name, template, _hex(window), "Y" if pass_through else "N",
+                                  fifo_depth, None])  # fmt: skip
         return self._expose(name, None, False)
 
     def _expose(self, port: str, prefix: str | None, exposed: bool) -> "Cfg":

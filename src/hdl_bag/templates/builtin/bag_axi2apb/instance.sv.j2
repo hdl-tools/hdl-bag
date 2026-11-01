@@ -1,0 +1,130 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#- Copyright 2026 The hdl-bag Authors -#}
+{#- Instantiation of bag_axi2apb. Context: hdl_bag.gen.wrapper.render_instance. "up" is the
+    bridge's slave port on the upstream fabric, "down" its master port downstream. -#}
+{% set up = inst.up %}
+{% set dn = inst.down %}
+{% set fab = spec.fabrics | selectattr("name", "equalto", bridge.upstream) | first %}
+{% set uw = [1, up.user_width] | max %}
+{% set idw = [1, up.id_width] | max %}
+{% set offset = bridge_offset(bridge.name) %}
+
+{% if up.protocol == "AXI4" %}
+  // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
+  bag_axi2apb #(
+      .UpAddrWidth  ({{ up.addr_width }}),
+      .DownAddrWidth({{ dn.addr_width }}),
+      .UpDataWidth  ({{ up.data_width }}),
+      .DownDataWidth({{ dn.data_width }}),
+      .IdWidth      ({{ idw }}),
+      .UserWidth    ({{ uw }}),
+      .MaxTrans     ({{ fab.max_slv_trans }}),
+      .FifoDepth    ({{ bridge.fifo_depth }}),
+      .AsyncCdc     (1'b{{ 1 if bridge.cdc else 0 }}),
+      .AddrOffset   ({{ lit(up.addr_width, offset) }})
+  ) {{ name }} (
+      .up_clk_i    ({{ ctx.clk(up.domain) }}),
+      .up_rst_ni   ({{ ctx.rst(up.domain) }}),
+      .down_clk_i  ({{ ctx.clk(dn.domain) }}),
+      .down_rst_ni ({{ ctx.rst(dn.domain) }}),
+      .s_awid_i    ({{ ctx.i(up, "awid", 0, idw) }}),
+      .s_awaddr_i  ({{ ctx.i(up, "awaddr", 0, up.addr_width) }}),
+      .s_awlen_i   ({{ ctx.i(up, "awlen", 0, 8) }}),
+      .s_awsize_i  ({{ ctx.i(up, "awsize", 0, 3) }}),
+      .s_awburst_i ({{ ctx.i(up, "awburst", 0, 2) }}),
+      .s_awlock_i  ({{ ctx.i(up, "awlock", 0, 1) }}),
+      .s_awcache_i ({{ ctx.i(up, "awcache", 3, 4) }}),
+      .s_awprot_i  ({{ ctx.i(up, "awprot", 0, 3) }}),
+      .s_awqos_i   ({{ ctx.i(up, "awqos", 0, 4) }}),
+      .s_awregion_i({{ ctx.i(up, "awregion", 0, 4) }}),
+      .s_awuser_i  ({{ ctx.i(up, "awuser", 0, uw) }}),
+      .s_awvalid_i ({{ ctx.i(up, "awvalid", 0, 1) }}),
+      .s_awready_o ({{ ctx.o(up, "awready", 1) }}),
+      .s_wdata_i   ({{ ctx.i(up, "wdata", 0, up.data_width) }}),
+      .s_wstrb_i   ({{ ctx.i(up, "wstrb", 0, up.data_width // 8) }}),
+      .s_wlast_i   ({{ ctx.i(up, "wlast", 0, 1) }}),
+      .s_wuser_i   ({{ ctx.i(up, "wuser", 0, uw) }}),
+      .s_wvalid_i  ({{ ctx.i(up, "wvalid", 0, 1) }}),
+      .s_wready_o  ({{ ctx.o(up, "wready", 1) }}),
+      .s_bid_o     ({{ ctx.o(up, "bid", idw) }}),
+      .s_bresp_o   ({{ ctx.o(up, "bresp", 2) }}),
+      .s_buser_o   ({{ ctx.o(up, "buser", uw) }}),
+      .s_bvalid_o  ({{ ctx.o(up, "bvalid", 1) }}),
+      .s_bready_i  ({{ ctx.i(up, "bready", 1, 1) }}),
+      .s_arid_i    ({{ ctx.i(up, "arid", 0, idw) }}),
+      .s_araddr_i  ({{ ctx.i(up, "araddr", 0, up.addr_width) }}),
+      .s_arlen_i   ({{ ctx.i(up, "arlen", 0, 8) }}),
+      .s_arsize_i  ({{ ctx.i(up, "arsize", 0, 3) }}),
+      .s_arburst_i ({{ ctx.i(up, "arburst", 0, 2) }}),
+      .s_arlock_i  ({{ ctx.i(up, "arlock", 0, 1) }}),
+      .s_arcache_i ({{ ctx.i(up, "arcache", 3, 4) }}),
+      .s_arprot_i  ({{ ctx.i(up, "arprot", 0, 3) }}),
+      .s_arqos_i   ({{ ctx.i(up, "arqos", 0, 4) }}),
+      .s_arregion_i({{ ctx.i(up, "arregion", 0, 4) }}),
+      .s_aruser_i  ({{ ctx.i(up, "aruser", 0, uw) }}),
+      .s_arvalid_i ({{ ctx.i(up, "arvalid", 0, 1) }}),
+      .s_arready_o ({{ ctx.o(up, "arready", 1) }}),
+      .s_rid_o     ({{ ctx.o(up, "rid", idw) }}),
+      .s_rdata_o   ({{ ctx.o(up, "rdata", up.data_width) }}),
+      .s_rresp_o   ({{ ctx.o(up, "rresp", 2) }}),
+      .s_rlast_o   ({{ ctx.o(up, "rlast", 1) }}),
+      .s_ruser_o   ({{ ctx.o(up, "ruser", uw) }}),
+      .s_rvalid_o  ({{ ctx.o(up, "rvalid", 1) }}),
+      .s_rready_i  ({{ ctx.i(up, "rready", 1, 1) }}),
+      .m_paddr_o   ({{ ctx.o(dn, "paddr", dn.addr_width) }}),
+      .m_pprot_o   ({{ ctx.o(dn, "pprot", 3) }}),
+      .m_psel_o    ({{ ctx.o(dn, "psel", 1) }}),
+      .m_penable_o ({{ ctx.o(dn, "penable", 1) }}),
+      .m_pwrite_o  ({{ ctx.o(dn, "pwrite", 1) }}),
+      .m_pwdata_o  ({{ ctx.o(dn, "pwdata", dn.data_width) }}),
+      .m_pstrb_o   ({{ ctx.o(dn, "pstrb", dn.data_width // 8) }}),
+      .m_pready_i  ({{ ctx.i(dn, "pready", 1, 1) }}),
+      .m_prdata_i  ({{ ctx.i(dn, "prdata", 0, dn.data_width) }}),
+      .m_pslverr_i ({{ ctx.i(dn, "pslverr", 0, 1) }})
+  );
+{% else %}
+  // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
+  bag_axil2apb #(
+      .UpAddrWidth  ({{ up.addr_width }}),
+      .DownAddrWidth({{ dn.addr_width }}),
+      .UpDataWidth  ({{ up.data_width }}),
+      .DownDataWidth({{ dn.data_width }}),
+      .FifoDepth    ({{ bridge.fifo_depth }}),
+      .AsyncCdc     (1'b{{ 1 if bridge.cdc else 0 }}),
+      .AddrOffset   ({{ lit(up.addr_width, offset) }})
+  ) {{ name }} (
+      .up_clk_i   ({{ ctx.clk(up.domain) }}),
+      .up_rst_ni  ({{ ctx.rst(up.domain) }}),
+      .down_clk_i ({{ ctx.clk(dn.domain) }}),
+      .down_rst_ni({{ ctx.rst(dn.domain) }}),
+      .s_awaddr_i ({{ ctx.i(up, "awaddr", 0, up.addr_width) }}),
+      .s_awprot_i ({{ ctx.i(up, "awprot", 0, 3) }}),
+      .s_awvalid_i({{ ctx.i(up, "awvalid", 0, 1) }}),
+      .s_awready_o({{ ctx.o(up, "awready", 1) }}),
+      .s_wdata_i  ({{ ctx.i(up, "wdata", 0, up.data_width) }}),
+      .s_wstrb_i  ({{ ctx.i(up, "wstrb", 0, up.data_width // 8) }}),
+      .s_wvalid_i ({{ ctx.i(up, "wvalid", 0, 1) }}),
+      .s_wready_o ({{ ctx.o(up, "wready", 1) }}),
+      .s_bresp_o  ({{ ctx.o(up, "bresp", 2) }}),
+      .s_bvalid_o ({{ ctx.o(up, "bvalid", 1) }}),
+      .s_bready_i ({{ ctx.i(up, "bready", 1, 1) }}),
+      .s_araddr_i ({{ ctx.i(up, "araddr", 0, up.addr_width) }}),
+      .s_arprot_i ({{ ctx.i(up, "arprot", 0, 3) }}),
+      .s_arvalid_i({{ ctx.i(up, "arvalid", 0, 1) }}),
+      .s_arready_o({{ ctx.o(up, "arready", 1) }}),
+      .s_rdata_o  ({{ ctx.o(up, "rdata", up.data_width) }}),
+      .s_rresp_o  ({{ ctx.o(up, "rresp", 2) }}),
+      .s_rvalid_o ({{ ctx.o(up, "rvalid", 1) }}),
+      .s_rready_i ({{ ctx.i(up, "rready", 1, 1) }}),
+      .m_paddr_o  ({{ ctx.o(dn, "paddr", dn.addr_width) }}),
+      .m_pprot_o  ({{ ctx.o(dn, "pprot", 3) }}),
+      .m_psel_o   ({{ ctx.o(dn, "psel", 1) }}),
+      .m_penable_o({{ ctx.o(dn, "penable", 1) }}),
+      .m_pwrite_o ({{ ctx.o(dn, "pwrite", 1) }}),
+      .m_pwdata_o ({{ ctx.o(dn, "pwdata", dn.data_width) }}),
+      .m_pstrb_o  ({{ ctx.o(dn, "pstrb", dn.data_width // 8) }}),
+      .m_pready_i ({{ ctx.i(dn, "pready", 1, 1) }}),
+      .m_prdata_i ({{ ctx.i(dn, "prdata", 0, dn.data_width) }}),
+      .m_pslverr_i({{ ctx.i(dn, "pslverr", 0, 1) }})
+  );
+{% endif %}

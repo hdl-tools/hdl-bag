@@ -178,7 +178,7 @@ async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data
 
 
 # A default-slave master's own errors (D32) come from its guard, which answers DECERR.
-AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3}
+AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3, "PSLVERR": 2}
 
 
 def _to_lite(m: Any) -> bool:
@@ -188,15 +188,23 @@ def _to_lite(m: Any) -> bool:
     return bool(m.protocol == "AXI4" and fabric.protocol == "AXI4-Lite")
 
 
+# Bridges whose response translation the model knows: PULP axi_lite_to_apb turns PSLVERR
+# into SLVERR, and their axi_to_axi_lite reports every write error as SLVERR.
+PULP_BRIDGES = ("bag_axi2apb", "bag_axi2axil")
+
+
 def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
-    """The exact AXI response an AXI master must get; None where bridges translate it."""
-    if m.protocol not in AXI or exp.bridges:
+    """The exact AXI response an AXI master must get; None where a bridge without a model
+    of its response translation is crossed."""
+    templates = {b.name: b.template for b in SPEC.bridges}
+    if m.protocol not in AXI or any(templates[b] not in PULP_BRIDGES for b in exp.bridges):
         return None
     if exp.slave is None:
         code = 0 if exp.masked else AXI_RESP[exp.miss]
     else:
         code = 2 if exp.slave_error else 0
-    return 2 if code and write and _to_lite(m) else code
+    through_lite = _to_lite(m) or bool(exp.bridges)
+    return 2 if code and write and through_lite else code
 
 
 def _pin_sets() -> list[dict[str, bool]]:
@@ -227,11 +235,15 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                     data = random.getrandbits(32)
                     written = None
                     for write in (True, False):
+                        ns = nonsec
                         if m.protocol == "AHB-Lite":
                             prot = random.getrandbits(4)
                         else:
-                            prot = (random.getrandbits(3) & ~0b010) | int(nonsec) << 1
-                        exp = route(SPEC, m.name, addr, write, nonsec, pins)
+                            # Without secure regions the non-secure bit cannot change the
+                            # route, so it is random too and every PROT bit is checked.
+                            ns = nonsec if secure else bool(random.getrandbits(1))
+                            prot = (random.getrandbits(3) & ~0b010) | int(ns) << 1
+                        exp = route(SPEC, m.name, addr, write, ns, pins)
                         before = {n: len(s.log) for n, s in slaves.items()}
                         user = random.getrandbits(m.user_width) if m.user_width else 0
                         err, got, resp = await _access(masters[m.name], m.protocol,
@@ -575,3 +587,36 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
             )
             checked += 1
     dut._log.info("AXI4 bursts: %d checks", checked)
+
+
+@cocotb.test(timeout_time=50, timeout_unit="us")
+async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
+    """Every AXI master to every APB4 slave it reaches: pre-fill a word, write one byte;
+    the APB slave sees that byte's PSTRB and the other bytes keep their value."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = 0
+    for m in SPEC.masters:
+        if m.protocol not in AXI:
+            continue
+        for s in SPEC.slaves:
+            if s.protocol != "APB4" or s.data_width != 32:
+                continue
+            region = next(r for r in SPEC.memory_map if r.slave == s.name)
+            word = region.base + 0x40
+            if word >= 1 << m.addr_width:
+                continue
+            outs = [route(SPEC, m.name, word, w, False, {}) for w in (True, False)]
+            if any(o.slave != s.name or o.slave_error or o.masked for o in outs):
+                continue
+            drv = masters[m.name]
+            assert await drv.write(word, 0xFFFF_FFFF) == 0, f"{m.name} -> {s.name} pre-fill"
+            n = len(slaves[s.name].log)
+            assert not await drv.byte_write(word + 1, 0x5A), f"{m.name} -> {s.name} byte write"
+            seen = [e for e in slaves[s.name].log[n:] if e.write and e.strb]
+            assert [e.strb for e in seen] == [0b0010], (
+                f"{m.name} -> {s.name}: APB writes with PSTRB {[bin(e.strb) for e in seen]}"
+            )
+            r = await drv.read(word)
+            assert not r.err and r.data == 0xFFFF_5AFF, f"{m.name} -> {s.name}: {r.data:#x}"
+            checked += 1
+    dut._log.info("byte writes checked: %d master/slave pairs", checked)

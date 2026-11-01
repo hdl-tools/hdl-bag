@@ -233,3 +233,44 @@ def test_width_conversion_on_the_axi4_side_of_pc() -> None:
     assert dw.up is not None and dw.down is not None
     assert (dw.up.protocol, dw.down.protocol) == ("AXI4", "AXI4")
     assert (dw.up.data_width, dw.down.data_width) == (64, 32)
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ("bridges_pulp", {
+            "u_br_per": ("bag_axi2apb", 32, 0x4000_0000, 2),
+            "u_br_cfg": ("bag_axi2axil", 32, 0, 2),
+            "u_br_lp": ("bag_axil2apb", 32, 0, 0),
+        }),
+        # br_per and br_led sit behind br_aon's pass-through N window (0x4000_0000): br_per
+        # (N) subtracts only the rest of its window, br_led (Y) nothing.
+        ("bridges_pulp_cdc", {
+            "u_br_aon": ("bag_axi2axil", 32, 0x4000_0000, 0),
+            "u_br_per": ("bag_axil2apb", 24, 0x0080_0000, 2),
+            "u_br_led": ("bag_axil2apb", 24, 0, 0),
+            "u_br_sys": ("bag_axi2apb", 32, 0x4200_0000, 1),
+        }),
+    ],
+)  # fmt: skip
+def test_bridge_instances(
+    tmp_path: Path, config: str, expected: dict[str, tuple[str, int, int, int]]
+) -> None:
+    """Each bridge instantiates the module for its upstream protocol, with the offset the
+    chain of pass-through windows gives it and the IR's FIFO depth."""
+    from hdl_bag.gen import generate
+    from hdl_bag.ir import load
+
+    root = Path(__file__).parents[1] / "configs" / "p3"
+    spec = load(root / f"{config}.ir.yaml")
+    out = generate(spec, tmp_path, root, "flat")
+    top = (tmp_path / f"rtl/{spec.hierarchy.top}.sv").read_text()
+    insts = {
+        m[3]: (m[1], m[2]) for m in re.finditer(r"\n  (\w+) #\((.*?)\n  \) (u_\w+) \(", top, re.S)
+    }
+    assert out.top
+    for name, (module, aw, offset, depth) in expected.items():
+        mod, params = insts[name]
+        assert mod == module, name
+        assert f"({lit(aw, offset)})" in params.split(".AddrOffset", 1)[1].split("\n", 1)[0], name
+        assert re.search(rf"\.FifoDepth\s*\({depth}\)", params), name

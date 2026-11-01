@@ -60,23 +60,40 @@ class DecodeTables:
 
 
 def fabric_offset(spec: Spec, fabric: Fabric) -> int:
-    """Address offset of FABRIC: the window base of the pass-through N bridge feeding it.
+    """Address offset of FABRIC: the window base of the nearest pass-through N bridge on its
+    path from the system (a pass-through Y bridge passes its upstream fabric's offset on).
 
     Every master of a fabric must see the same addresses, so masters that translate
     differently (a pass-through N bridge next to a direct master, or two bridges with
     different windows) cannot share a fabric.
     """
     bridges = {b.name: b for b in spec.bridges}
+    fabrics = {f.name: f for f in spec.fabrics}
     offsets = set()
     for p in fabric.master_ports:
         b = bridges.get(p.port)
-        offsets.add(0 if b is None or b.pass_through else b.window_base)
+        if b is None:
+            offsets.add(0)
+        elif not b.pass_through:
+            offsets.add(b.window_base)
+        else:
+            offsets.add(fabric_offset(spec, fabrics[b.upstream]))
     if len(offsets) > 1:
         raise GenerateError(
             f"fabric {fabric.name}: its masters see different address translations "
             f"(pass-through N bridges with other masters); give them separate fabrics"
         )
     return offsets.pop() if offsets else 0
+
+
+def bridge_offset(spec: Spec, name: str) -> int:
+    """What bridge NAME subtracts from the addresses it forwards: for pass-through N its
+    window base relative to its upstream fabric's addresses, for pass-through Y nothing."""
+    b = next(x for x in spec.bridges if x.name == name)
+    if b.pass_through:
+        return 0
+    upstream = next(f for f in spec.fabrics if f.name == b.upstream)
+    return b.window_base - fabric_offset(spec, upstream)
 
 
 def decode_tables(fabric: Fabric, offset: int = 0) -> DecodeTables:
