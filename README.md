@@ -10,13 +10,67 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha: Phase 0 (repository bootstrap). Nothing is usable yet.
+Pre-alpha. Phases 1 and 2 of 6 are done; Phase 3 (AXI) is in progress.
+
+| Works today | Not yet |
+|---|---|
+| Spec workbook template, reader and 81 validation checks | AXI4 / AXI4-Lite fabrics, adapters and AXI bridges (Phase 3) |
+| Canonical YAML IR, byte-identical across runs | Generated cocotb tests (Phase 4) |
+| AHB-Lite single-layer bus (multi-master), APB3/APB4 decoder-mux, AHB-Lite → APB bridge | Formal checks and nightly random regression (Phase 5) |
+| Wrapper in flat or SV-interface port style, nested sub-wrappers | User guide and v1.0 release (Phase 6) |
+| C header, memory-map doc (Markdown and HTML), port map | |
+| Lint (slang, Verilator, Verible) and Verilator compile flows | |
+
+A spec that uses an AXI template still gets its collateral; `bag generate`
+then stops and names the templates that have no RTL yet.
+
+Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md).
+
+## Quick start
+
+```sh
+# Until v1.0 is on PyPI, install from the repository:
+pip install git+https://github.com/hdl-tools/hdl-bag.git
+
+bag template --sample -o demo_ss.xlsx   # the demo_ss sample (omit --sample for a blank one)
+bag check spec.xlsx                     # every check; exit 1 on any error
+bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
+bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml)
+bag lint out/                           # slang + Verilator + Verible, zero unwaived findings
+bag flow spec.xlsx -o out/              # check -> generate -> lint -> compile
+```
+
+`--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
+port style. `hdl-bag` is an alias for the `bag` command.
+
+Generated output (under the output directory):
+
+```
+rtl/pkg/<package>.sv     parameter package (widths, decode tables)
+rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
+rtl/inhouse/*.sv         the in-house IP the design uses
+<project>.f              file list in compile order
+sw/<project>_memmap.h    C header
+doc/memmap.md, .html     memory-map document
+doc/port_map.md          per-fabric port map
+```
 
 ## Requirements
 
-- Python 3.11 or newer
-- EDA tools (Verilator, slang, Verible, SymbiYosys, Bender) for the lint,
-  simulation and formal flows; a pinned container image is provided.
+- Python 3.11 or newer (tested on Linux and Windows).
+- For `bag lint` and `bag flow`: Verilator, slang and Verible. The pinned
+  versions are in [tools.lock](tools.lock), and the container image
+  `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile))
+  has all of them. Reading, checking and generating need no EDA tools.
+
+## Development
+
+```sh
+uv sync
+uv run ruff check && uv run ruff format --check && uv run mypy src tests scripts
+uv run pytest                 # everything except EDA tests
+uv run pytest -m eda          # lint, compile and cocotb tests (in the tools image)
+```
 
 ## Licence
 
