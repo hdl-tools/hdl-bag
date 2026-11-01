@@ -119,7 +119,7 @@ fabrics:
             enable: boot_remap_i
       - master: dbg
         miss: default-slave
-        default_slave: regs
+        default_slave: rom
         aliases: []
       - master: dma
         miss: SLVERR
@@ -331,4 +331,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_xbar_rules.xlsx
-  sha256: e48391776db71459d75b0b5d304c780a40fc68d8f8973703ba8867e50f878fcf
+  sha256: 57a719922d114a2aff0eaf22de6af6fa24ac1d97ea4da6bd700e280b62bbd97a

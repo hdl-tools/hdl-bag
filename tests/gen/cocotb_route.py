@@ -177,7 +177,8 @@ async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data
     return r.err, r.data, 2 * int(r.err)
 
 
-AXI_RESP = {"SLVERR": 2, "DECERR": 3}
+# A default-slave master's own errors (D32) come from its guard, which answers DECERR.
+AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3}
 
 
 def _expected_resp(m: Any, exp: Any) -> int | None:

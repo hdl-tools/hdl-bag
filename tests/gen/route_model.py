@@ -6,7 +6,7 @@ The spec semantics (workbook guide + owner decisions), not the generator's table
 per fabric, apply the master's enabled alias, find the Memory_Map region (from
 spec.memory_map, not the resolver's addr_rules), then deny on RO/WO, secure-only with a
 non-secure access, or Access_Rules; a miss or denial goes to the master's default slave
-or returns an error. A bridge forwards to its downstream fabric (as master). Memory_Map
+or returns an error, and a denial by the default slave itself returns an error (D32). A bridge forwards to its downstream fabric (as master). Memory_Map
 addresses are system addresses throughout; a pass-through N bridge only changes what
 the slaves behind it see (the offset from its window base). A slave sees the low bits
 of its address (D29).
@@ -81,9 +81,14 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 denied |= (write and ar.access == "RO") or (not write and ar.access == "WO")
             target = None if denied else region.slave
         if target is None:
-            if decode.miss != "default-slave" or decode.default_slave is None:
+            to_default = decode.miss == "default-slave" and decode.default_slave is not None
+            # D32: a denial never reaches the slave that denied it.
+            if to_default and region is not None and region.slave == decode.default_slave:
+                to_default = False
+            if not to_default:
                 return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
             target = decode.default_slave
+            assert target is not None  # to_default implies a default slave
         if target in bridges:
             b = bridges[target]
             offset += 0 if b.pass_through else b.window_base
@@ -93,12 +98,14 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             crossed.append(b.name)
             continue
         word = slaves[target].data_width // 8  # a slave answers per data word
-        error = any(r.slave == target and addr // word == (r.base + r.size - ERROR_WORD) // word
-                    for r in spec.memory_map)  # fmt: skip
-        error = error and not pslverr_tied(spec, target) and not masked
         width = slaves[target].addr_width
-        return Outcome(target, (addr - offset) & ((1 << width) - 1), masked=masked,
-                       slave_error=error, nonsec=nonsec, bridges=tuple(crossed))  # fmt: skip
+        visible = (addr - offset) & ((1 << width) - 1)
+        # The slave decides on the address it sees (a redirected miss can alias its error word).
+        error = visible // word in {e // word for e in error_words(spec, target)}
+        error = error and not masked
+        return Outcome(
+            target, visible, masked=masked, slave_error=error, nonsec=nonsec, bridges=tuple(crossed)
+        )
     raise AssertionError("bridge chain longer than the number of fabrics")
 
 
