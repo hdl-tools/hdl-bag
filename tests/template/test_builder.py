@@ -65,13 +65,18 @@ def test_blank_has_sample_structure_without_data(sample: Workbook, blank: Workbo
 
 
 def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
-    """True if a cell difference is part of the approved schema 0.2 -> 0.3 delta."""
+    """True if a cell difference is part of the approved delta: schema 0.2 -> 0.3, then
+    0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column)."""
     if isinstance(old, str) and isinstance(new, str):
         renamed = old.replace("BusGen", "BAG").replace("busgen_", "bag_")
         if renamed == new:
             return True
     if (sheet, coord) == ("Project", "B6"):
-        return (old, new) == ("0.2", "0.3")
+        return (old, new) == ("0.2", "0.4")
+    if sheet == "README" and old is None:
+        return coord in {"A27", "B27"}  # the User_Ports row, after the last legend row
+    if sheet == "Lists" and old is None:
+        return True  # the Direction list (a new column)
     if (sheet, coord) == ("Wrapper", "C13"):
         return isinstance(old, str) and new == old.replace("cdc, fifo", "cdc, iw (ID width), fifo")
     if sheet == "Fabrics" and coord[0] in "IJ" and coord[1:] in {"7", "8", "9"}:
@@ -87,13 +92,22 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
 def test_port_matches_reference_except_schema_delta(sample: Workbook) -> None:
     ref = signature(openpyxl.load_workbook(REFERENCE))
     new = signature(sample)
-    assert ref["order"] == new["order"]
+    assert ref["order"] == [n for n in new["order"] if n != "User_Ports"]  # 0.4 adds it
     unexplained = []
     for name, a in ref["sheets"].items():
         b = new["sheets"][name]
         for key in ("validations", "conditional", "freeze", "widths"):
-            if a[key] != b[key]:
-                unexplained.append(f"{name}.{key}")
+            if a[key] == b[key]:
+                continue
+            if (
+                name == "Lists"
+                and key == "widths"
+                and all(  # 0.4: one more list column
+                    b[key].get(k) == v for k, v in a[key].items()
+                )
+            ):
+                continue
+            unexplained.append(f"{name}.{key}")
         for key in ("cells", "comments"):
             for coord in sorted(set(a[key]) | set(b[key])):
                 old, cur = a[key].get(coord), b[key].get(coord)

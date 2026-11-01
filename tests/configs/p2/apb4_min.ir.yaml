@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: apb4_min
   revision: p2
@@ -128,6 +128,7 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: s0
     region: regs
@@ -167,4 +168,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_min.xlsx
-  sha256: 011bfba5ec11f2ac77c2e7ea5de7871a59a53d96c0bd17fae0eb18eb2c258c5c
+  sha256: c97060186bfce88cbdb53a58367173ba87e5a28bee2a010418423b152c552b69

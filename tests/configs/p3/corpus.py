@@ -446,7 +446,7 @@ def external_fabric() -> Cfg:
     by an AXI4 master through CDC and width adapters, with an AXI4 slave; an APB4 "peri"
     reached through a bag_ahb2apb bridge from a generated AHB-Lite bus. BAG instantiates
     demo modules <project>_noc / <project>_peri and writes stubs for them."""
-    c = Cfg("external_fabric", phase=3)
+    c = Cfg("external_fabric", phase=3, extra_inputs=("test_mode_i",))
     c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_NOC", "clk_noc", "rst_noc_n")
     c.fabric("noc", "AXI4", 32, 32, "D_NOC", "round-robin", latency="CUT_ALL_AX",
              max_trans=(4, 4), template="bag_external")  # fmt: skip
@@ -468,6 +468,18 @@ def external_fabric() -> Cfg:
     c.option("mcu", **AHB_MASTER_NA)
     c.option("br_peri", **APB4_NA).option("uart", **APB4_NA)
     c.sub("ss_noc", "external_fabric_top").place("noc", "ss_noc")
+    # User ports (D41), one of each connection; noc's exposed ones cross ss_noc.
+    c.user_port("noc", "irq_o", "output", 1, "expose")
+    c.user_port("noc", "err_o", "output", 2, "open")
+    c.user_port("noc", "cfg_i", "input", 4, "expose")
+    c.user_port("noc", "qos_i", "input", 4, "0xA")
+    c.user_port("noc", "test_i", "input", 1, "extra input test_mode_i")
+    c.user_port("noc", "clk_cfg_i", "input", 1, "clock D_SYS")
+    c.user_port("noc", "rst_cfg_ni", "input", 1, "reset D_SYS")
+    c.user_port("noc", "lock_i", "input", 1, "tie-1")
+    c.user_port("noc", "cfg_o", "output", 4, "expose")
+    c.user_port("noc", "qos_o", "output", 4, "expose")
+    c.user_port("peri", "irq_o", "output", 1, "expose")
     return c
 
 

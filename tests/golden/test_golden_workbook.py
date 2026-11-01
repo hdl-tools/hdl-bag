@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""The committed golden workbook: recalculated demo_ss sample (schema 0.3).
+"""The committed golden workbook: recalculated demo_ss sample (schema 0.4).
 
 Refresh it after a schema change from the ``golden-demo_ss`` CI artifact (see the
 ``golden`` job in .github/workflows/pr.yml).
@@ -24,6 +24,7 @@ CHECK_COLUMNS = [
     ("Topology", "L", 5, 200),
     ("Access_Rules", "G", 5, 60),
     ("Memory_Map", "M", 5, 60),
+    ("User_Ports", "H", 5, 60),
     ("Hierarchy", "D", 5, 12),
     ("Hierarchy", "F", 16, 55),
 ]

@@ -92,6 +92,8 @@ def to_spec_data(spec: ir.Spec) -> SpecData:
         [o.port, o.fifo_depth, o.slice, o.prot, o.qos, o.region, o.cache, o.lock, o.pstrb, o.pslverr, None]
         for o in spec.port_options
     ]  # fmt: skip
+    data.user_ports = [[u.instance, u.port, u.direction, u.width, _connection(u), None]
+                       for u in spec.user_ports]  # fmt: skip
     data.sub_wrappers = [[s.name, s.parent, None] for s in spec.hierarchy.wrappers]
 
     # Placement rows only where the IR differs from the default home or instance name.
@@ -120,3 +122,14 @@ def to_spec_data(spec: ir.Spec) -> SpecData:
 
 def to_workbook(spec: ir.Spec) -> Workbook:
     return build_workbook(data=to_spec_data(spec))
+
+
+def _connection(u: ir.UserPort) -> str:
+    """User_Ports > Connection text for U (the inverse of reader.values.parse_connection)."""
+    if u.connection == "tie":
+        return f"0x{u.tie or 0:X}"
+    if u.connection == "extra-input":
+        return f"extra input {u.target}"
+    if u.connection in ("clock", "reset"):
+        return f"{u.connection} {u.target}"
+    return u.connection

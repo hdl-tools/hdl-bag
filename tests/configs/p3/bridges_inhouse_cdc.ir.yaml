@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: bridges_inhouse_cdc
   revision: p3
@@ -546,6 +546,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: sram
     region: mem
@@ -702,4 +703,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_inhouse_cdc.xlsx
-  sha256: 04e66bb20c2ad3c4ebdcd9a28f63669480caf5a5d68b5e85402cc325c4fd1296
+  sha256: e831dc26bb0b19af524061fa09093bd3c74a3124e0d434f6631a0c089242770b

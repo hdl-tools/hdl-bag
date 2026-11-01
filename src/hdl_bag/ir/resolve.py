@@ -18,6 +18,7 @@ from hdl_bag.checks.memory import access_rules
 from hdl_bag.ir import model as ir
 from hdl_bag.protocols import OPTIONAL_SIGNALS, signal_applies
 from hdl_bag.reader.model import Cell
+from hdl_bag.reader.values import parse_connection
 from hdl_bag.template import SCHEMA_VERSION
 
 _SIGNAL_FIELDS = {
@@ -158,6 +159,7 @@ def resolve(result: CheckResult) -> ir.Spec:
         bridges=tuple(bridges),
         adapters=adapters,
         port_options=_port_options(ctx),
+        user_ports=_user_ports(ctx),
         memory_map=tuple(sorted(regions, key=lambda r: (r.base, r.fabric, r.slave, r.region))),
         hierarchy=ir.Hierarchy(top=top, wrappers=wrappers, placement=placement),
         wrapper=ir.Wrapper(
@@ -414,3 +416,19 @@ def _port_options(ctx: Context) -> tuple[ir.PortOption, ...]:
         out.append(ir.PortOption(port=name, fifo_depth=fifo or 0, slice=sl or "none", **signals))  # type: ignore[arg-type]
     assert set(_SIGNAL_FIELDS) == set(OPTIONAL_SIGNALS)
     return tuple(out)
+
+
+def _user_ports(ctx: Context) -> tuple[ir.UserPort, ...]:
+    """User_Ports rows (D41), sorted by instance then port; tie-1 becomes all ones."""
+    out = []
+    for r in ctx.raw.user_ports:
+        width = _req_int(ctx, r["Width (bits)"], 1)
+        kind, target, tie = parse_connection(r["Connection"].value)
+        if tie == -1:
+            tie = (1 << width) - 1
+        out.append(ir.UserPort(
+            instance=_req(ctx.text(r["Instance"])), port=_req(ctx.text(r["Port"])),
+            direction=_req(ctx.text(r["Direction"])),  # type: ignore[arg-type]
+            width=width, connection=kind, target=target, tie=tie,  # type: ignore[arg-type]
+        ))  # fmt: skip
+    return tuple(sorted(out, key=lambda u: (u.instance, u.port)))

@@ -57,6 +57,16 @@ def _messages(tmp_path: Path, edits: list[Edit]) -> list[str]:
     return [f.message for f in run_checks(read_workbook(path), tmp_path).findings]
 
 
+def _user(row: int, inst: str, port: str, direction: str, width: int, conn: str) -> list[Edit]:
+    """A User_Ports row (D41)."""
+    cells = _row("User_Ports", row, Instance=inst, Port=port, Direction=direction, Connection=conn)
+    return [*cells, ("User_Ports", row, "Width (bits)", width)]
+
+
+# aon_apb becomes a user-supplied fabric, so User_Ports rows may name it.
+EXT: list[Edit] = [("Fabrics", 9, "Backing template", "bag_external")]
+
+
 def _clear(sheet: str, row: int, headers: tuple[str, ...]) -> list[Edit]:
     return [(sheet, row, h, None) for h in headers]
 
@@ -83,7 +93,7 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
      ["Resets row 5: Polarity 'low' is not one of active-low, active-high (VALUE-ILLEGAL)"]),
     ("PROJ-SCHEMA-VERSION", [("Project", 6, "Value", "0.2")],
-     ["Project row 6: Spec schema version '0.2' differs from '0.3' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+     ["Project row 6: Spec schema version '0.2' differs from '0.4' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
@@ -286,6 +296,26 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Wrapper row 34: bridge br_main2per is always internal; set N (WRAP-INTERNAL-PORT)"]),
     ("WRAP-NAME-COLLISION", [("Wrapper", 11, "Value", "boot_remap_i, cpu0_axi_awaddr")],
      ["Wrapper row 18: top-level port cpu0_axi_awaddr of cpu0 collides with Wrapper > Extra top-level inputs (WRAP-NAME-COLLISION)"]),
+    ("USERPORT-INSTANCE", _user(5, "main_xbar", "irq_o", "output", 1, "open"),
+     ["User_Ports row 5: main_xbar is not a fabric with a user-supplied template (bag_external) (USERPORT-INSTANCE)"]),
+    ("USERPORT-DUPLICATE", [*EXT, *_user(5, "aon_apb", "irq_o", "output", 1, "open"),
+                            *_user(6, "aon_apb", "irq_o", "output", 1, "expose")],
+     ["User_Ports row 6: aon_apb.irq_o is already declared on row 5 (USERPORT-DUPLICATE)"]),
+    ("USERPORT-NAME", [*EXT, *_user(5, "aon_apb", "clk_i", "input", 1, "clock D_AON")],
+     ["User_Ports row 5: clk_i is a bus or clock port BAG already connects on aon_apb (USERPORT-NAME)"]),
+    ("USERPORT-CONNECTION", [*EXT, *_user(5, "aon_apb", "cfg_i", "input", 4, "open"),
+                             *_user(6, "aon_apb", "irq_o", "output", 1, "tie-0"),
+                             *_user(7, "aon_apb", "test_i", "input", 1, "extra input nope_i"),
+                             *_user(8, "aon_apb", "qos_i", "input", 2, "0x7"),
+                             *_user(9, "aon_apb", "bad_i", "input", 1, "wire it")],
+     ["User_Ports row 5: open leaves the port unconnected, so cfg_i must be an output (tie an unused input) (USERPORT-CONNECTION)",
+      "User_Ports row 6: tie-0 drives the port, so irq_o must be an input (USERPORT-CONNECTION)",
+      "User_Ports row 7: nope_i is not on Wrapper > Extra top-level inputs (USERPORT-CONNECTION)",
+      "User_Ports row 8: 0x7 does not fit in 2 bits (USERPORT-CONNECTION)",
+      "User_Ports row 9: 'wire it' is not expose, open, tie-0, tie-1, 0x<hex>, extra input <name>, clock <domain> or reset <domain> (USERPORT-CONNECTION)"]),
+    ("WRAP-NAME-COLLISION-user", [*EXT, *_user(5, "aon_apb", "awaddr", "output", 1, "expose"),
+                                  ("Wrapper", 11, "Value", "boot_remap_i, aon_apb_awaddr")],
+     ["User_Ports row 5: top-level port aon_apb_awaddr of User_Ports aon_apb.awaddr collides with Wrapper > Extra top-level inputs (WRAP-NAME-COLLISION)"]),
     ("WRAP-NAME-COLLISION-boundary", [("Wrapper", 11, "Value", "boot_remap_i, br_main2per_2_periph_apb_apb4_paddr")],
      ["Hierarchy row 7: boundary port br_main2per_2_periph_apb_apb4_paddr of sub-wrapper per_wrapper is claimed by extra input br_main2per_2_periph_apb_apb4_paddr and link br_main2per_2_periph_apb (WRAP-NAME-COLLISION)"]),
 ]  # fmt: skip

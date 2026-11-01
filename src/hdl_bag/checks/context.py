@@ -192,6 +192,8 @@ class Context:
     slave_fabric: dict[str, str] = field(default_factory=dict)  # slaves, bridge upstream ends
     fabric_masters: dict[str, list[str]] = field(default_factory=dict)
     fabric_slaves: dict[str, list[str]] = field(default_factory=dict)
+    # Top-level port names and their owners (filled by check_wrapper_ports).
+    top_names: dict[str, str] = field(default_factory=dict)
 
     def rows(self, kind: Kind) -> tuple[Row, ...]:
         return {

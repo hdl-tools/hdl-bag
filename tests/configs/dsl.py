@@ -148,6 +148,12 @@ class Cfg:
         self.data.port_options[-1].insert(0, port)
         return self
 
+    def user_port(self, inst: str, port: str, direction: str, width: int,
+                  connection: str) -> "Cfg":  # fmt: skip
+        """A User_Ports row (D41): an extra port of a user-supplied fabric."""
+        self.data.user_ports.append([inst, port, direction, width, connection, None])
+        return self
+
     # ---- hierarchy
     def sub(self, name: str, parent: str) -> "Cfg":
         self.data.sub_wrappers.append([name, parent, None])

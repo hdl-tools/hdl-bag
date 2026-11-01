@@ -30,7 +30,7 @@ class Table:
     stop_labels: tuple[str, ...] = ()  # column-A section labels that end the table
 
 
-# Input columns of every table (schema 0.3). tests/reader keeps these equal to the
+# Input columns of every table (schema 0.4). tests/reader keeps these equal to the
 # builder's input columns.
 CLOCKS = Table("Clocks", ("Clock", "Freq (MHz)", "Source", "Domain", "Reset", "Notes"))
 RESETS = Table(
@@ -86,6 +86,9 @@ PORT_OPTIONS = Table(
         "LOCK / excl", "PSTRB", "PSLVERR", "Notes",
     ),
 )  # fmt: skip
+USER_PORTS = Table(
+    "User_Ports", ("Instance", "Port", "Direction", "Width (bits)", "Connection", "Notes")
+)
 SUB_WRAPPERS = Table("Hierarchy", ("Sub-wrapper", "Parent", "Notes"), ("Placement",))
 PLACEMENT = Table("Hierarchy", ("Instance", "Sub-wrapper", "RTL instance name", "Notes"))
 EXPOSED_PORTS = Table(
@@ -95,7 +98,7 @@ KV_HEADERS: Final = ("Setting", "Value", "Notes")
 
 TABLES: Final = (
     CLOCKS, RESETS, FABRICS, MASTERS, SLAVES, BRIDGES, TOPOLOGY, ACCESS_RULES, MEMORY_MAP,
-    ADDRESS_DECODE, PORT_OPTIONS, SUB_WRAPPERS, PLACEMENT, EXPOSED_PORTS,
+    ADDRESS_DECODE, PORT_OPTIONS, USER_PORTS, SUB_WRAPPERS, PLACEMENT, EXPOSED_PORTS,
 )  # fmt: skip
 
 
@@ -205,6 +208,7 @@ def read_workbook(path: Path) -> RawSpec:
         memory_map=_read_table(wb, MEMORY_MAP),
         address_decode=_read_table(wb, ADDRESS_DECODE),
         port_options=_read_table(wb, PORT_OPTIONS),
+        user_ports=_read_table(wb, USER_PORTS),
         sub_wrappers=tuple(sub_wrappers),
         placement=_read_table(wb, PLACEMENT, first_row=placement_from),
         exposed_ports=_read_table(wb, EXPOSED_PORTS, first_row=wrapper_end + 1),

@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: ahb2apb_cdc
   revision: p2
@@ -249,6 +249,7 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: mem
     region: ram
@@ -325,4 +326,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb2apb_cdc.xlsx
-  sha256: 0b996cd52b833e2df54b6929386c03966991de4f8e063a9776d5f8e48ae5c9df
+  sha256: 4f72fae5c7a6793095a0b11d61a8de2f74cdc452de4299c755584dfb2abedd93

@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: ahb_single
   revision: p2
@@ -213,6 +213,7 @@ port_options:
     lock: n/a
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: s12
     region: mem
@@ -287,4 +288,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_single.xlsx
-  sha256: 9e5868a3e9508815a141082bc9854c770bda1ccba5b5a43b243247bbfd54c018
+  sha256: 2a9bd0cf610be5af76bcfc9792d0e6e4804d0ab25b86c3bddca08768487ac7bc

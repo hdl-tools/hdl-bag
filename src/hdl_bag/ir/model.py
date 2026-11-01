@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""IR models (schema 0.3). The YAML dump of ``Spec`` is the canonical spec.
+"""IR models (schema 0.4). The YAML dump of ``Spec`` is the canonical spec.
 
 Field order is the dump order. Every list is sorted by resolve, so equal specs give
 byte-identical files. Addresses and sizes are ints here and hex text in YAML.
@@ -207,6 +207,21 @@ class PortOption(_M):
     pslverr: Signal
 
 
+class UserPort(_M):
+    """An extra port of a user-supplied module (bag_external) and its connection (D41).
+
+    ``target`` is the extra top-level input (connection extra-input) or the clock domain
+    (clock, reset); ``tie`` the constant of connection tie."""
+
+    instance: str
+    port: str
+    direction: Literal["input", "output"]
+    width: int
+    connection: Literal["expose", "extra-input", "tie", "open", "clock", "reset"]
+    target: str | None = None
+    tie: Addr | None = None
+
+
 class Region(_M):
     slave: str
     region: str
@@ -274,6 +289,7 @@ class Spec(_M):
     bridges: tuple[Bridge, ...]
     adapters: tuple[Adapter, ...]
     port_options: tuple[PortOption, ...]
+    user_ports: tuple[UserPort, ...]
     memory_map: tuple[Region, ...]
     hierarchy: Hierarchy
     wrapper: Wrapper

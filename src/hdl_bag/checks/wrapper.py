@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""Hierarchy (sub-wrappers, placement) and Wrapper (exposed ports, name collisions)."""
+"""Hierarchy (sub-wrappers, placement), Wrapper (exposed ports, name collisions) and
+User_Ports (extra ports of user-supplied fabrics, D41)."""
 
 from typing import TYPE_CHECKING, Literal
 
@@ -14,6 +15,7 @@ from hdl_bag.protocols import (
     Protocol,
     port_signals,
 )
+from hdl_bag.reader.values import parse_connection
 
 if TYPE_CHECKING:
     from hdl_bag.checks import CheckResult
@@ -127,7 +129,7 @@ def check_wrapper_ports(ctx: Context) -> None:
         for f in ctx.findings
     ):
         pattern = "{port}_{proto}_{signal}"
-    owners: dict[str, str] = {}  # top-level port name -> owner
+    owners = ctx.top_names  # top-level port name -> owner
 
     def claim(name: str, owner: str, row_cell: object) -> None:
         if name in owners and owners[name] != owner:
@@ -222,3 +224,90 @@ def check_boundary_names(ctx: Context, result: "CheckResult") -> None:
     rows = {ctx.text(r["Sub-wrapper"]): r for r in ctx.raw.sub_wrappers}
     for prob in problems(netlist, plan(netlist)):
         ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
+
+
+USER_DIRECTIONS = ("input", "output")
+_INPUT_ONLY = ("extra-input", "tie", "clock", "reset")
+
+
+def check_user_ports(ctx: Context) -> None:
+    """User_Ports rows: a known user-supplied fabric, a fresh port name, a connection legal
+    for the direction, and (exposed) a top-level name nothing else uses."""
+    pattern_cell = ctx.raw.wrapper.get("Signal naming pattern")
+    pattern = (ctx.text(pattern_cell) if pattern_cell else None) or "{port}_{proto}_{signal}"
+    domains = set(ctx.domains)
+    inputs = set(extra_inputs(ctx))
+    seen: dict[tuple[str, str], int] = {}
+    contract: dict[str, set[str]] = {}
+    for row in ctx.raw.user_ports:
+        inst = ctx.text(row["Instance"], required=True)
+        port = ctx.name(row["Port"])
+        direction = ctx.enum(row["Direction"], USER_DIRECTIONS)
+        width = ctx.integer(row["Width (bits)"], 1)
+        conn_text = ctx.text(row["Connection"], required=True)
+        ctx.text(row["Notes"])
+        if inst is None:
+            continue
+        frow = ctx.defs.get(inst)
+        template = ctx.text(frow["Backing template"]) if frow is not None else None
+        manifest = ctx.registry.get(template) if template else None
+        if ctx.kinds.get(inst) != "fabric" or manifest is None or not manifest.opaque:
+            ctx.report("USERPORT-INSTANCE", row["Instance"],
+                       f"{inst} is not a fabric with a user-supplied template (bag_external)")  # fmt: skip
+            continue
+        if port is None:
+            continue
+        if (inst, port) in seen:
+            ctx.report("USERPORT-DUPLICATE", row["Port"],
+                       f"{inst}.{port} is already declared on row {seen[(inst, port)]}")  # fmt: skip
+            continue
+        seen[(inst, port)] = row.row
+        if inst not in contract:
+            proto = ctx.fabric_protocol(inst)
+            names = {"clk_i", "rst_ni"}
+            if proto is not None:
+                attached = [*ctx.fabric_masters.get(inst, []), *ctx.fabric_slaves.get(inst, [])]
+                sigs = {*port_signals(proto, False, has_user=True),
+                        *port_signals(proto, True, has_user=True)}  # fmt: skip
+                names |= {flat_signal_name(pattern, f"{inst}_{p}", PROTO_TOKEN[proto], s, None)
+                          for p in attached for s in sigs}  # fmt: skip
+            contract[inst] = names
+        if port in contract[inst]:
+            ctx.report("USERPORT-NAME", row["Port"],
+                       f"{port} is a bus or clock port BAG already connects on {inst}")  # fmt: skip
+            continue
+        if conn_text is None or direction is None:
+            continue
+        try:
+            kind, target, tie = parse_connection(conn_text)
+        except ValueError as exc:
+            ctx.report("USERPORT-CONNECTION", row["Connection"], str(exc))
+            continue
+        if kind in _INPUT_ONLY and direction != "input":
+            ctx.report("USERPORT-CONNECTION", row["Connection"],
+                       f"{conn_text} drives the port, so {port} must be an input")  # fmt: skip
+        elif kind == "open" and direction != "output":
+            ctx.report("USERPORT-CONNECTION", row["Connection"],
+                       f"open leaves the port unconnected, so {port} must be an output "
+                       "(tie an unused input)")  # fmt: skip
+        elif kind == "extra-input" and target not in inputs:
+            ctx.report("USERPORT-CONNECTION", row["Connection"],
+                       f"{target} is not on Wrapper > Extra top-level inputs")  # fmt: skip
+        elif kind in ("clock", "reset") and target not in domains:
+            ctx.report("USERPORT-CONNECTION", row["Connection"],
+                       f"{target} is not a clock domain")  # fmt: skip
+        elif kind in ("clock", "reset", "extra-input") and isinstance(width, int) and width != 1:
+            ctx.report("USERPORT-CONNECTION", row["Width (bits)"],
+                       f"a {kind.replace('-', ' ')} is 1 bit; {port} is {width} bits")  # fmt: skip
+        elif kind == "tie" and isinstance(width, int) and tie is not None and tie >= 1 << width:
+            ctx.report("USERPORT-CONNECTION", row["Connection"],
+                       f"{conn_text} does not fit in {width} bits")  # fmt: skip
+        elif kind == "expose":
+            top = f"{inst}_{port}"
+            owner = ctx.top_names.get(top)
+            if owner is not None:
+                ctx.report("WRAP-NAME-COLLISION", row["Port"],
+                           f"top-level port {top} of User_Ports {inst}.{port} collides with "
+                           f"{owner}")  # fmt: skip
+            else:
+                ctx.top_names[top] = f"User_Ports {row.where}"

@@ -45,6 +45,7 @@ class SpecData:
     memory_map: Rows = field(default_factory=list)
     address_decode: Rows = field(default_factory=list)
     port_options: Rows = field(default_factory=list)
+    user_ports: Rows = field(default_factory=list)
     sub_wrappers: Rows = field(default_factory=list)  # excluding the top wrapper row
     placement: Rows = field(default_factory=list)
     exposed_ports: Rows = field(default_factory=list)

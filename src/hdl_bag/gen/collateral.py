@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from hdl_bag.gen.decode import fabric_offset
 from hdl_bag.gen.render import GenerateError, header
-from hdl_bag.ir.model import Spec
+from hdl_bag.ir.model import Spec, UserPort
 
 MEMMAP_COLUMNS = ("Slave", "Region", "Base", "End", "Size", "Access", "Secure only")
 ALIAS_COLUMNS = ("Master", "Alias base", "Size", "Maps to", "Enable")
@@ -234,4 +234,26 @@ def port_map_md(spec: Spec, user_header: str | None) -> str:
         rows = [row(r.index, r.port, None, f.name, True)
                 for r in sorted(f.slave_ports, key=lambda r: r.index)]  # fmt: skip
         lines += [*_md_table(PORT_COLUMNS, rows), ""]
+        users = [u for u in spec.user_ports if u.instance == f.name]
+        if users:
+            lines += ["### User ports (User_Ports)", ""]
+            rows = [{"Port": u.port, "Direction": u.direction, "Width": str(u.width),
+                     "Connection": _user_connection(u)} for u in users]  # fmt: skip
+            lines += [*_md_table(USER_COLUMNS, rows), ""]
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+USER_COLUMNS = ("Port", "Direction", "Width", "Connection")
+
+
+def _user_connection(u: UserPort) -> str:
+    """How a user port (D41) is connected, for the port map."""
+    if u.connection == "expose":
+        return f"top-level port {u.instance}_{u.port}"
+    if u.connection == "tie":
+        return f"tied to {u.tie or 0:#x}"
+    if u.connection == "extra-input":
+        return f"extra input {u.target}"
+    if u.connection in ("clock", "reset"):
+        return f"{u.connection} of domain {u.target}"
+    return "open"

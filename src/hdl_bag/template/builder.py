@@ -22,7 +22,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from hdl_bag.template.data import Cell, SpecData
 from hdl_bag.template.sample_demo_ss import SAMPLE
 
-SCHEMA_VERSION: Final = "0.3"
+SCHEMA_VERSION: Final = "0.4"
 COMMENT_AUTHOR: Final = "BAG"
 
 FONT = "Arial"
@@ -48,7 +48,7 @@ P_HDR = 15  # Hierarchy placement header row
 SHEET_ORDER: Final = (
     "README", "Project", "Clocks", "Resets", "Fabrics", "Masters", "Slaves", "Bridges",
     "Topology", "Access_Rules", "Memory_Map", "Address_Decode", "Port_Options",
-    "Hierarchy", "Wrapper", "Lists",
+    "User_Ports", "Hierarchy", "Wrapper", "Lists",
 )  # fmt: skip
 
 LISTS: Final[dict[str, list[str]]] = {
@@ -70,6 +70,7 @@ LISTS: Final[dict[str, list[str]]] = {
                  "bag_ahb2apb", "bag_apb2axi", "bag_apb2ahb", "bag_axi2axil", "bag_external"],
     "SigDrive": ["drive", "tie-0", "tie-default", "n/a"],
     "AdapterPlace": ["with fabric", "with port", "top"],
+    "Direction": ["input", "output"],
 }  # fmt: skip
 
 # Topology lookups (source column A, destination column B)
@@ -280,6 +281,7 @@ class _Builder:
             ("Names", "Lowercase SystemVerilog identifiers, unique across Masters, Slaves, Bridges, Fabrics and sub-wrappers."),
             ("Canonical spec", "BAG converts this workbook to a YAML IR checked into git. RTL, tests and docs are generated from the IR."),
             ("Bridge templates", "axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, plus axi2axil. Never link two fabrics in both directions."),
+            ("User_Ports", "Extra ports of user-supplied fabrics (bag_external) beyond the bus ports: how each one connects (exposed at the top, an extra input, a constant, a clock or reset, or left open)."),
         ]  # fmt: skip
         for i, (k, v) in enumerate(legend, 4):
             a, b = ws.cell(i, 1, k), ws.cell(i, 2, v)
@@ -666,6 +668,35 @@ class _Builder:
         for col in "EFGHIJK":
             self.dv(ws, self.lref["SigDrive"], col)
 
+    def user_ports(self) -> None:
+        ws = self.sheet(
+            "User_Ports",
+            "User ports",
+            "Extra ports of user-supplied fabrics (bag_external): interrupts, status, "
+            "configuration, extra clocks. BAG connects each one as declared here.",
+        )
+        tmpl = "=" + fab_lookup("K", "A{r}")
+        up_check = (
+            '=IF(G{r}="?","UNKNOWN INSTANCE",IF(G{r}<>"bag_external","NOT USER RTL",'
+            f"IF(COUNTIFS($A${FIRST}:$A${MAXR},A{{r}},$B${FIRST}:$B${MAXR},B{{r}})>1,"
+            '"DUPLICATE","ok")))'
+        )
+        self.table(ws, [
+            _in("Instance", 14, "A fabric whose Backing template is bag_external."),
+            _in("Port", 18, "Port name on the user module (a SystemVerilog identifier)."),
+            _in("Direction", 9, "input | output, as the user module sees it."),
+            _in("Width (bits)", 8, "1 or more."),
+            _in("Connection", 22,
+                "expose (top-level port <instance>_<port>) | extra input <name> (inputs) | "
+                "tie-0 | tie-1 | 0x<hex> (inputs) | open (outputs) | clock <domain> | "
+                "reset <domain> (inputs; the conditioned active-low reset)."),
+            _in("Notes", 34, ""),
+            _drv("Template", 14, "Backing template of the instance.", tmpl),
+            _drv("Check", 18, "ok | UNKNOWN INSTANCE | NOT USER RTL | DUPLICATE", up_check),
+        ], "user_ports")  # fmt: skip
+        self.dv(ws, self.lref["Direction"], "C")
+        self.check_format(ws, "H")
+
     def hierarchy(self) -> None:
         ws = self.sheet(
             "Hierarchy",
@@ -776,6 +807,7 @@ class _Builder:
         self.memory_map()
         self.address_decode()
         self.port_options()
+        self.user_ports()
         self.hierarchy()
         self.wrapper()
         wb = self.wb
