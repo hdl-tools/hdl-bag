@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: ahb_fixed
   revision: p2
@@ -241,6 +241,7 @@ port_options:
     lock: n/a
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: s0
     region: mem
@@ -307,4 +308,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_fixed.xlsx
-  sha256: cbbb7ae1121870d23437a721d51a3f547e36cfa7e23c551c6533e8042a6b7bc9
+  sha256: c52a3dd356c4a87d942829d4cbd800671cb4a7eb98d86aab17cc1b926297f179

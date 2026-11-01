@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: bridges_pulp_cdc
   revision: p3
@@ -497,6 +497,7 @@ port_options:
     lock: n/a
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: wdt
     region: regs
@@ -646,4 +647,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_pulp_cdc.xlsx
-  sha256: 7ba4b1559e710bf384f0b166751d7457ed233dcee93ad340060c968a28b892c7
+  sha256: 9c4b739b5b351ee67e74a5008126056ad6bc8c001d6e68bf5abd28d9b1bcb4fb

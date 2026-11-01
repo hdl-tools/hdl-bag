@@ -48,6 +48,7 @@ def run_checks(raw: RawSpec, base_dir: Path, registry: Registry | None = None) -
         memory.check_secure_prot(ctx, regions)
         wrapper.check_hierarchy(ctx)
         wrapper.check_wrapper_ports(ctx)
+        wrapper.check_user_ports(ctx)  # after wrapper ports: claims top-level names
     # Checks on the resolved spec: they need every row-level check to pass first.
     if not any(f.severity == Severity.ERROR for f in ctx.findings):
         clean = CheckResult(ctx, tuple(ctx.findings))  # both resolve this error-free state

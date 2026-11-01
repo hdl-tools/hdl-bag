@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axil_shared_fixed
   revision: p3
@@ -200,6 +200,7 @@ port_options:
     lock: n/a
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: s0
     region: regs
@@ -253,4 +254,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_shared_fixed.xlsx
-  sha256: ff9cd1f189808966d5d5a1fed0c8750ced8a292e62c9e69aafab180e1be99c1c
+  sha256: a1f7b0e600ddbcba13345db82d2f48d2725f82a2861665e5645a02df63848415

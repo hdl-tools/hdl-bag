@@ -65,6 +65,7 @@ class RawSpec(BaseModel):
     memory_map: tuple[Row, ...]
     address_decode: tuple[Row, ...]
     port_options: tuple[Row, ...]
+    user_ports: tuple[Row, ...]
     sub_wrappers: tuple[Row, ...]  # first row is the top wrapper
     placement: tuple[Row, ...]
     exposed_ports: tuple[Row, ...]

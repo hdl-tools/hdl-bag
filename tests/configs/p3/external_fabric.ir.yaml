@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: external_fabric
   revision: p3
@@ -285,6 +285,84 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports:
+  - instance: noc
+    port: cfg_i
+    direction: input
+    width: 4
+    connection: expose
+    target: null
+    tie: null
+  - instance: noc
+    port: cfg_o
+    direction: output
+    width: 4
+    connection: expose
+    target: null
+    tie: null
+  - instance: noc
+    port: clk_cfg_i
+    direction: input
+    width: 1
+    connection: clock
+    target: D_SYS
+    tie: null
+  - instance: noc
+    port: err_o
+    direction: output
+    width: 2
+    connection: open
+    target: null
+    tie: null
+  - instance: noc
+    port: irq_o
+    direction: output
+    width: 1
+    connection: expose
+    target: null
+    tie: null
+  - instance: noc
+    port: lock_i
+    direction: input
+    width: 1
+    connection: tie
+    target: null
+    tie: '0x0000_0001'
+  - instance: noc
+    port: qos_i
+    direction: input
+    width: 4
+    connection: tie
+    target: null
+    tie: '0x0000_000A'
+  - instance: noc
+    port: qos_o
+    direction: output
+    width: 4
+    connection: expose
+    target: null
+    tie: null
+  - instance: noc
+    port: rst_cfg_ni
+    direction: input
+    width: 1
+    connection: reset
+    target: D_SYS
+    tie: null
+  - instance: noc
+    port: test_i
+    direction: input
+    width: 1
+    connection: extra-input
+    target: test_mode_i
+    tie: null
+  - instance: peri
+    port: irq_o
+    direction: output
+    width: 1
+    connection: expose
+    target: null
+    tie: null
 memory_map:
   - slave: uart
     region: regs
@@ -344,7 +422,8 @@ wrapper:
   clock_reset_ports: one per domain
   package: external_fabric_pkg
   file_header: header.txt
-  extra_inputs: []
+  extra_inputs:
+    - test_mode_i
   adapter_placement: with fabric
   adapter_naming: '{from}_{type}_2_{to}'
   subwrapper_port_naming: '{instance}_{proto}_{signal}'
@@ -367,4 +446,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_fabric.xlsx
-  sha256: 84a8e41b8bc9b94344fb03d05771603e7f452f86f6bf363a0515f767e67701e0
+  sha256: 8de7f7d8b1c648199b42387a4a0ad8a388d80f5d41f3773ffbeb5529ea7628bc

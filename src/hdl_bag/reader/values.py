@@ -45,3 +45,26 @@ def parse_yes_no(value: RawValue) -> bool:
 def is_identifier(value: RawValue) -> bool:
     """Lowercase SystemVerilog identifier, as required for instance and port names."""
     return isinstance(value, str) and _IDENT.fullmatch(value) is not None
+
+
+def parse_connection(value: RawValue) -> tuple[str, str | None, int | None]:
+    """User_Ports > Connection -> (kind, target, tie value).
+
+    expose | open | tie-0 | tie-1 | 0x<hex> | extra input <name> | clock <domain> |
+    reset <domain>. tie-1 is returned as -1 (all ones; the width is applied later).
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"{value!r} is not a connection")
+    if value in ("expose", "open"):
+        return value, None, None
+    if value in ("tie-0", "tie-1"):
+        return "tie", None, -1 if value == "tie-1" else 0
+    if _HEX.fullmatch(value):
+        return "tie", None, parse_hex(value)
+    for prefix, kind in (("extra input ", "extra-input"), ("clock ", "clock"), ("reset ", "reset")):
+        if value.startswith(prefix) and value[len(prefix) :].strip():
+            return kind, value[len(prefix) :].strip(), None
+    raise ValueError(
+        f"{value!r} is not expose, open, tie-0, tie-1, 0x<hex>, extra input <name>, "
+        "clock <domain> or reset <domain>"
+    )

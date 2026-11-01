@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axil_adapters
   revision: p3
@@ -306,6 +306,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: buf
     region: regs
@@ -395,4 +396,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_adapters.xlsx
-  sha256: be41182e54305587976526c78b7d92ffed603d5fc1e1e1a6ba586305e05ae0d8
+  sha256: afae77b9676163a67ad1c54820c06e588b08defa0b6a596ba5a0b4e214cc9c44

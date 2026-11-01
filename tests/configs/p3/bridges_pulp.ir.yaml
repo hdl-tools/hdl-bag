@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: bridges_pulp
   revision: p3
@@ -492,6 +492,7 @@ port_options:
     lock: n/a
     pstrb: drive
     pslverr: drive
+user_ports: []
 memory_map:
   - slave: uart
     region: regs
@@ -633,4 +634,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_pulp.xlsx
-  sha256: 8f03307f4aa138b4cba19a2cade5aafc42da79a407c599b07ed679a536374e12
+  sha256: 20da375fe58e6cae7817aa97a36d34f0f55882e63a7af377321c4bca964a809f

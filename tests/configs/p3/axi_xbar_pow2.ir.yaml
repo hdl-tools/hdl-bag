@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axi_xbar_pow2
   revision: p3
@@ -235,6 +235,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: s0
     region: mem
@@ -305,4 +306,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_xbar_pow2.xlsx
-  sha256: 442d5ededeaca2d6e4f8f8e9c8f3ce5e040739aefef20aae4e9e76d423965ccf
+  sha256: 47bebf282693a8580f34f685dc90c97cb60a29ef26f34f9df6c6e4752093e339

@@ -1,15 +1,20 @@
 {#- SPDX-License-Identifier: Apache-2.0 -#}
 {#- Copyright 2026 The hdl-bag Authors -#}
 {#- Instantiation of an opaque, user-supplied fabric (bag_external): the module and its
-    port contract are defined in hdl_bag.gen.external. Context:
-    hdl_bag.gen.wrapper.render_instance. -#}
+    port contract are defined in hdl_bag.gen.external; user ports come from User_Ports
+    (D41). Context: hdl_bag.gen.wrapper.render_instance. -#}
 {% set ports = opaque_ports(inst) %}
-{% set width = (ports | map(attribute="name") | map("length") | list + [6]) | max %}
+{% set users = user_ports(inst) %}
+{% set names = (ports | map(attribute="name") | list) + (users | map(attribute="port") | list) %}
+{% set width = (names | map("length") | list + [6]) | max %}
   // {{ fabric.name }}: user-supplied {{ fabric.protocol }} {{ fabric.topology }} (bag_external)
   {{ opaque_module(fabric) }} {{ name }} (
       .{{ "clk_i".ljust(width) }}({{ ctx.clk(fabric.domain) }}),
-      .{{ "rst_ni".ljust(width) }}({{ ctx.rst(fabric.domain) }}){{ "," if ports }}
+      .{{ "rst_ni".ljust(width) }}({{ ctx.rst(fabric.domain) }}){{ "," if names }}
 {% for p in ports %}
-      .{{ p.name.ljust(width) }}({{ ctx.i(p.bus, p.signal) if p.direction == "input" else ctx.o(p.bus, p.signal) }}){{ "," if not loop.last }}
+      .{{ p.name.ljust(width) }}({{ ctx.i(p.bus, p.signal) if p.direction == "input" else ctx.o(p.bus, p.signal) }}){{ "," if not loop.last or users }}
+{% endfor %}
+{% for u in users %}
+      .{{ u.port.ljust(width) }}({{ ctx.user(u) }}){{ "," if not loop.last }}
 {% endfor %}
   );

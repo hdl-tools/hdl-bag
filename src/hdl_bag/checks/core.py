@@ -109,6 +109,11 @@ RULES: Final[dict[str, Severity]] = {
     "WRAP-DUPLICATE-PORT": E,
     "WRAP-INTERNAL-PORT": E,
     "WRAP-NAME-COLLISION": E,
+    # user ports (D41)
+    "USERPORT-INSTANCE": E,
+    "USERPORT-DUPLICATE": E,
+    "USERPORT-NAME": E,
+    "USERPORT-CONNECTION": E,
 }
 
 _SHEET_RANK: Final = {name: i for i, name in enumerate(SHEET_ORDER)}

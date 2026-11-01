@@ -1,4 +1,4 @@
-schema: '0.3'
+schema: '0.4'
 project:
   name: axi_xbar_rules
   revision: p3
@@ -255,6 +255,7 @@ port_options:
     lock: drive
     pstrb: n/a
     pslverr: n/a
+user_ports: []
 memory_map:
   - slave: rom
     region: code
@@ -333,4 +334,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_xbar_rules.xlsx
-  sha256: 4606da0dd8f3b7e996c1965b076286cedfd6e7f3927a2453f41dce736f0f2bef
+  sha256: d689e3218ddf1de19e469b9b86405c5f229c941d7dabfa31669c94b8aa9643f2
