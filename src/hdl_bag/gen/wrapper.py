@@ -134,43 +134,85 @@ class InstanceContext:
     inst: Instance
 
     def i(self, bus: Bus, sig: str, default: int = 0, width: int | None = None) -> str:
+        """Value for a component input of WIDTH bits (default: the bus's own width).
+
+        A bus narrower than the component port is zero-extended, a wider one truncated
+        (D19: e.g. a 32-bit port address into a 40-bit fabric or adapter).
+        """
         w = width or Scope.width(bus, sig)
         if sig in bus.ties:
             return self.scope.tie(bus, sig, w)
         if sig not in bus.signals:
             return lit(w, default)
-        return self.scope.ref(bus, sig)
+        ref, bw = self.scope.ref(bus, sig), Scope.width(bus, sig)
+        if bw < w:
+            return f"{{{lit(w - bw, 0)}, {ref}}}"
+        if bw > w:
+            return f"{ref}[{w - 1}:0]" if w > 1 else f"{ref}[0]"
+        return ref
 
     def o(self, bus: Bus, sig: str, width: int | None = None) -> str:
-        w = width or Scope.width(bus, sig)
+        """Target for a component output of WIDTH bits (default: the bus's own width).
+
+        When the widths differ, the output drives a component-width net whose low bits
+        (or zero-extended value) feed the bus; bits the bus lacks go to an unused sink.
+        """
+        bw = Scope.width(bus, sig)
+        w = width or bw
         if sig in bus.ties or sig not in bus.signals:
             return self.scope.sink(f"{self.inst.rtl_name}_{bus.name}_{sig}", w)
-        return self.scope.ref(bus, sig)
+        ref = self.scope.ref(bus, sig)
+        if bw == w:
+            return ref
+        net = f"{self.inst.rtl_name}_{bus.name}_{sig}_fit"
+        self.scope.declare(net, w)
+        self._fit_out(ref, bw, net, w, f"{net}_msb")
+        return net
+
+    def _fit_out(self, target: str, bw: int, src: str, w: int, msb: str) -> None:
+        """assign TARGET (BW bits) from SRC (W bits): truncate (the dropped bits go to the
+        unused sink MSB) or zero-extend."""
+        if bw < w:
+            self.scope.assigns.append(f"  assign {target} = {src}[{bw - 1}:0];")
+            sink = self.scope.sink(msb, w - bw)
+            self.scope.assigns.append(f"  assign {sink} = {src}[{w - 1}:{bw}];")
+        else:
+            self.scope.assigns.append(f"  assign {target} = {{{lit(bw - w, 0)}, {src}}};")
 
     def vec(self, port: str, buses: Sequence[Bus], sig: str, direction: str,
             default: int = 0, width: int | None = None) -> str:  # fmt: skip
+        """Packed [N-1:0][W-1:0] array for one port of a multi-port component.
+
+        W defaults to the fabric's width for SIG: its address and data width, its
+        master-side or slave-side ID width (by which side BUSES attach to) and the widest
+        user signal among its ports.
+        """
         fab = self.inst.fabric
-        w = width or (
-            signal_width(sig, fab.addr_width, fab.data_width) if fab else Scope.width(buses[0], sig)
-        )
+        if width:
+            w = width
+        elif fab:
+            ids = fab.id_width
+            idw = (ids.slave_side if buses[0].is_slave else ids.master_side) if ids else 0
+            uw = max(b.user_width for b in (*self.inst.masters, *self.inst.slaves))
+            w = signal_width(sig, fab.addr_width, fab.data_width, idw, uw)
+        else:
+            w = Scope.width(buses[0], sig)
         name = f"{self.inst.rtl_name}_{port}"
         self.scope.declare(name, w, packed=len(buses))
         for k, bus in enumerate(buses):
-            # A port may be narrower than the fabric (addresses, D19): zero-extend inputs,
-            # truncate outputs and sink the bits it does not have.
-            bw = Scope.width(bus, sig) if sig in bus.signals and sig not in bus.ties else w
-            bw = min(bw, w)
             if direction == "in":
-                value = self.i(bus, sig, default, bw)
-                if bw < w:
-                    value = f"{{{lit(w - bw, 0)}, {value}}}"
-                self.scope.assigns.append(f"  assign {name}[{k}] = {value};")
+                self.scope.assigns.append(f"  assign {name}[{k}] = {self.i(bus, sig, default, w)};")
+                continue
+            if sig in bus.ties or sig not in bus.signals:
+                sink = self.scope.sink(f"{self.inst.rtl_name}_{bus.name}_{sig}", w)
+                self.scope.assigns.append(f"  assign {sink} = {name}[{k}];")
+                continue
+            bw = Scope.width(bus, sig)
+            ref = self.scope.ref(bus, sig)
+            if bw == w:
+                self.scope.assigns.append(f"  assign {ref} = {name}[{k}];")
             else:
-                src = f"{name}[{k}]" if bw == w else f"{name}[{k}][{bw - 1}:0]"
-                self.scope.assigns.append(f"  assign {self.o(bus, sig, bw)} = {src};")
-                if bw < w:
-                    sink = self.scope.sink(f"{name}_{k}_msb", w - bw)
-                    self.scope.assigns.append(f"  assign {sink} = {name}[{k}][{w - 1}:{bw}];")
+                self._fit_out(ref, bw, f"{name}[{k}]", w, f"{name}_{k}_msb")
         return name
 
     def clk(self, domain: str) -> str:
@@ -206,6 +248,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         p=camel(inst.name),
         fabric=fab,
         bridge=inst.bridge,
+        adapter=inst.adapter,
         tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
     )
@@ -410,9 +453,10 @@ _MODPORTS = {  # modport -> (port role whose signal set it carries, mirrored)
 
 
 def interface_signals(protocol: Protocol) -> tuple[str, ...]:
-    """Union of the master-port and slave-port signals, in protocol order."""
-    out = list(port_signals(protocol, False))
-    out += [s for s in port_signals(protocol, True) if s not in out]
+    """Union of the master-port and slave-port signals, in protocol order. AXI4 includes
+    the USER signals; a port without them leaves them to the harness's defaults."""
+    out = list(port_signals(protocol, False, has_user=True))
+    out += [s for s in port_signals(protocol, True, has_user=True) if s not in out]
     return tuple(out)
 
 
@@ -441,7 +485,7 @@ def render_interface(spec: Spec, protocol: Protocol, header: str) -> str:
         lines.append(f"  logic {dim}{sig};")
     lines.append("")
     for modport, (is_slave, mirrored) in _MODPORTS.items():
-        sigs = port_signals(protocol, is_slave)
+        sigs = port_signals(protocol, is_slave, has_user=True)
         items = []
         for sig in sigs:
             out = towards_slave(sig, is_slave) != is_slave

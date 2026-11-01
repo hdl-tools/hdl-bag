@@ -10,6 +10,7 @@ upstream:
 downstream:
   - AXI4
   - AXI4-Lite
+down_id_width: 1
 sources:
   - rtl/inhouse/bag_apb2axi.sv
 licence: Apache-2.0

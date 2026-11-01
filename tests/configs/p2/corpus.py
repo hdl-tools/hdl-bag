@@ -9,132 +9,15 @@ keeps them in sync. The feature each config must cover follows the PR 3/PR 4 des
 reviews; see COVERAGE.
 """
 
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from hdl_bag.template.data import PROJECT_DEFAULTS, WRAPPER_DEFAULTS, Cell, SpecData
-
 HERE = Path(__file__).parent
-TEMPLATE = {"AHB-Lite": "bag_ahb_lite_bus", "APB4": "bag_apb_mux", "APB3": "bag_apb_mux"}
-TOPOLOGY = {"AHB-Lite": "single-layer", "APB4": "decoder-mux", "APB3": "decoder-mux"}
-ERROR = {"AHB-Lite": "HRESP_ERROR", "APB4": "PSLVERR", "APB3": "PSLVERR"}
-OPTION_COLUMNS = ("fifo", "slice", "prot", "qos", "region", "cache", "lock", "pstrb", "pslverr")
+sys.path.insert(0, str(HERE.parent))  # tests/configs: the shared DSL
 
-
-@dataclass
-class Cfg:
-    name: str
-    extra_inputs: tuple[str, ...] = ()
-    style: str = "flat"
-    signal_pattern: str = "{port}_{proto}_{signal}"
-    subwrapper_naming: str = "{instance}_{proto}_{signal}"
-    data: SpecData = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.data = SpecData(title=f"BAG Phase 2 gate config: {self.name}",
-                             description="Hand-written gate config (tests/configs/p2/corpus.py).")  # fmt: skip
-        self.data.project = {**PROJECT_DEFAULTS, "Project name": self.name, "Spec revision": "p2",
-                             "Author": "BAG", "Output directory": f"out/{self.name}",
-                             "Generate RTL": "Y", "Generate C header": "Y",
-                             "Generate memory-map doc": "Y", "Generate cocotb unit tests": "Y",
-                             "Generate formal (SymbiYosys)": "Y"}  # fmt: skip
-        self.data.wrapper = {**WRAPPER_DEFAULTS, "Top module name": f"{self.name}_top",
-                             "Parameter package": f"{self.name}_pkg", "File header": "header.txt",
-                             "Port style": self.style, "Signal naming pattern": self.signal_pattern,
-                             "Sub-wrapper port naming": self.subwrapper_naming,
-                             "Extra top-level inputs": ", ".join(self.extra_inputs) or None}  # fmt: skip
-
-    # ---- clocks and resets
-    def domain(self, domain: str, clock: str, reset: str, polarity: str = "active-low",
-               assertion: str = "async", deassertion: str = "sync") -> "Cfg":  # fmt: skip
-        self.data.clocks.append([clock, 100, "top port", domain, reset, None])
-        self.data.resets.append([reset, polarity, assertion, deassertion, domain, "top port", None])
-        return self
-
-    # ---- fabrics and ports
-    def fabric(self, name: str, proto: str, dw: int, aw: int, domain: str,
-               arb: str = "single-master") -> "Cfg":  # fmt: skip
-        self.data.fabrics.append([name, proto, TOPOLOGY[proto], dw, aw, domain, arb, "n/a", "n/a",
-                                  "n/a", TEMPLATE[proto], "in-house template", "n/a", "n/a",
-                                  None])  # fmt: skip
-        return self
-
-    def master(self, name: str, proto: str, dw: int, aw: int, domain: str,
-               prefix: str | None = None, exposed: bool = True) -> "Cfg":  # fmt: skip
-        self.data.masters.append([name, proto, dw, aw, None, 0, domain, 1, 1, None, None])
-        return self._expose(name, prefix, exposed)
-
-    def slave(self, name: str, proto: str, dw: int, aw: int, domain: str,
-              prefix: str | None = None) -> "Cfg":  # fmt: skip
-        self.data.slaves.append([name, proto, dw, aw, None, None, domain, ERROR[proto], 0, None,
-                                 None])  # fmt: skip
-        return self._expose(name, prefix, True)
-
-    def bridge(self, name: str, window: int, pass_through: bool = True,
-               template: str = "bag_ahb2apb") -> "Cfg":  # fmt: skip
-        self.data.bridges.append([name, template, _hex(window), "Y" if pass_through else "N", 0,
-                                  None])  # fmt: skip
-        return self._expose(name, None, False)
-
-    def _expose(self, port: str, prefix: str | None, exposed: bool) -> "Cfg":
-        self.data.exposed_ports.append([port, "Y" if exposed else "N", prefix,
-                                        None if exposed else "internal", None])  # fmt: skip
-        return self
-
-    # ---- connectivity and map
-    def link(self, src: str, dst: str, index: int, priority: int | None = None) -> "Cfg":
-        self.data.topology.append([src, dst, index, priority, None])
-        return self
-
-    def region(self, target: str, region: str, base: int, size: int, access: str = "RW",
-               secure: bool = False) -> "Cfg":  # fmt: skip
-        self.data.memory_map.append([target, region, _hex(base), _hex(size), access,
-                                     "Y" if secure else "N", None])  # fmt: skip
-        return self
-
-    def decode(self, master: str, miss: str, default: str | None = None,
-               alias: tuple[int, int, int, str] | None = None) -> "Cfg":  # fmt: skip
-        base, size, to, enable = alias or (None, None, None, None)
-        self.data.address_decode.append([
-            master, miss, default, _hex(base) if base is not None else None,
-            _hex(size) if size is not None else None, _hex(to) if to is not None else None,
-            enable, None,
-        ])  # fmt: skip
-        return self
-
-    def access(self, master: str, slave: str, access: str) -> "Cfg":
-        self.data.access_rules.append([master, slave, access, None])
-        return self
-
-    def option(self, port: str, **values: Cell) -> "Cfg":
-        """Port_Options row; unspecified optional signals default to drive / n/a."""
-        row: dict[str, Cell] = {"fifo": 0, "slice": "none"}
-        row.update(values)
-        self.data.port_options.append([row.get(c, "drive") for c in OPTION_COLUMNS] + [None])
-        self.data.port_options[-1].insert(0, port)
-        return self
-
-    # ---- hierarchy
-    def sub(self, name: str, parent: str) -> "Cfg":
-        self.data.sub_wrappers.append([name, parent, None])
-        return self
-
-    def place(self, instance: str, wrapper: str, rtl: str | None = None) -> "Cfg":
-        self.data.placement.append([instance, wrapper, rtl, None])
-        return self
-
-
-def _hex(v: int) -> str:
-    h = f"{v:08X}"
-    return "0x" + "_".join(h[i : i + 4] for i in range(0, len(h), 4))
-
-
-# Optional-signal values that do not exist on a protocol must be n/a.
-APB4_NA = {"qos": "n/a", "region": "n/a", "cache": "n/a", "lock": "n/a"}
-APB3_NA = {**APB4_NA, "prot": "n/a", "pstrb": "n/a"}
-AHB_MASTER_NA = {"qos": "n/a", "region": "n/a", "cache": "n/a", "pstrb": "n/a", "pslverr": "n/a"}
-AHB_SLAVE_NA = {**AHB_MASTER_NA, "lock": "n/a"}
+import dsl  # noqa: E402
+from dsl import AHB_MASTER_NA, AHB_SLAVE_NA, APB3_NA, APB4_NA, Cfg  # noqa: E402
 
 
 def apb4_min() -> Cfg:
@@ -379,29 +262,7 @@ LEGACY = ("ahb2apb_pt", "ahb2apb_nested")
 
 
 def write_all() -> None:
-    """Build every config through workbook -> bag check -> resolve and write its IR."""
-    import shutil
-    import tempfile
-
-    from hdl_bag.checks import run_checks
-    from hdl_bag.ir import dump, resolve
-    from hdl_bag.reader import read_workbook
-    from hdl_bag.template.builder import build_workbook
-
-    with tempfile.TemporaryDirectory() as tmp:
-        for name, make in BUILT.items():
-            wb = build_workbook(data=make().data)
-            path = Path(tmp) / f"{name}.xlsx"
-            wb.save(path)
-            shutil.copy(HERE / "header.txt", Path(tmp) / "header.txt")
-            result = run_checks(read_workbook(path), Path(tmp))
-            if result.findings:
-                print(f"{name}:")
-                for f in result.findings:
-                    print(f"  {f.severity}: {f.message}")
-                continue
-            dump(resolve(result), HERE / f"{name}.ir.yaml")
-            print(f"{name}: ok")
+    dsl.write_all(BUILT, HERE)
 
 
 if __name__ == "__main__":
