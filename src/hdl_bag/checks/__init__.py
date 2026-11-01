@@ -50,7 +50,9 @@ def run_checks(raw: RawSpec, base_dir: Path, registry: Registry | None = None) -
         wrapper.check_wrapper_ports(ctx)
     # Checks on the resolved spec: they need every row-level check to pass first.
     if not any(f.severity == Severity.ERROR for f in ctx.findings):
-        wrapper.check_boundary_names(ctx, CheckResult(ctx, tuple(ctx.findings)))
+        clean = CheckResult(ctx, tuple(ctx.findings))  # both resolve this error-free state
+        wrapper.check_boundary_names(ctx, clean)
+        basics.check_cdc_resets(ctx, clean)
     unknown = {f.rule for f in ctx.findings} - RULES.keys()
     assert not unknown, f"unregistered rule IDs: {unknown}"
     findings = tuple(sorted(set(ctx.findings), key=Finding.sort_key))

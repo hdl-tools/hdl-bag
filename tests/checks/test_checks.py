@@ -108,6 +108,14 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
       "Clocks row 9: reset rst_sys_n belongs to domain D_SYS, not D_X (CLK-RESET-DOMAIN)"]),
     ("CLK-RESET-DOMAIN", [("Clocks", 5, "Reset", "rst_sys_n")],
      ["Clocks row 5: reset rst_sys_n belongs to domain D_SYS, not D_CPU (CLK-RESET-DOMAIN)"]),
+    ("CLK-CDC-RESET", [("Resets", 5, "Deassertion", "async")],
+     ["Resets row 5: reset rst_cpu_n (async assertion, async deassertion) resets one side of the "
+      "clock-domain crossing cpu0_cdc_2_main_xbar (D_CPU -> D_SYS); a crossing needs async "
+      "assertion and sync deassertion on both sides (CLK-CDC-RESET)"]),
+    ("CLK-CDC-RESET-bridge", [("Resets", 8, "Assertion", "sync")],
+     ["Resets row 8: reset rst_aon_n (sync assertion, sync deassertion) resets one side of the "
+      "clock-domain crossing br_ahb2main (D_AON -> D_SYS); a crossing needs async assertion and "
+      "sync deassertion on both sides (CLK-CDC-RESET)"]),
     ("WIDTH-DATA", [("Masters", 7, "Data width (bits)", 128)],
      ["Masters row 7: data width 128 is not legal for AXI4-Lite (32, 64) (WIDTH-DATA)"]),
     ("WIDTH-ADDR", [("Slaves", 7, "Addr width (bits)", 40)],

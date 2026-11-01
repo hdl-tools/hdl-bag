@@ -31,6 +31,7 @@ RULES: Final[dict[str, Severity]] = {
     "CLK-DOMAIN-TWO-CLOCKS": E,
     "CLK-DOMAIN-NO-RESET": E,
     "CLK-RESET-DOMAIN": E,
+    "CLK-CDC-RESET": E,
     # widths, templates, fabrics
     "WIDTH-DATA": E,
     "WIDTH-ADDR": E,

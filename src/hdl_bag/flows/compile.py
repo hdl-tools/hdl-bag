@@ -13,6 +13,11 @@ from pathlib import Path
 from hdl_bag.flows.backends import Verilator
 from hdl_bag.flows.base import Finding, Report, run_backend
 
+# Verilator 5.052's DFG optimiser runs out of memory (over 14 GB) on PULP's axi_dw_downsizer,
+# whose variable-granularity combinational loops it cannot break; without it the same design
+# elaborates in seconds. Simulation behaviour is unchanged.
+BUILD_FLAGS = ("-fno-dfg",)
+
 
 class VerilatorBuild(Verilator):
     name = "verilator-build"
@@ -23,6 +28,7 @@ class VerilatorBuild(Verilator):
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
             self.executable, "--cc", "--build", "-Wno-fatal", "-Wno-lint", "-Wno-style",
+            *BUILD_FLAGS,
             "--top-module", top, "-Mdir", self.obj_dir,
             *(f"-I{d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files),
         ]  # fmt: skip

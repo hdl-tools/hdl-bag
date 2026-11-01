@@ -181,13 +181,22 @@ async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data
 AXI_RESP = {"SLVERR": 2, "DECERR": 3, "default-slave": 3}
 
 
-def _expected_resp(m: Any, exp: Any) -> int | None:
+def _to_lite(m: Any) -> bool:
+    """An AXI4 master on an AXI4-Lite fabric (through PULP axi_to_axi_lite, whose burst
+    splitter reports every write error as SLVERR; read responses pass unchanged)."""
+    fabric = next(f for f in SPEC.fabrics if any(p.port == m.name for p in f.master_ports))
+    return bool(m.protocol == "AXI4" and fabric.protocol == "AXI4-Lite")
+
+
+def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
     """The exact AXI response an AXI master must get; None where bridges translate it."""
     if m.protocol not in AXI or exp.bridges:
         return None
     if exp.slave is None:
-        return 0 if exp.masked else AXI_RESP[exp.miss]
-    return 2 if exp.slave_error else 0
+        code = 0 if exp.masked else AXI_RESP[exp.miss]
+    else:
+        code = 2 if exp.slave_error else 0
+    return 2 if code and write and _to_lite(m) else code
 
 
 def _pin_sets() -> list[dict[str, bool]]:
@@ -199,7 +208,9 @@ def _pin_sets() -> list[dict[str, bool]]:
     return sets
 
 
-@cocotb.test(timeout_time=50, timeout_unit="ms")
+# Timeouts are a few times the longest run seen (route test 70 us, others under 4 us of
+# simulated time), so a deadlocked design fails within minutes instead of hanging CI.
+@cocotb.test(timeout_time=400, timeout_unit="us")
 async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     secure = any(r.secure for r in SPEC.memory_map)
@@ -226,7 +237,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                         err, got, resp = await _access(masters[m.name], m.protocol,
                                                        m.data_width, addr, write, data, nonsec,
                                                        prot, user)  # fmt: skip
-                        want_resp = _expected_resp(m, exp)
+                        want_resp = _expected_resp(m, exp, write)
                         where = f"{m.name} {'W' if write else 'R'} {addr:#x} nonsec={nonsec} pins={pins}"
                         grew = {n for n, s in slaves.items() if len(s.log) != before[n]}
                         if exp.slave is None:
@@ -242,11 +253,15 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: expected {exp.slave} @ {exp.address:#x} "
                                 f"error={exp.slave_error}, got err={err} at {grew}"
                             )
-                            seen = slaves[exp.slave].log[-1]
-                            assert seen.addr == exp.address and seen.write == write, (
-                                f"{where}: {exp.slave} saw {seen.addr:#x} write={seen.write}, "
-                                f"expected {exp.address:#x}"
+                            # A width converter may add beats (zero-strobe halves), so the
+                            # access must be among what the slave saw, not necessarily last.
+                            new = slaves[exp.slave].log[before[exp.slave] :]
+                            match = [e for e in new if e.addr == exp.address and e.write == write]
+                            assert match, (
+                                f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]} "
+                                f"write={write}, expected {exp.address:#x}"
                             )
+                            seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
                             )
@@ -279,7 +294,7 @@ def _reach(region: Any, ports: list[Any]) -> list[Any]:
             and not route(SPEC, p.port, region.base, True, False, {}).bridges]  # fmt: skip
 
 
-@cocotb.test(timeout_time=5, timeout_unit="ms")
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     for f in SPEC.fabrics:
@@ -330,7 +345,7 @@ def _private_words(m: Any, index: int, count: int) -> list[int]:
     return []
 
 
-@cocotb.test(timeout_time=20, timeout_unit="ms")
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
     """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
     rotates IDs): every write lands and every read returns that master's own data."""
@@ -400,10 +415,10 @@ async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int
     await ClockCycles(clk, 20)
     slave.stall(False)
     await task
-    return [owner[e.addr] for e in slave.log[n:] if e.write]
+    return [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
 
 
-@cocotb.test(timeout_time=10, timeout_unit="ms")
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
     """AXI fabrics with several masters on one slave, with the slave stalled so every
     request is waiting when it opens:
@@ -411,8 +426,8 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
     * rounds: one write per master, three times; fixed priority serves them in priority
       order every round, round robin serves each once per round;
     * starvation: the first-served master keeps four writes queued against one write of
-      the last-served one; fixed priority serves the low master last, round robin
-      serves it no later than second;
+      the last-served one; fixed priority serves the low master last, round robin does
+      not;
     * lock: a low-priority write is presented while the slave is stalled, then a higher-
       priority one arrives; the grant must not change before the handshake.
     """
@@ -425,19 +440,30 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         slave = slaves[region.slave]
         clk = clocks[f.domain]
         width = next(s.addr_width for s in SPEC.slaves if s.name == region.slave)
-        base = {p.port: region.base + 0x40 * i for i, p in enumerate(ports)}
-        owner = {(a + 4 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(8)}
+        # 16 bytes between jobs: a downsizer's extra (zero-strobe) beat of a narrow write
+        # never lands on another job's address.
+        base = {p.port: region.base + 0x100 * i for i, p in enumerate(ports)}
+        owner = {(a + 16 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(9)}
         fixed = f.arbitration == "fixed-priority"
         by_prio = [p.port for p in sorted(ports, key=lambda p: p.priority or 0)]
 
+        # Without master-side adapters every request reaches the arbiter in the same cycle,
+        # so round robin must rotate in Port-index order and starve nobody.
+        direct = not any(a.fabric == f.name and a.port in base for a in SPEC.adapters)
+        index = [p.port for p in ports]
         for rnd in range(3):
             order = await _served(
-                masters, slave, clk, owner, [(p.port, base[p.port] + 4 * rnd) for p in ports]
+                masters, slave, clk, owner, [(p.port, base[p.port] + 16 * rnd) for p in ports]
             )
             if fixed:
                 assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
             else:
                 assert sorted(order) == sorted(base), f"{f.name} round {rnd}: {order}"
+                if direct:
+                    k = index.index(order[0])
+                    assert order == index[k:] + index[:k], (
+                        f"{f.name} round {rnd}: {order} is not a rotation of {index}"
+                    )
         first = by_prio[0] if fixed else order[0]
         last = by_prio[-1] if fixed else order[-1]
         # Starvation needs every request waiting at the arbiter when the slave opens; a
@@ -445,24 +471,28 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         mid = f.midpoint
         buffered = mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
         if not buffered:
-            jobs = [(first, base[first] + 4 * (4 + k)) for k in range(4)]
-            jobs.append((last, base[last] + 16))
+            jobs = [(first, base[first] + 16 * (3 + k)) for k in range(4)]
+            jobs.append((last, base[last] + 16 * 3))
             order = await _served(masters, slave, clk, owner, jobs)
             pos = order.index(last)
             if fixed:
                 assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"
-            else:
+            elif direct:
                 assert pos <= 1, f"{f.name}: round robin starved {last}: {order}"
+            else:
+                # Requests reach the arbiter through adapter pipelines at different times,
+                # so round robin is only required never to leave the single request last.
+                assert pos < len(order) - 1, f"{f.name}: round robin starved {last}: {order}"
         if fixed:
             n = len(slave.log)
             slave.stall(True)
-            low = cocotb.start_soon(masters[last].write(base[last] + 28, 1))
+            low = cocotb.start_soon(masters[last].write(base[last] + 16 * 8, 1))
             await ClockCycles(clk, 10)
-            high = cocotb.start_soon(masters[first].write(base[first] + 28, 2))
+            high = cocotb.start_soon(masters[first].write(base[first] + 16 * 8, 2))
             await ClockCycles(clk, 10)
             slave.stall(False)
             await Combine(low, high)
-            order = [owner[e.addr] for e in slave.log[n:] if e.write]
+            order = [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
             assert order == [last, first], f"{f.name}: grant changed under a stall: {order}"
         tested += 1
         dut._log.info("%s (%s): arbitration checked over %s", f.name, f.arbitration,
@@ -471,7 +501,7 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         dut._log.info("no AXI fabric with contention")
 
 
-@cocotb.test(timeout_time=10, timeout_unit="ms")
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
     """With the slave's AR stalled, a master can issue exactly as many reads as the shared
     bus's mid-point holds: FIFO depth + 2 per register slice (each cut is a 2-entry spill
@@ -513,7 +543,7 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
         dut._log.info("%s: mid-point held %d reads", f.name, accepted)
 
 
-@cocotb.test(timeout_time=10, timeout_unit="ms")
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
     """Every AXI4 master: a 4-beat INCR burst writes and reads back through the fabric; a
     4-beat burst to an unmapped or denied address is answered with the master's error on
@@ -535,10 +565,13 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
             and not route(SPEC, m.name, a + 4 * k, w, False, {}).bridges
             for k in range(4) for w in (True, False))), None)  # fmt: skip
         if miss is not None:
-            want = AXI_RESP[route(SPEC, m.name, miss, True, False, {}).miss or "DECERR"]
+            exp = route(SPEC, m.name, miss, True, False, {})
+            want_w, want_r = _expected_resp(m, exp, True), _expected_resp(m, exp, False)
             code = await masters[m.name].burst_write(miss, bytes(16))
-            assert code == want, f"{m.name} burst write to {miss:#x}: {code}, expected {want}"
+            assert code == want_w, f"{m.name} burst write to {miss:#x}: {code}, expected {want_w}"
             r = await masters[m.name].burst_read(miss, 16)
-            assert r.resp == want, f"{m.name} burst read to {miss:#x}: {r.resp}, expected {want}"
+            assert r.resp == want_r, (
+                f"{m.name} burst read to {miss:#x}: {r.resp}, expected {want_r}"
+            )
             checked += 1
     dut._log.info("AXI4 bursts: %d checks", checked)

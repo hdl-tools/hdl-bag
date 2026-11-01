@@ -3,13 +3,20 @@
 name: bag_pc
 kind: adapter
 api_version: 1
-description: Protocol adapter AXI4 <-> AXI4-Lite (PULP axi_to_axi_lite / axi_lite_to_axi). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'Protocol adapter: bag_axi_to_axil (PULP axi_to_axi_lite) / bag_axil_to_axi (axi_lite_to_axi). PULP limits on AXI4 -> AXI4-Lite: WRAP bursts, and non-modifiable (AxCACHE[1] = 0) bursts of 2 to 16 beats, are answered with SLVERR; every write error is reported as SLVERR.'
 protocols:
   - AXI4
   - AXI4-Lite
 adapter_type: pc
 sources:
-  - bender:axi:axi_to_axi_lite
   - bender:axi:axi_lite_to_axi
+  - bender:axi:axi_to_axi_lite
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_to_axil.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_to_axi.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

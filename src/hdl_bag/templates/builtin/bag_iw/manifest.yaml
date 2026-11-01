@@ -3,11 +3,15 @@
 name: bag_iw
 kind: adapter
 api_version: 1
-description: AXI ID-width converter (PULP axi_iw_converter). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'AXI4 ID-width converter: bag_axi_iw around PULP axi_iw_converter.'
 protocols:
   - AXI4
 adapter_type: iw
 sources:
   - bender:axi:axi_iw_converter
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_iw.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

@@ -21,6 +21,7 @@ and the corpus is warning-free).
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from hdl_bag.ir import Spec
 
@@ -57,6 +58,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     bridges = {b.name: b for b in spec.bridges}
     slaves = {s.name: s for s in spec.slaves}
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
+    span = _read_span(spec, master, fabric) if not write else 4
     nonsec = nonsec or prot_tied(spec, master)
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
@@ -101,12 +103,31 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
         # The slave decides on the address it sees (a redirected miss can alias its error word).
-        error = visible // word in {e // word for e in error_words(spec, target)}
+        # A read reaches every slave word of the master's beat (SPAN bytes): width
+        # converters read all of it.
+        span_ = span if not crossed else 4
+        first = visible - visible % span_
+        words = {a // word for a in range(first, first + max(span_, word), word)}
+        error = bool(words & {e // word for e in error_words(spec, target)})
         error = error and not masked
         return Outcome(
             target, visible, masked=masked, slave_error=error, nonsec=nonsec, bridges=tuple(crossed)
         )
     raise AssertionError("bridge chain longer than the number of fabrics")
+
+
+def _read_span(spec: Spec, master: str, fabric: Any) -> int:
+    """Bytes a 32-bit read of MASTER fetches at the slave: AXI4 masters issue narrow (size 2)
+    transfers, but an AXI4-Lite beat is always full width, so a Lite master's read spans its
+    data width (and the fabric's, when that is AXI4-Lite and wider: Lite upsizers keep the
+    full width)."""
+    m = next(x for x in spec.masters if x.name == master)
+    if m.protocol != "AXI4-Lite":
+        return 4
+    width = m.data_width
+    if fabric.protocol == "AXI4-Lite":
+        width = max(width, fabric.data_width)
+    return width // 8
 
 
 def error_words(spec: Spec, slave: str) -> set[int]:

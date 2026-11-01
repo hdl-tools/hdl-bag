@@ -7,12 +7,13 @@ Parsing is pure, so it is tested on captured output without the tools installed.
 """
 
 import re
+from dataclasses import replace
 from importlib.resources import as_file, files
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Final
 
-from hdl_bag.flows.base import Finding, Severity, relative
+from hdl_bag.flows.base import Finding, Severity, is_third_party, relative
 
 # path:line:col: severity: message [-Wname]
 _SLANG: Final = re.compile(
@@ -23,6 +24,10 @@ _SLANG: Final = re.compile(
 _VERILATOR: Final = re.compile(
     r"^%(?P<sev>Warning|Error)(?:-(?P<rule>[A-Z0-9_]+))?: "
     r"(?:(?P<file>(?:[A-Za-z]:)?[^:\s][^:]*):(?P<line>\d+):(?:\d+:)? )?(?P<msg>.*)$"
+)
+# continuation of an UNOPTFLAT warning:   path:line:col:      Example path: <node>
+_VERILATOR_PATH: Final = re.compile(
+    r"^\s+(?P<file>(?:[A-Za-z]:)?[^:\s][^:]*):\d+:\d+:\s+Example path:"
 )
 # path:line:col[-col]: message [Style: section] [rule-name]
 _VERIBLE: Final = re.compile(
@@ -65,8 +70,13 @@ class Verilator:
         ]  # fmt: skip
 
     def parse(self, output: str, root: Path) -> list[Finding]:
-        out = []
+        out: list[Finding] = []
+        loop_files: list[list[str]] = []  # per finding: files on its UNOPTFLAT example path
         for line in output.splitlines():
+            path = _VERILATOR_PATH.match(line)
+            if path and out:
+                loop_files[-1].append(relative(path["file"], root))
+                continue
             m = _VERILATOR.match(line)
             if not m or m["msg"].startswith("Exiting due to"):
                 continue
@@ -74,7 +84,8 @@ class Verilator:
             file = relative(m["file"], root) if m["file"] else ""
             line_no = int(m["line"]) if m["line"] else 0
             out.append(Finding(self.name, file, line_no, m["rule"] or "error", sev, m["msg"]))
-        return out
+            loop_files.append([])
+        return [_loop_owner(f, files) for f, files in zip(out, loop_files, strict=True)]
 
 
 class Verible:
@@ -102,6 +113,29 @@ class Verible:
                             m["msg"])
                 )  # fmt: skip
         return out
+
+
+def _loop_owner(f: Finding, path_files: list[str]) -> Finding:
+    """An UNOPTFLAT (circular logic) warning is reported at one node of the loop, which can
+    be a generated net even when the loop runs through vendored RTL (variable-granularity
+    loops in PULP modules). Attribute such a warning to the first vendored file on its
+    example path, so the lint scope (P3-2) treats it as third-party. A loop is attributed
+    only when its other nodes are in vendored RTL or in the hand-written in-house wrappers
+    (rtl/inhouse/: fixed, reviewed struct forwarding between flat ports and PULP structs,
+    which Verilator sees as whole-struct nodes). A loop with any node in generated code,
+    other than where it is reported, keeps its location and is judged: that is where the
+    generator could wire a ready back into a valid."""
+    if f.rule != "UNOPTFLAT" or is_third_party(f.file):
+        return f
+    vendor = next((p for p in path_files if is_third_party(p)), None)
+    fixed = [p for p in path_files if is_third_party(p) or _in_house(p) or p == f.file]
+    if vendor is None or len(fixed) != len(path_files):
+        return f
+    return replace(f, file=vendor, message=f"{f.message} (loop through {vendor}, seen at {f.file})")
+
+
+def _in_house(path: str) -> bool:
+    return "/rtl/inhouse/" in f"/{path}"
 
 
 def slang_flags() -> list[str]:

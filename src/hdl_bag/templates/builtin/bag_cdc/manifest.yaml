@@ -3,12 +3,19 @@
 name: bag_cdc
 kind: adapter
 api_version: 1
-description: Asynchronous clock-domain crossing (PULP axi_cdc). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'Asynchronous clock-domain crossing: bag_axi_cdc / bag_axil_cdc around PULP axi_cdc.'
 protocols:
   - AXI4
   - AXI4-Lite
 adapter_type: cdc
 sources:
   - bender:axi:axi_cdc
+  - rtl/inhouse/bag_axi_cdc.sv
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
+  - rtl/inhouse/bag_axil_cdc.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true
