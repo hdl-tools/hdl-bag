@@ -45,7 +45,8 @@ def _xbar_rules(c: Cfg, proto: str, na: dict[str, str]) -> Cfg:
     c.region("regs", "log", 0x4000_1000, 4 * KB, access="WO")
     c.decode("cpu", "DECERR", alias=(0x0000_0000, 64 * KB, 0x0001_0000, "boot_remap_i"))
     c.decode("dma", "SLVERR")
-    c.decode("dbg", "default-slave", default="regs")
+    # dbg's writes to the read-only rom are denied by its own default slave (D32: error).
+    c.decode("dbg", "default-slave", default="rom")
     c.access("dma", "rom", "-")  # DMA cannot reach the ROM
     c.access("cpu", "regs", "RO")  # the CPU may only read the registers
     for p in ("cpu", "dma", "dbg", "mem", "rom", "regs"):

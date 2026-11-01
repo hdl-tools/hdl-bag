@@ -7,7 +7,8 @@
 //   1. that master's aliases: an enabled alias moves its window to AliasTo;
 //   2. the address rules: base/mask per region, the slave port it hits, RO/WO, secure-only;
 //   3. that master's connectivity and Access_Rules (RO/WO) towards the hit slave port.
-// A miss or a blocked access selects the master's default slave port, or raises err_o.
+// A miss or a blocked access selects the master's default slave port, or raises err_o; an
+// access blocked by the default slave itself always raises err_o (D32).
 // err_o is also raised whenever nothing is selected, so a rule or default slave that
 // points outside the slave ports can never give a silent OKAY or hang a bus.
 //
@@ -113,7 +114,11 @@ module bag_addr_decode #(
       err_o = !to_default;
       for (int unsigned m = 0; m < NoMasters; m++) begin
         for (int unsigned s = 0; s < NoSlaves; s++) begin
-          if (to_default && mst_i[m] && DefaultSlave[m] == s) sel_o[s] = 1'b1;
+          if (to_default && mst_i[m] && DefaultSlave[m] == s) begin
+            // D32: a denial never reaches the slave that denied it; answer with an error.
+            if (deny && hit[s]) err_o = 1'b1;
+            else sel_o[s] = 1'b1;
+          end
         end
       end
     end
