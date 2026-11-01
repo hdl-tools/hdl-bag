@@ -2,3 +2,5 @@
 * text=auto eol=lf
 *.xlsx binary
 *.png binary
+# Vendored third-party RTL: upstream files, never hand-edited (scripts/vendor_pulp.py).
+src/hdl_bag/rtl/vendor/** linguist-vendored

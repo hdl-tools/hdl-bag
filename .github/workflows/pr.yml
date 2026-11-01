@@ -30,7 +30,10 @@ jobs:
       - run: uv run mypy src tests scripts
       - name: SPDX headers
         shell: bash
-        run: uv run python scripts/check_spdx.py $(git ls-files '*.py' '*.sv') tools/Dockerfile
+        # Vendored third-party RTL keeps its upstream (SHL-0.51) headers.
+        run: >-
+          uv run python scripts/check_spdx.py
+          $(git ls-files '*.py' '*.sv' ':(exclude)src/hdl_bag/rtl/vendor') tools/Dockerfile
       - run: uv run pytest
 
   golden:
@@ -60,6 +63,21 @@ jobs:
       - run: uv run pytest tests/golden
         env:
           BAG_RECALC_WORKBOOK: out/demo_ss.recalc.xlsx
+
+  vendor:
+    # The vendored PULP tree must match Bender.lock exactly (scripts/vendor_pulp.py).
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: uv run --no-project python scripts/vendor_pulp.py --check
 
   eda:
     # Lint flow and simulation tests against the pinned EDA tools (pytest -m eda).

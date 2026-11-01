@@ -9,7 +9,7 @@ import click
 from hdl_bag import __version__, ir
 from hdl_bag.checks import CheckResult, run_checks
 from hdl_bag.flows import Report, compile_design, lint
-from hdl_bag.gen import MissingRtl, Outputs, generate, load_outputs, sources
+from hdl_bag.gen import MissingRtl, Outputs, generate, include_dirs, load_outputs, sources
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.reader import ReaderError, read_workbook
 from hdl_bag.template import write_template
@@ -126,7 +126,7 @@ def generate_command(spec: Path, output: Path | None, style: str | None) -> None
 def lint_command(outdir: Path) -> None:
     """Lint a generated OUTDIR with every tool; exit 1 on any unwaived finding."""
     out = load_outputs(outdir)
-    _report(lint(sources(out), out.top, outdir))
+    _report(lint(sources(out), out.top, outdir, incdirs=include_dirs(out)))
 
 
 @main.command()
@@ -136,8 +136,8 @@ def lint_command(outdir: Path) -> None:
 def flow(spec: Path, output: Path | None, style: str | None) -> None:
     """check -> generate -> lint -> compile. Simulation and formal come in Phases 4 and 5."""
     out = _generate(spec, output, style)
-    _report(lint(sources(out), out.top, out.root))
-    _report(compile_design(sources(out), out.top, out.root))
+    _report(lint(sources(out), out.top, out.root, incdirs=include_dirs(out)))
+    _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out)))
 
 
 if __name__ == "__main__":

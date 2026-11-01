@@ -10,7 +10,8 @@ Output layout (relative to the output directory)::
     rtl/<top>_flat.sv          sv-interface style only: flat harness, the lint/compile top
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
     rtl/inhouse/*.sv           copies of the in-house IP the design uses
-    <project>.f                file list in compile order
+    rtl/vendor/pulp/...        copies of the vendored PULP files the design uses
+    <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
@@ -31,6 +32,7 @@ from hdl_bag.gen.wrapper import render_harness, render_interface, render_modules
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
+from hdl_bag.templates.sources import resolve_sources
 
 # In-house cells the wrapper itself may instantiate (reset conditioning).
 _WRAPPER_CELLS = ("rtl/inhouse/bag_rst_sync.sv",)
@@ -89,13 +91,15 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         raise MissingRtl(missing)
     top = spec.hierarchy.top
 
-    srcs: list[str] = list(_WRAPPER_CELLS)
+    refs: list[str] = list(_WRAPPER_CELLS)
     for t in used:
         manifest = registry.get(t)
         assert manifest is not None
-        srcs += [s for s in manifest.sources if s not in srcs]
+        refs += [s for s in manifest.sources if s not in refs]
+    src = resolve_sources(refs)
+    srcs = list(src.files)
     pkg_root = files("hdl_bag")
-    for rel in sorted(srcs):
+    for rel in sorted([*srcs, *src.headers]):
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
     # Sub-wrappers (children first), then the top.
@@ -105,7 +109,7 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _write(outdir, rel, text, written)
         module_rels.append(rel)
     top_rel = module_rels[-1]
-    order = [pkg_rel, *sorted(srcs), *module_rels[:-1]]
+    order = [pkg_rel, *srcs, *module_rels[:-1]]
     lint_top = top
     if style == "sv-interface":
         interfaces = []
@@ -121,7 +125,8 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     else:
         order.append(top_rel)
     filelist = f"{spec.project.name}.f"
-    _write(outdir, filelist, "".join(f"{p}\n" for p in order), written)
+    incdirs = "".join(f"+incdir+{d}\n" for d in src.incdirs)
+    _write(outdir, filelist, incdirs + "".join(f"{p}\n" for p in order), written)
     _manifest(outdir, written, lint_top, filelist)
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist)
 
@@ -139,7 +144,13 @@ def load_outputs(root: Path) -> Outputs:
 
 def sources(out: Outputs) -> list[Path]:
     """OUT's file list, relative to its root, in compile order."""
-    return [Path(line) for line in (out.root / out.filelist).read_text().split()]
+    return [Path(t) for t in (out.root / out.filelist).read_text().split() if t[0] != "+"]
+
+
+def include_dirs(out: Outputs) -> list[Path]:
+    """OUT's include directories (``+incdir+`` lines of the file list), relative to its root."""
+    lines = (out.root / out.filelist).read_text().split()
+    return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
 
 
 def _manifest(root: Path, written: list[str], top: str | None, filelist: str | None) -> None:
