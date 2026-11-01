@@ -187,9 +187,8 @@ def apb4_rules() -> Cfg:
     c.fabric("apb", "APB4", 32, 32, "D_R")
     c.master("cpu", "APB4", 32, 32, "D_R").link("cpu", "apb", 0)
     for i, name in enumerate(("ro0", "wo0", "sec0", "dual0")):
-        # dual0 has two regions; D29 (each region base aligned to 2^slave width) would
-        # reject them on a narrow slave, so it takes the full address width.
-        c.slave(name, "APB4", 32, 32 if name == "dual0" else 16, "D_R").link("apb", name, i)
+        # dual0 is a narrow slave with two regions in one 2^16-aligned block (D29).
+        c.slave(name, "APB4", 32, 16, "D_R").link("apb", name, i)
     c.region("ro0", "regs", 0x1000_0000, 0x1000, access="RO")
     c.region("wo0", "regs", 0x1001_0000, 0x1000, access="WO")
     c.region("sec0", "regs", 0x1002_0000, 0x1000, secure=True)
