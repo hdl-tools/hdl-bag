@@ -441,12 +441,42 @@ def bridges_inhouse_cdc() -> Cfg:
     return c
 
 
+def external_fabric() -> Cfg:
+    """bag_external, user-supplied fabrics: an AXI4 crossbar "noc" in a sub-wrapper, reached
+    by an AXI4 master through CDC and width adapters, with an AXI4 slave; an APB4 "peri"
+    reached through a bag_ahb2apb bridge from a generated AHB-Lite bus. BAG instantiates
+    demo modules <project>_noc / <project>_peri and writes stubs for them."""
+    c = Cfg("external_fabric", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_NOC", "clk_noc", "rst_noc_n")
+    c.fabric("noc", "AXI4", 32, 32, "D_NOC", "round-robin", latency="CUT_ALL_AX",
+             max_trans=(4, 4), template="bag_external")  # fmt: skip
+    c.fabric("sys", "AHB-Lite", 32, 32, "D_SYS")
+    c.fabric("peri", "APB4", 32, 16, "D_SYS", template="bag_external")
+    c.master("cpu", "AXI4", 64, 32, "D_SYS", id_width=4)
+    c.master("mcu", "AHB-Lite", 32, 32, "D_SYS")
+    c.slave("ram", "AXI4", 32, 32, "D_NOC")
+    c.slave("uart", "APB4", 32, 12, "D_SYS")
+    c.bridge("br_peri", 0x5000_0000, pass_through=False, template="bag_ahb2apb")
+    c.link("cpu", "noc", 0).link("noc", "ram", 0)
+    c.link("mcu", "sys", 0).link("sys", "br_peri", 0)
+    c.link("br_peri", "peri", 0).link("peri", "uart", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("br_peri", "win", 0x5000_0000, 64 * KB)
+    c.region("uart", "regs", 0x5000_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("mcu", "HRESP_ERROR").decode("br_peri", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA)
+    c.option("mcu", **AHB_MASTER_NA)
+    c.option("br_peri", **APB4_NA).option("uart", **APB4_NA)
+    c.sub("ss_noc", "external_fabric_top").place("noc", "ss_noc")
+    return c
+
+
 BUILT: dict[str, Callable[[], Cfg]] = {
     f.__name__: f
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
               axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one, axi_adapters,
               axil_adapters, bridges_pulp, bridges_pulp_cdc, bridges_inhouse,
-              bridges_inhouse_cdc)
+              bridges_inhouse_cdc, external_fabric)
 }  # fmt: skip
 
 

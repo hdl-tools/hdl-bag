@@ -25,6 +25,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md
+from hdl_bag.gen.external import opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
 from hdl_bag.gen.render import GenerateError, header
@@ -85,7 +86,8 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     registry = builtin_registry()
     netlist = build_netlist(spec)
     used = sorted({i.template for i in netlist.instances})
-    missing = [t for t in used if not (m := registry.get(t)) or not m.rtl]
+    # An opaque template (bag_external) has no RTL of BAG's own: the user supplies it.
+    missing = [t for t in used if not (m := registry.get(t)) or not (m.rtl or m.opaque)]
     if missing:
         _manifest(outdir, written, None, None)
         raise MissingRtl(missing)
@@ -101,6 +103,14 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     pkg_root = files("hdl_bag")
     for rel in sorted([*srcs, *src.headers]):
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+
+    # Stubs for opaque fabrics: the user replaces them with the fabric's RTL.
+    for inst in netlist.instances:
+        manifest = registry.get(inst.template)
+        if inst.fabric is not None and manifest is not None and manifest.opaque:
+            rel = f"rtl/ext/{opaque_module(spec, inst.fabric)}.sv"
+            _write(outdir, rel, render_stub(spec, inst, hdr), written)
+            srcs.append(rel)
 
     # Sub-wrappers (children first), then the top.
     module_rels = []

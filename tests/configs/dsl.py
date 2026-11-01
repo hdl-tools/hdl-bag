@@ -67,7 +67,8 @@ class Cfg:
     def fabric(self, name: str, proto: str, dw: int, aw: int, domain: str,
                arb: str = "single-master", topology: str | None = None,
                latency: str = "NO_LATENCY", max_trans: tuple[int, int] = (4, 4),
-               midpoint: tuple[int, str] = (2, "cut")) -> "Cfg":  # fmt: skip
+               midpoint: tuple[int, str] = (2, "cut"),
+               template: str | None = None) -> "Cfg":  # fmt: skip
         """A fabric row. AXI settings apply only where they are legal (D16): latency mode
         on crossbars, max transactions on AXI, the mid-point on shared buses."""
         topo = topology or TOPOLOGY[proto]
@@ -76,9 +77,12 @@ class Cfg:
         mst: Cell = max_trans[0] if axi else "n/a"
         slv: Cell = max_trans[1] if axi else "n/a"
         mid: tuple[Cell, Cell] = midpoint if topo == "shared-bus" else ("n/a", "n/a")
-        backing = "PULP" if axi else "in-house template"
+        backing = (
+            "user RTL" if template == "bag_external" else "PULP" if axi else "in-house template"
+        )
         self.data.fabrics.append([name, proto, topo, dw, aw, domain, arb, lat, mst, slv,
-                                  TEMPLATE[(proto, topo)], backing, *mid, None])  # fmt: skip
+                                  template or TEMPLATE[(proto, topo)], backing, *mid,
+                                  None])  # fmt: skip
         return self
 
     def master(self, name: str, proto: str, dw: int, aw: int, domain: str,

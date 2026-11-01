@@ -36,6 +36,25 @@ ALL = sorted(f"{ph}/{p.name.removesuffix('.ir.yaml')}" for ph in PHASES
 HERE = Path(__file__).parent
 
 
+def _opaque(config: str) -> bool:
+    """A config with a user-supplied fabric (bag_external): BAG generates only a stub of
+    it, so the route model cannot be simulated through it (test_external.py covers the
+    wiring with test-supplied fabrics)."""
+    from hdl_bag.templates import builtin_registry
+
+    configs, name = config.split("/")
+    spec = load(CONFIG_ROOT / configs / f"{name}.ir.yaml")
+    reg = builtin_registry()
+    return any((m := reg.get(f.template)) is not None and m.opaque for f in spec.fabrics)
+
+
+ROUTED = [c for c in ALL if not _opaque(c)]
+
+
+def test_only_external_configs_skip_the_route_simulation() -> None:
+    assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric"]
+
+
 def _corpus(phase: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(f"corpus_{phase}",
                                                   CONFIG_ROOT / phase / "corpus.py")  # fmt: skip
@@ -108,7 +127,7 @@ def test_gate_lint_and_compile(config: str, style: str) -> None:
 
 
 @pytest.mark.eda
-@pytest.mark.parametrize("config", ALL)
+@pytest.mark.parametrize("config", ROUTED)
 def test_route_simulation(config: str) -> None:
     configs, name = _split(config)
     src = configs / f"{name}.ir.yaml"
