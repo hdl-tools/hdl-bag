@@ -18,7 +18,7 @@ from simrun import REPO, run_cocotb
 
 from hdl_bag.checks import run_checks
 from hdl_bag.flows import compile_design, lint
-from hdl_bag.gen import generate, sources
+from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.ir import dumps, load, resolve
 from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import read_workbook
@@ -82,8 +82,11 @@ def test_round_trip_and_oracle(tmp_path: Path, name: str) -> None:
 def test_gate_lint_and_compile(name: str, style: str) -> None:
     root = REPO / "out" / "corpus" / f"{name}_{style}"
     out = generate(load(CONFIGS / f"{name}.ir.yaml"), root, CONFIGS, style)
-    files = sources(out)
-    for report in (lint(files, out.top, root), compile_design(files, out.top, root)):
+    files, inc = sources(out), include_dirs(out)
+    for report in (
+        lint(files, out.top, root, incdirs=inc),
+        compile_design(files, out.top, root, incdirs=inc),
+    ):
         assert report.ok, report.format()
 
 
@@ -95,4 +98,5 @@ def test_route_simulation(name: str) -> None:
     root = REPO / "out" / "corpus" / f"{name}_route"
     out = generate(spec, root, CONFIGS)  # the config's own port style
     run_cocotb([root / f for f in sources(out)], out.top, HERE / "cocotb_route.py",
-               f"route_{name}", env={"BAG_IR": str(src)})  # fmt: skip
+               f"route_{name}", env={"BAG_IR": str(src)},
+               incdirs=[root / d for d in include_dirs(out)])  # fmt: skip

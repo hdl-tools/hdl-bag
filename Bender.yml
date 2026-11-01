@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+#
+# Third-party RTL vendored into src/hdl_bag/rtl/vendor/pulp/ by scripts/vendor_pulp.py.
+# pulp-platform/axi pins common_cells and tech_cells_generic itself; Bender.lock records
+# the exact commits. Bump deliberately, then re-run the script (docs/third-party.md).
+package:
+  name: hdl_bag_vendor
+  authors:
+    - "The hdl-bag Authors"
+
+dependencies:
+  axi: { git: "https://github.com/pulp-platform/axi.git", version: "=0.39.11" }
+  # Exact pins: the minimum each dependency asks for (axi v0.39.11 needs common_cells
+  # ^1.39.0; common_cells 1.39.0 needs tech_cells_generic ^0.2.11).
+  common_cells: { git: "https://github.com/pulp-platform/common_cells.git", version: "=1.39.0" }
+  tech_cells_generic: { git: "https://github.com/pulp-platform/tech_cells_generic.git", version: "=0.2.11" }

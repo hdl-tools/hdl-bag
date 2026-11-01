@@ -20,17 +20,20 @@ class VerilatorBuild(Verilator):
     def __init__(self, obj_dir: str) -> None:
         self.obj_dir = obj_dir
 
-    def command(self, files: list[Path], top: str) -> list[str]:
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
             self.executable, "--cc", "--build", "-Wno-fatal", "-Wno-lint", "-Wno-style",
-            "--top-module", top, "-Mdir", self.obj_dir, *(f.as_posix() for f in files),
+            "--top-module", top, "-Mdir", self.obj_dir,
+            *(f"-I{d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files),
         ]  # fmt: skip
 
     def parse(self, output: str, root: Path) -> list[Finding]:
         return [f for f in super().parse(output, root) if f.severity == "error"]
 
 
-def compile_design(files: Sequence[Path], top: str, root: Path) -> Report:
+def compile_design(
+    files: Sequence[Path], top: str, root: Path, *, incdirs: Sequence[Path] = ()
+) -> Report:
     """Elaborate and build FILES with TOP; the object directory is ROOT/obj/<top>."""
     obj = root / "obj" / top
     shutil.rmtree(obj, ignore_errors=True)
@@ -38,5 +41,5 @@ def compile_design(files: Sequence[Path], top: str, root: Path) -> Report:
     if shutil.which("ccache") is None:
         os.environ.setdefault("OBJCACHE", "")  # Verilator's makefiles default to ccache
     backend = VerilatorBuild((Path("obj") / top).as_posix())
-    findings = run_backend(backend, list(files), top, root)
+    findings = run_backend(backend, list(files), top, root, list(incdirs))
     return Report("compile", tuple(sorted(findings)), (backend.name,))

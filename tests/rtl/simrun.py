@@ -20,6 +20,7 @@ def run_cocotb(
     build: str,
     params: dict[str, int] | None = None,
     env: dict[str, str] | None = None,
+    incdirs: list[Path] | None = None,
 ) -> None:
     """Build SOURCES with TOP, run every @cocotb.test in MODULE and require all to pass."""
     from cocotb_tools.check_results import get_results
@@ -31,6 +32,7 @@ def run_cocotb(
     runner = get_runner("verilator")
     runner.build(
         sources=sources,
+        includes=incdirs or [],
         hdl_toplevel=top,
         parameters=params or {},
         build_dir=build_dir,

@@ -27,3 +27,6 @@ out/
 .DS_Store
 Thumbs.db
 ~$*.xlsx
+
+# Bender checkouts (scripts/vendor_pulp.py)
+.bender/

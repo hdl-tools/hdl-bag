@@ -34,11 +34,18 @@ class Finding:
         return f"{self.tool}: {where}{self.severity}: {self.message} [{self.rule}]{tag}"
 
 
+def is_third_party(path: str) -> bool:
+    """True for a file in a vendored third-party tree (any ``rtl/vendor/`` directory)."""
+    return "/rtl/vendor/" in f"/{path}"
+
+
 @dataclass(frozen=True)
 class Report:
     flow: str
     findings: tuple[Finding, ...]
     tools: tuple[str, ...]
+    # Warnings located in vendored third-party RTL: reported, never judged (P3-2).
+    third_party: tuple[Finding, ...] = ()
 
     @property
     def unwaived(self) -> tuple[Finding, ...]:
@@ -55,6 +62,10 @@ class Report:
             f"{self.flow} ({', '.join(self.tools)}): {len(self.unwaived)} unwaived finding(s), "
             f"{waived} waived"
         )
+        if self.third_party:
+            lines.append(
+                f"{len(self.third_party)} third-party warning(s) in rtl/vendor/ not judged"
+            )
         return "\n".join(lines) + "\n"
 
 
@@ -62,7 +73,7 @@ class Backend(Protocol):
     name: str
     executable: str
 
-    def command(self, files: list[Path], top: str) -> list[str]: ...
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]: ...
 
     def parse(self, output: str, root: Path) -> list[Finding]: ...
 
@@ -78,7 +89,9 @@ def relative(path: str, root: Path) -> str:
     return p.as_posix()
 
 
-def run_backend(backend: Backend, files: list[Path], top: str, root: Path) -> list[Finding]:
+def run_backend(
+    backend: Backend, files: list[Path], top: str, root: Path, incdirs: list[Path] | None = None
+) -> list[Finding]:
     """Run one tool in ROOT and return its findings. A missing tool is an error finding."""
     exe = shutil.which(backend.executable)
     if exe is None:
@@ -86,7 +99,7 @@ def run_backend(backend: Backend, files: list[Path], top: str, root: Path) -> li
             Finding(backend.name, "", 0, "TOOL-MISSING", "error",
                     f"'{backend.executable}' not found on PATH")
         ]  # fmt: skip
-    cmd = [exe, *backend.command(files, top)[1:]]
+    cmd = [exe, *backend.command(files, top, incdirs or [])[1:]]
     proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True, check=False)
     output = proc.stdout + proc.stderr
     findings = backend.parse(output, root)

@@ -35,10 +35,10 @@ class Slang:
     name = "slang"
     executable = "slang"
 
-    def command(self, files: list[Path], top: str) -> list[str]:
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
             self.executable, "--quiet", "-Weverything", *slang_flags(), "--top", top,
-            *(f.as_posix() for f in files),
+            *(f"-I{d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files),
         ]  # fmt: skip
 
     def parse(self, output: str, root: Path) -> list[Finding]:
@@ -58,10 +58,10 @@ class Verilator:
     name = "verilator"
     executable = "verilator"
 
-    def command(self, files: list[Path], top: str) -> list[str]:
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
             self.executable, "--lint-only", "-Wall", "--top-module", top,
-            *(f.as_posix() for f in files),
+            *(f"-I{d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files),
         ]  # fmt: skip
 
     def parse(self, output: str, root: Path) -> list[Finding]:
@@ -81,7 +81,8 @@ class Verible:
     name = "verible"
     executable = "verible-verilog-lint"
 
-    def command(self, files: list[Path], top: str) -> list[str]:
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
+        # Verible lints files one at a time and needs no include directories.
         with as_file(files_root() / "verible.rules") as rules:
             config = rules.as_posix()
         return [
