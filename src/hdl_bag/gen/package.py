@@ -26,6 +26,7 @@ LATENCY_MODE = {
     "CUT_ALL_PORTS": (1 << 10) - 1,
 }
 CUT_STAGES = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}
+AXI_RESP = {"SLVERR": 0b10, "DECERR": 0b11}  # axi_pkg::RESP_SLVERR / RESP_DECERR
 
 
 def _pattern(items: list[str]) -> str:
@@ -112,6 +113,11 @@ def axi_params(spec: Spec, p: str, fab: Fabric) -> list[str]:
     if fab.midpoint is not None:
         lp("FifoDepth", fab.midpoint.fifo_depth)
         lp("CutStages", CUT_STAGES[fab.midpoint.slice])
+    # Error response of each master's guard, by Port index (unused with a default slave).
+    miss = {d.master: d.miss for d in fab.decode}
+    masters = sorted(fab.master_ports, key=lambda r: r.index)
+    resp = [AXI_RESP.get(miss.get(r.port, "DECERR"), AXI_RESP["DECERR"]) for r in masters]
+    _lp(out, f"logic [{len(resp) - 1}:0][1:0]", f"{p}MissResp", _pattern([lit(2, v) for v in resp]))
     return out
 
 

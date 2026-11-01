@@ -3,7 +3,7 @@
 name: bag_axil_shared_bus
 kind: fabric
 api_version: 1
-description: 'AXI4-Lite shared bus: N:1 axi_lite_mux, mid-point FIFO + register slice, 1:M axi_lite_demux. Fixed priority uses an in-house priority arbiter at the mux (Phase 3). PULP module and parameter names are verified at the pinned commit in Phase 3.'
+description: 'AXI4-Lite shared bus: per-master guards, bag_axil_mux (PULP axi_lite_mux derivative with fixed priority, P3-3), mid-point axi_fifo + axi_cut/axi_multicut, axi_lite_demux steered by the guards'' route bits.'
 protocols:
   - AXI4-Lite
 topologies:
@@ -12,7 +12,21 @@ arbitration:
   - round-robin
   - fixed-priority
 sources:
-  - bender:axi:axi_lite_mux
+  - rtl/inhouse/bag_addr_decode.sv
+  - rtl/inhouse/bag_axil_err_slv.sv
+  - rtl/inhouse/bag_axil_from_flat.sv
+  - rtl/inhouse/bag_axil_guard.sv
+  - rtl/inhouse/bag_axil_shared_bus.sv
+  - rtl/inhouse/bag_axil_to_flat.sv
+  - rtl/inhouse/bag_prio_arb.sv
+  - rtl/vendor/derived/bag_axil_mux.sv
+  - bender:common_cells:rr_arb_tree
+  - bender:common_cells:spill_register
+  - bender:common_cells:fifo_v3
   - bender:axi:axi_lite_demux
+  - bender:axi:axi_fifo
+  - bender:axi:axi_cut
+  - bender:axi:axi_multicut
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

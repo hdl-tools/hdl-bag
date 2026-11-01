@@ -3,7 +3,7 @@
 name: bag_axi_xbar
 kind: fabric
 api_version: 1
-description: AXI4 crossbar (PULP axi_xbar). PULP module and parameter names are verified at the pinned commit in Phase 3.
+description: 'AXI4 crossbar: per-master guards (bag_axi_guard: aliases, rules, Access_Rules, RO/WO, secure, misses) in front of PULP axi_xbar, which steers on the route bits the guards write above the address.'
 protocols:
   - AXI4
 topologies:
@@ -22,6 +22,14 @@ param_map:
   data_width: Cfg.AxiDataWidth
   n_addr_rules: Cfg.NoAddrRules
 sources:
+  - rtl/inhouse/bag_addr_decode.sv
+  - rtl/inhouse/bag_axi_from_flat.sv
+  - rtl/inhouse/bag_axi_guard.sv
+  - rtl/inhouse/bag_axi_to_flat.sv
+  - rtl/inhouse/bag_axi_xbar.sv
   - bender:axi:axi_xbar
+  - bender:axi:axi_demux_simple
+  - bender:axi:axi_err_slv
 licence: SHL-0.51
 qualification: unqualified
+rtl: true

@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""The Phase 2 gate corpus (tests/configs/p2): 10+ APB/AHB-only configs.
+"""The phase gate corpora: tests/configs/p2 (APB/AHB-only) and tests/configs/p3 (AXI and
+mixed protocols).
 
-Gate: every config lints (slang, Verilator, Verible) and compiles in both port styles,
-one with nested sub-wrappers. Beyond the gate, every config also passes the structural
-connectivity oracle and an IR-driven route simulation through its generated top.
+Gate: every config lints (slang, Verilator, Verible) and compiles in both port styles;
+the Phase 2 corpus has 10+ configs, one with nested sub-wrappers. Beyond the gates, every
+config also passes the structural connectivity oracle and an IR-driven route simulation
+through its generated top.
 """
 
 import importlib.util
@@ -24,17 +26,28 @@ from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import read_workbook
 from hdl_bag.template.builder import build_workbook
 
-CONFIGS = REPO / "tests" / "configs" / "p2"
+CONFIG_ROOT = REPO / "tests" / "configs"
+PHASES = ("p2", "p3")
+CONFIGS = CONFIG_ROOT / "p2"  # the Phase 2 gate corpus
 NAMES = sorted(p.name.removesuffix(".ir.yaml") for p in CONFIGS.glob("*.ir.yaml"))
+# Every config of every phase, as "<phase>/<name>".
+ALL = sorted(f"{ph}/{p.name.removesuffix('.ir.yaml')}" for ph in PHASES
+             for p in (CONFIG_ROOT / ph).glob("*.ir.yaml"))  # fmt: skip
 HERE = Path(__file__).parent
 
 
-def _corpus() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("corpus", CONFIGS / "corpus.py")
+def _corpus(phase: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(f"corpus_{phase}",
+                                                  CONFIG_ROOT / phase / "corpus.py")  # fmt: skip
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _split(config: str) -> tuple[Path, str]:
+    phase, name = config.split("/")
+    return CONFIG_ROOT / phase, name
 
 
 def _ir_text(text: str) -> str:
@@ -47,41 +60,44 @@ def test_corpus_has_ten_configs_with_nesting() -> None:
     assert nested, "the gate needs a config with nested sub-wrappers"
 
 
-@pytest.mark.parametrize("name", sorted(_corpus().BUILT))
-def test_ir_matches_its_workbook_source(tmp_path: Path, name: str) -> None:
+@pytest.mark.parametrize("config", [f"{ph}/{n}" for ph in PHASES for n in _corpus(ph).BUILT])
+def test_ir_matches_its_workbook_source(tmp_path: Path, config: str) -> None:
     """The committed IR is what `bag check` + resolve make of the corpus.py workbook."""
+    configs, name = _split(config)
     path = tmp_path / f"{name}.xlsx"
-    build_workbook(data=_corpus().BUILT[name]().data).save(path)
-    shutil.copy(CONFIGS / "header.txt", tmp_path / "header.txt")
+    build_workbook(data=_corpus(configs.name).BUILT[name]().data).save(path)
+    shutil.copy(configs / "header.txt", tmp_path / "header.txt")
     result = run_checks(read_workbook(path), tmp_path)
     assert [f.message for f in result.findings] == []
-    committed = (CONFIGS / f"{name}.ir.yaml").read_text()
+    committed = (configs / f"{name}.ir.yaml").read_text()
     assert _ir_text(dumps(resolve(result))) == _ir_text(committed), (
-        "stale: run `uv run python tests/configs/p2/corpus.py`"
+        f"stale: run `uv run python tests/configs/{configs.name}/corpus.py`"
     )
 
 
-@pytest.mark.parametrize("name", NAMES)
-def test_round_trip_and_oracle(tmp_path: Path, name: str) -> None:
-    spec = load(CONFIGS / f"{name}.ir.yaml")
+@pytest.mark.parametrize("config", ALL)
+def test_round_trip_and_oracle(tmp_path: Path, config: str) -> None:
+    configs, name = _split(config)
+    spec = load(configs / f"{name}.ir.yaml")
     # IR -> workbook -> check -> IR is the identity (apart from provenance).
     wb = tmp_path / "rt.xlsx"
     to_workbook(spec).save(wb)
-    shutil.copy(CONFIGS / "header.txt", tmp_path / "header.txt")
+    shutil.copy(configs / "header.txt", tmp_path / "header.txt")
     result = run_checks(read_workbook(wb), tmp_path)
     assert [f.message for f in result.findings] == []
     assert _ir_text(dumps(resolve(result))) == _ir_text(dumps(spec))
     # The generated hierarchy matches the IR, port by port and net by net.
-    generate(spec, tmp_path / "out", CONFIGS, "flat")
+    generate(spec, tmp_path / "out", configs, "flat")
     assert check(spec, tmp_path / "out" / "rtl") == []
 
 
 @pytest.mark.eda
 @pytest.mark.parametrize("style", ["flat", "sv-interface"])
-@pytest.mark.parametrize("name", NAMES)
-def test_gate_lint_and_compile(name: str, style: str) -> None:
+@pytest.mark.parametrize("config", ALL)
+def test_gate_lint_and_compile(config: str, style: str) -> None:
+    configs, name = _split(config)
     root = REPO / "out" / "corpus" / f"{name}_{style}"
-    out = generate(load(CONFIGS / f"{name}.ir.yaml"), root, CONFIGS, style)
+    out = generate(load(configs / f"{name}.ir.yaml"), root, configs, style)
     files, inc = sources(out), include_dirs(out)
     for report in (
         lint(files, out.top, root, incdirs=inc),
@@ -91,12 +107,56 @@ def test_gate_lint_and_compile(name: str, style: str) -> None:
 
 
 @pytest.mark.eda
-@pytest.mark.parametrize("name", NAMES)
-def test_route_simulation(name: str) -> None:
-    src = CONFIGS / f"{name}.ir.yaml"
+@pytest.mark.parametrize("config", ALL)
+def test_route_simulation(config: str) -> None:
+    configs, name = _split(config)
+    src = configs / f"{name}.ir.yaml"
     spec = load(src)
     root = REPO / "out" / "corpus" / f"{name}_route"
-    out = generate(spec, root, CONFIGS)  # the config's own port style
+    out = generate(spec, root, configs)  # the config's own port style
     run_cocotb([root / f for f in sources(out)], out.top, HERE / "cocotb_route.py",
                f"route_{name}", env={"BAG_IR": str(src)},
                incdirs=[root / d for d in include_dirs(out)])  # fmt: skip
+
+
+@pytest.mark.parametrize("config", ALL)
+def test_probes_exercise_every_protection_rule(config: str) -> None:
+    """Each Access_Rule (of a master port) and each RO / WO / secure-only region is hit by a
+    route-simulation probe that the reference model denies, so no configured protection
+    passes silently because no probe reaches it."""
+    from route_model import probes, route
+
+    configs, name = _split(config)
+    spec = load(configs / f"{name}.ir.yaml")
+    masters = {m.name: m for m in spec.masters}
+    addrs = probes(spec)
+
+    def denied(master: str, region: object, write: bool, nonsec: bool = False) -> bool:
+        r = region  # a MemoryRegion
+        width = masters[master].addr_width
+        return any(r.base <= a < r.base + r.size and a < 1 << width  # type: ignore[attr-defined]
+                   and route(spec, master, a, write, nonsec, {}).slave != r.slave  # type: ignore[attr-defined]
+                   for a in addrs)  # fmt: skip
+
+    missing = []
+    for f in spec.fabrics:
+        regions = [r for r in spec.memory_map if r.fabric == f.name]
+        for rule in f.access_rules:
+            if rule.master not in masters:
+                continue  # a bridge's rule: reached through its upstream masters
+            hit = False
+            for r in (r for r in regions if r.slave == rule.slave):
+                for write in (True, False):  # the direction the region allows, the rule bars
+                    region_ok = r.access == "RW" or (r.access == "RO") != write
+                    rule_bars = rule.access == "none" or (rule.access == "RO") == write
+                    if region_ok and rule_bars:
+                        hit |= denied(rule.master, r, write)
+            if not hit:
+                missing.append(f"Access_Rules {rule.master} -> {rule.slave} {rule.access}")
+        for r in regions:  # reached by any master, possibly across bridges
+            if r.access in ("RO", "WO") and not any(
+                    denied(m, r, r.access == "RO") for m in masters):  # fmt: skip
+                missing.append(f"{r.access} region {r.slave}.{r.region}")
+            if r.secure and not any(denied(m, r, False, nonsec=True) for m in masters):
+                missing.append(f"secure region {r.slave}.{r.region}")
+    assert missing == []
