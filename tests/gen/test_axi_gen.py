@@ -214,3 +214,22 @@ def test_slave_side_pc_carries_the_fabric_slave_id() -> None:
     assert pc.down.protocol == "AXI4-Lite" and pc.down.id_width == 0
     assert pc.up.id_width == xbar.id_width.slave_side and "bid" in pc.up.signals
     assert dw.up.id_width == xbar.id_width.slave_side  # the fabric slot
+
+
+def test_width_conversion_on_the_axi4_side_of_pc() -> None:
+    """D33: an AXI4 port on an AXI4-Lite fabric converts width while still AXI4."""
+    from hdl_bag.ir import load
+
+    spec = load(Path(__file__).parents[1] / "configs" / "p3" / "axil_adapters.ir.yaml")
+
+    def chain(port: str) -> list[str]:
+        own = sorted((a for a in spec.adapters if a.port == port), key=lambda a: a.chain_index)
+        return [a.type for a in own]
+
+    assert chain("cpu") == ["dw", "pc"]  # master: port -> dw (AXI4) -> pc -> fabric
+    assert chain("mem") == ["dw", "pc"]  # slave, from the port: port <- dw (AXI4) <- pc <- fabric
+    insts = {i.name: i for i in build_netlist(spec).instances}
+    dw = insts["cpu_dw_2_cfg"]
+    assert dw.up is not None and dw.down is not None
+    assert (dw.up.protocol, dw.down.protocol) == ("AXI4", "AXI4")
+    assert (dw.up.data_width, dw.down.data_width) == (64, 32)

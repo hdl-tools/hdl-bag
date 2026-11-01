@@ -116,7 +116,7 @@ masters:
   - name: cpu
     protocol: AXI4
     fabric: cfg
-    data_width: 32
+    data_width: 64
     addr_width: 32
     id_width: 4
     user_width: 0
@@ -148,7 +148,7 @@ slaves:
   - name: mem
     protocol: AXI4
     fabric: cfg
-    data_width: 32
+    data_width: 64
     addr_width: 16
     id_width: null
     id_width_auto: true
@@ -200,11 +200,22 @@ adapters:
       depth: 2
     placed_in: axil_adapters_top
     rtl_name: u_cfg_fifo_2_buf
+  - name: cpu_dw_2_cfg
+    type: dw
+    port: cpu
+    fabric: cfg
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 64
+      to: 32
+    placed_in: axil_adapters_top
+    rtl_name: u_cpu_dw_2_cfg
   - name: cpu_pc_2_cfg
     type: pc
     port: cpu
     fabric: cfg
-    chain_index: 0
+    chain_index: 1
     template: bag_pc
     params:
       from: AXI4
@@ -222,11 +233,22 @@ adapters:
       to: 32
     placed_in: axil_adapters_top
     rtl_name: u_dsp_dw_2_cfg
+  - name: cfg_dw_2_mem
+    type: dw
+    port: mem
+    fabric: cfg
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 32
+      to: 64
+    placed_in: axil_adapters_top
+    rtl_name: u_cfg_dw_2_mem
   - name: cfg_pc_2_mem
     type: pc
     port: mem
     fabric: cfg
-    chain_index: 0
+    chain_index: 1
     template: bag_pc
     params:
       from: AXI4-Lite
@@ -319,6 +341,10 @@ hierarchy:
       kind: adapter
       wrapper: axil_adapters_top
       rtl_name: u_cfg_dw_2_buf
+    - instance: cfg_dw_2_mem
+      kind: adapter
+      wrapper: axil_adapters_top
+      rtl_name: u_cfg_dw_2_mem
     - instance: cfg_fifo_2_buf
       kind: adapter
       wrapper: axil_adapters_top
@@ -327,6 +353,10 @@ hierarchy:
       kind: adapter
       wrapper: axil_adapters_top
       rtl_name: u_cfg_pc_2_mem
+    - instance: cpu_dw_2_cfg
+      kind: adapter
+      wrapper: axil_adapters_top
+      rtl_name: u_cpu_dw_2_cfg
     - instance: cpu_pc_2_cfg
       kind: adapter
       wrapper: axil_adapters_top
@@ -365,4 +395,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_adapters.xlsx
-  sha256: b3ceb52c61ba7b8516b68d3779a50ac0ca64ef8e0d364dfbea56022ef71bc15f
+  sha256: 1b6579304c2c13bad555ab594f845db4c91d43d72c70f20809df2c74c2b2d3b2
