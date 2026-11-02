@@ -250,7 +250,7 @@ Reviewed against `src/hdl_bag/rtl/vendor/pulp/` at axi v0.39.11 (commit 42ca270)
 | D40 | Ports BAG understands keep generator-chosen defaults; transparency through the tie-off report and template guards. |
 | D41 | Extra ports of user modules are declared on User_Ports (schema 0.4). |
 | D42 | Max mst trans and Max slv trans mean different things on AXI4 and AXI4-Lite because PULP does. v1 documents the difference; the in-house crossbars (v2, D36) give both protocols one meaning. |
-| D43 | CDC constraints and `bag_sync` synthesis attributes: v1 documents which paths to constrain (user guide, Phase 6). Generating them waits for v2. |
+| D43 | CDC constraints and `bag_sync` synthesis attributes are a v1.0 requirement, in Phase 6: `bag generate` outputs them, and the user guide documents which paths to constrain. |
 | CI | Split `eda` into parallel jobs always, not only above 15 minutes. |
 
 ## Design-agent reviews
@@ -286,7 +286,7 @@ Each RTL or verification PR was reviewed (review-only) by `chip-design-rtl:rtl-d
 
 1. **Workbook notes on Max mst trans and Max slv trans are wrong** (finding 2). Needs a schema bump (0.4 to 0.5). Owner decision: fix it in the first PR of Phase 4, as no 0.4 workbooks are in use outside this repo. The notes will state each protocol's meaning. The difference itself goes away with the in-house crossbars (D42).
 2. **FIFO depth is silently ignored** on `bag_ahb2apb`, `bag_ahb2axi`, `bag_apb2axi` and `bag_apb2ahb` (one transfer at a time). The manifests say so; `bag check` does not warn.
-3. **CDC integration:** no SDC is generated. Handshake bridges need max-delay constraints on payload paths, and `axi_cdc` on its pointer and data paths. Both sides of a crossing must reset together; `CLK-CDC-RESET` checks the style, not the timing. Owner decision (D43): the v1 user guide says which paths to constrain; generating the constraints waits for v2.
+3. **CDC integration:** no SDC is generated. Handshake bridges need max-delay constraints on payload paths, and `axi_cdc` on its pointer and data paths. Both sides of a crossing must reset together; `CLK-CDC-RESET` checks the style, not the timing. Owner decision (D43): Phase 6 generates the constraints and documents them in the user guide.
 4. **`bag_axi2ahb`:** a master must not make RREADY wait for a later write's progress (documented in the RTL and manifest). AxLOCK gets OKAY, so exclusives fail. USER is not carried.
 5. **Handshake bridges:** a partial PSTRB becomes byte writes, so it is not atomic at the destination. Contiguous strobes could use larger transfers.
 6. **Report and test limits:**
@@ -307,5 +307,5 @@ Each RTL or verification PR was reviewed (review-only) by `chip-design-rtl:rtl-d
 
 - **Phase 4** (generated unit tests) starts with one PR for known gap 1 (the workbook notes and schema 0.5), known gap 2 (a `bag check` warning for an ignored FIFO depth) a snapshot of the waived-finding count (gap 6) and the `demo_ss` test time (gap 10). It then takes the rest of gap 6's test limits and gap 11, which its generated tests should close; gap 12's behaviour goes in its scoreboard. It builds on the route model, which becomes the scoreboard; on `Orderings`, `AxiWatch` and `AhbRules`; and on the raw AXI driver. It adds, per D38, an SV shim driving READY combinationally from VALID, plus bursts and random traffic with a scoreboard, reset during traffic and CDC stress.
 - **Phase 5** (formal and nightly) adds per-channel properties on every in-house AXI block (D38): VALID and payload stable until READY, and a cover of VALID rising with READY held low. The nightly can restore full C++ builds of both port styles.
-- **Phase 6** documents known gaps 3 (D43), 4, 5, 8 and 12, completes `doc/tieoffs.md` (gap 6), and picks up known gap 9 and the template author guide note on protocol feature flags (D35).
-- **v2:** D35, D36, D42, D43, the changes behind known gaps 4, 5 and 7, a PREADY timeout (gap 8), plug-ins, and whole-bus user ports (D41).
+- **Phase 6** generates and documents the CDC constraints and `bag_sync` attributes (known gap 3 and part of gap 8, D43), documents known gaps 4, 5, 8 and 12, completes `doc/tieoffs.md` (gap 6), and picks up known gap 9 and the template author guide note on protocol feature flags (D35).
+- **v2:** D35, D36, D42, the changes behind known gaps 4, 5 and 7, a PREADY timeout (gap 8), plug-ins, and whole-bus user ports (D41).
