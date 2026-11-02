@@ -13,7 +13,7 @@ from typing import Any
 
 import cocotb
 from bfm import value
-from bfm_axi import AXI4_IDS
+from bfm_axi import AXI4_IDS, Orderings
 from cocotb.triggers import ReadOnly, RisingEdge
 
 # AXI signal names of a Lite and an AXI4 slave model on the m_* ports.
@@ -61,6 +61,7 @@ class AxiWatch:
         self.log: list[Ax] = []
         self.r: list[Beat] = []
         self.b: list[Beat] = []
+        self.orderings = Orderings()
         cocotb.start_soon(self._run())
 
     def _sig(self, name: str) -> int:
@@ -75,6 +76,7 @@ class AxiWatch:
             await ReadOnly()
             for ch, fields in PAYLOAD.items():
                 valid, ready = self._sig(f"{ch}valid"), self._sig(f"{ch}ready")
+                self.orderings.update(ch, valid, ready)
                 payload = tuple(self._sig(f) for f in fields)
                 if ch in held:
                     assert valid, f"{self.p}: {ch.upper()}VALID dropped before READY"

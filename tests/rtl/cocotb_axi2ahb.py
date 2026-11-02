@@ -19,7 +19,7 @@ from typing import Any
 import cocotb
 from axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
 from bfm import AHB_S, AHB_S_RESP, NONSEQ, SEQ, AhbSlave, bridge_clocks, fabric_port, value
-from bfm_axi import bus
+from bfm_axi import ROUNDS, Handshaking, bus
 from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 from cocotbext.axi import AxiBurstType, AxiLiteMaster, AxiLockType, AxiMaster, AxiProt, AxiResp
 
@@ -451,3 +451,29 @@ async def exclusive_accesses_get_okay(dut: Any) -> None:
     wr = await m.write(addr, _data(AB, 40), size=FULL_SIZE, lock=lock)
     assert wr.resp == AxiResp.OKAY
     assert _mem(s, addr - OFFSET, AB) == _data(AB, 40)
+
+
+@cocotb.test(timeout_time=5, timeout_unit="ms")
+async def every_handshake_ordering(dut: Any) -> None:
+    """VALID first, READY first and same cycle on B and R, where the master model answers
+    (D38); lazy READY also proves the bridge's BVALID / RVALID do not wait for READY."""
+    m, _, _, w = await _setup(dut)
+    sinks = {"b": (m.write_if.b_channel, dut.s_bvalid), "r": (m.read_if.r_channel, dut.s_rvalid)}
+    handshaking = Handshaking(dut.aclk_i, sinks)
+
+    async def traffic() -> None:
+        for k in range(16):
+            addr = BASE + 0x8000 + AB * k
+            data = _data(AB, 50 + k)
+            assert (await m.write(addr, data)).resp == AxiResp.OKAY
+            r = await m.read(addr, AB)
+            assert (r.data, r.resp) == (data, AxiResp.OKAY)
+
+    for mode in ("eager", "lazy", "random"):
+        handshaking.set(mode, seed=23)
+        await traffic()
+    for _ in range(ROUNDS):  # same-cycle handshakes come by chance: run until seen
+        if not w.orderings.missing(("b", "r")):
+            break
+        await traffic()
+    assert w.orderings.missing(("b", "r")) == {}, w.orderings.counts

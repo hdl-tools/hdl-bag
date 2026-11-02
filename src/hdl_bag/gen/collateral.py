@@ -15,10 +15,12 @@ HTML put it in an HTML comment.
 """
 
 import html
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from hdl_bag.gen.decode import fabric_offset
 from hdl_bag.gen.render import GenerateError, header
+from hdl_bag.gen.wrapper import TieOff
 from hdl_bag.ir.model import Spec, UserPort
 
 MEMMAP_COLUMNS = ("Slave", "Region", "Base", "End", "Size", "Access", "Secure only")
@@ -244,6 +246,20 @@ def port_map_md(spec: Spec, user_header: str | None) -> str:
 
 
 USER_COLUMNS = ("Port", "Direction", "Width", "Connection")
+TIEOFF_COLUMNS = ("Instance", "Bus", "Signal", "Direction", "Value", "Reason")
+
+
+def tieoffs_md(spec: Spec, rows: Iterable[TieOff], user_header: str | None) -> str:
+    """Every component port BAG tied, defaulted, fitted or left unused, and why (D40)."""
+    lines = [f"<!--\n{_banner(spec, user_header)}-->", "",
+             f"# {spec.project.name} tie-offs", "",
+             "Component ports that are not simply wired to a bus signal. Direction is the "
+             "component's. Inputs show the value they see; nothing reads the unused outputs.",
+             ""]  # fmt: skip
+    table = [{"Instance": t.instance, "Bus": t.bus, "Signal": t.signal, "Direction": t.direction,
+              "Value": t.value, "Reason": t.reason} for t in sorted(rows)]  # fmt: skip
+    lines += _md_table(TIEOFF_COLUMNS, table) if table else ["None."]
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def _user_connection(u: UserPort) -> str:

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""The phase gate corpora: tests/configs/p2 (APB/AHB-only) and tests/configs/p3 (AXI and
-mixed protocols).
+"""The phase gate corpora: tests/configs/p2 (APB/AHB-only), tests/configs/p3 (AXI and
+mixed protocols) and the golden demo_ss spec.
 
 Gate: every config lints (slang, Verilator, Verible) and compiles in both port styles;
 the Phase 2 corpus has 10+ configs, one with nested sub-wrappers. Beyond the gates, every
@@ -25,34 +25,16 @@ from hdl_bag.ir import dumps, load, resolve
 from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import read_workbook
 from hdl_bag.template.builder import build_workbook
+from hdl_bag.templates import builtin_registry
 
 CONFIG_ROOT = REPO / "tests" / "configs"
 PHASES = ("p2", "p3")
 CONFIGS = CONFIG_ROOT / "p2"  # the Phase 2 gate corpus
 NAMES = sorted(p.name.removesuffix(".ir.yaml") for p in CONFIGS.glob("*.ir.yaml"))
 # Every config of every phase, as "<phase>/<name>".
-ALL = sorted(f"{ph}/{p.name.removesuffix('.ir.yaml')}" for ph in PHASES
-             for p in (CONFIG_ROOT / ph).glob("*.ir.yaml"))  # fmt: skip
+ALL = [*sorted(f"{ph}/{p.name.removesuffix('.ir.yaml')}" for ph in PHASES
+              for p in (CONFIG_ROOT / ph).glob("*.ir.yaml")), "golden/demo_ss"]  # fmt: skip
 HERE = Path(__file__).parent
-
-
-def _opaque(config: str) -> bool:
-    """A config with a user-supplied fabric (bag_external): BAG generates only a stub of
-    it, so the route model cannot be simulated through it (test_external.py covers the
-    wiring with test-supplied fabrics)."""
-    from hdl_bag.templates import builtin_registry
-
-    configs, name = config.split("/")
-    spec = load(CONFIG_ROOT / configs / f"{name}.ir.yaml")
-    reg = builtin_registry()
-    return any((m := reg.get(f.template)) is not None and m.opaque for f in spec.fabrics)
-
-
-ROUTED = [c for c in ALL if not _opaque(c)]
-
-
-def test_only_external_configs_skip_the_route_simulation() -> None:
-    assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric"]
 
 
 def _corpus(phase: str) -> ModuleType:
@@ -66,7 +48,24 @@ def _corpus(phase: str) -> ModuleType:
 
 def _split(config: str) -> tuple[Path, str]:
     phase, name = config.split("/")
-    return CONFIG_ROOT / phase, name
+    return (REPO / "tests" / "golden" if phase == "golden" else CONFIG_ROOT / phase), name
+
+
+def _opaque(config: str) -> bool:
+    """A config with a user-supplied fabric (bag_external): BAG generates only a stub of
+    it, so the route model cannot be simulated through it (test_external.py covers the
+    wiring with test-supplied fabrics)."""
+    configs, name = _split(config)
+    spec = load(configs / f"{name}.ir.yaml")
+    reg = builtin_registry()
+    return any((m := reg.get(f.template)) is not None and m.opaque for f in spec.fabrics)
+
+
+ROUTED = [c for c in ALL if not _opaque(c)]
+
+
+def test_only_external_configs_skip_the_route_simulation() -> None:
+    assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric"]
 
 
 def _ir_text(text: str) -> str:
@@ -180,3 +179,48 @@ def test_probes_exercise_every_protection_rule(config: str) -> None:
             if r.secure and not any(denied(m, r, False, nonsec=True) for m in masters):
                 missing.append(f"secure region {r.slave}.{r.region}")
     assert missing == []
+
+
+def test_phase_3_gate_coverage() -> None:
+    """The Phase 3 gate: 15+ hand-written configs that together cover its feature list. Every
+    item is computed from the IR, so a config edit cannot silently drop one."""
+    specs = [load(CONFIG_ROOT / "p3" / f"{n}.ir.yaml") for n in _corpus("p3").BUILT]
+    mixed = [s.project.name for s in specs
+             if len({*(f.protocol for f in s.fabrics), *(m.protocol for m in s.masters),
+                     *(x.protocol for x in s.slaves)}) > 1]  # fmt: skip
+    assert len(mixed) >= 15, mixed
+    have: set[str] = set()
+    for s in specs:
+        ports = {m.name: m for m in s.masters} | {x.name: x for x in s.slaves}
+        have |= {b.template for b in s.bridges} | {f.template for f in s.fabrics}
+        have |= {f"{f.template}:{f.arbitration}" for f in s.fabrics}
+        for a in s.adapters:
+            if a.port not in ports:
+                continue
+            side = "master" if a.port in {m.name for m in s.masters} else "slave"
+            have.add(f"{a.type}:{side}")
+            if a.type == "dw":  # the data path's direction, master to slave
+                have.add("dw:up" if int(a.params["to"]) > int(a.params["from"]) else "dw:down")
+            if a.type == "pc":
+                have.add(f"pc:{a.params['from']}->{a.params['to']}")
+        have |= {f"slice:{o.slice}" for o in s.port_options}
+        axi = {f.name for f in s.fabrics if f.protocol.startswith("AXI")}
+        if any(d.aliases for f in s.fabrics if f.name in axi for d in f.decode):
+            have.add("alias on AXI")
+        if any(r.secure and r.fabric in axi for r in s.memory_map):
+            have.add("secure-only on AXI")
+        parents = {w.name: w.parent for w in s.hierarchy.wrappers}
+        placed = [p.wrapper for p in s.hierarchy.placement if p.kind == "adapter"]
+        if any(parents.get(parents.get(w, ""), "") for w in placed):  # two levels down
+            have.add("adapters in nested sub-wrappers")
+    registry = builtin_registry()
+    required = set(registry.names("bridge")) | set(registry.names("fabric"))  # every template
+    required |= {
+        "bag_axi_shared_bus:fixed-priority", "bag_axi_shared_bus:round-robin",
+        "bag_axil_shared_bus:fixed-priority", "bag_axil_shared_bus:round-robin",
+        "cdc:master", "cdc:slave", "dw:up", "dw:down", "iw:slave", "fifo:master", "fifo:slave",
+        "cut:master", "cut:slave", "pc:AXI4->AXI4-Lite", "pc:AXI4-Lite->AXI4",
+        "slice:multicut-2", "alias on AXI", "secure-only on AXI",
+        "adapters in nested sub-wrappers",
+    }  # fmt: skip
+    assert required - have == set()

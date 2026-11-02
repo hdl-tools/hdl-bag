@@ -9,6 +9,12 @@
 * ``AxiPortSlave``: a memory that answers SLVERR at the given slave-visible addresses and
   logs every AW / AR handshake (address, write, PROT, USER) like ``bfm.AhbSlave``; its AW
   and AR channels can be stalled (``stall``).
+* Handshake orderings (D38): ``Orderings`` classifies every handshake as VALID first, READY
+  first or same cycle. A model controls READY only on the channels it receives (a slave's
+  AW / W / AR, a master's B / R); ``handshaking.set(mode)`` sets it there: eager (READY up
+  before VALID), lazy (READY only some cycles after VALID, so a DUT whose VALID waits for
+  READY deadlocks and times out), random, or, on a slave, w_first (AWREADY only once WVALID
+  was seen: legal for a slave, and a design whose WVALID waits for AWREADY deadlocks).
 
 Wrapper ports follow the Wrapper sheet's naming pattern, so signals are bound through a
 proxy entity that maps AXI signal names to the wrapper's port handles; a signal a
@@ -20,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import cocotb
-from cocotb.triggers import RisingEdge
+from cocotb.triggers import ReadOnly, RisingEdge
 from cocotb.types import LogicArray
 from cocotbext.axi import (
     AxiBus,
@@ -74,6 +80,110 @@ class _Entity:
 
 
 AXI4_IDS = ("awid", "bid", "arid", "rid")
+ORDERINGS = ("valid_first", "ready_first", "same_cycle")
+ROUNDS = 40  # bound on the extra traffic rounds a test may run to see every ordering
+
+
+class Orderings:
+    """Per channel, how many handshakes happened in each VALID / READY order. Feed it one
+    (valid, ready) sample per cycle."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, dict[str, int]] = {}
+        self._waiting: dict[str, bool] = {}  # VALID was high last cycle, without READY
+        self._ready: dict[str, bool] = {}  # READY was high last cycle
+
+    def update(self, channel: str, valid: int, ready: int) -> None:
+        if valid and ready:
+            if self._waiting.get(channel):
+                kind = "valid_first"
+            elif self._ready.get(channel):
+                kind = "ready_first"
+            else:
+                kind = "same_cycle"
+            row = self.counts.setdefault(channel, dict.fromkeys(ORDERINGS, 0))
+            row[kind] += 1
+        self._waiting[channel] = bool(valid and not ready)
+        self._ready[channel] = bool(ready)
+
+    def missing(self, channels: tuple[str, ...]) -> dict[str, list[str]]:
+        """Orderings not seen, per channel of CHANNELS."""
+        out = {}
+        for ch in channels:
+            row = self.counts.get(ch, {})
+            gaps = [k for k in ORDERINGS if not row.get(k)]
+            if gaps:
+                out[ch] = gaps
+        return out
+
+
+def _channel_signals(axi_bus: Any) -> dict[str, tuple[Any, Any]]:
+    """Channel -> (VALID, READY) handles of a cocotbext-axi bus."""
+    w, r = axi_bus.write, axi_bus.read
+    return {"aw": (w.aw.awvalid, w.aw.awready), "w": (w.w.wvalid, w.w.wready),
+            "b": (w.b.bvalid, w.b.bready), "ar": (r.ar.arvalid, r.ar.arready),
+            "r": (r.r.rvalid, r.r.rready)}  # fmt: skip
+
+
+async def _watch_orderings(clock: Any, axi_bus: Any, orderings: Orderings) -> None:
+    signals = _channel_signals(axi_bus)
+    while True:
+        await RisingEdge(clock)
+        await ReadOnly()
+        for ch, (valid, ready) in signals.items():
+            orderings.update(ch, int(valid.value), int(ready.value))
+
+
+class Handshaking:
+    """READY of the channels a model receives (see the module docstring for the modes)."""
+
+    def __init__(self, clock: Any, sinks: dict[str, tuple[Any, Any]]) -> None:
+        self.clock, self.sinks = clock, sinks  # channel -> (cocotbext sink, VALID handle)
+        self.tasks: list[Any] = []
+        self.aw_ready: Any = None  # a slave's write channels, for w_first
+        self.w_ready: Any = None
+        self.w_last: Any = None
+
+    def set(self, mode: str, seed: int = 1) -> None:
+        for task in self.tasks:
+            task.cancel()
+        self.tasks = []
+        rng = random.Random(seed)
+
+        def pauses() -> Any:
+            while True:
+                yield rng.random() < 0.5
+
+        for sink, valid in self.sinks.values():
+            sink.set_pause_generator(pauses() if mode == "random" else None)
+            sink.pause = False
+            if mode == "lazy":
+                self.tasks.append(cocotb.start_soon(self._lazy(sink, valid)))
+        if mode == "w_first":
+            self.tasks.append(cocotb.start_soon(self._w_first()))
+
+    async def _lazy(self, sink: Any, valid: Any) -> None:
+        sink.pause = True
+        waited = 0
+        while True:
+            await RisingEdge(self.clock)
+            waited = waited + 1 if int(valid.value) else 0
+            sink.pause = waited < 3
+
+    async def _w_first(self) -> None:
+        """Hold AWREADY until WVALID: W may run ahead of AW, never the other way round."""
+        aw_sink, aw_valid = self.sinks["aw"]
+        _, w_valid = self.sinks["w"]
+        aw_ready, w_ready, w_last = self.aw_ready, self.w_ready, self.w_last
+        aw_sink.pause = True
+        ahead = 0  # last W beats taken minus AWs taken
+        while True:
+            await RisingEdge(self.clock)
+            if int(aw_valid.value) and int(aw_ready.value):
+                ahead -= 1
+            if int(w_valid.value) and int(w_ready.value) and (w_last is None or int(w_last.value)):
+                ahead += 1
+            aw_sink.pause = not (ahead > 0 or int(w_valid.value))
 
 
 def bus(dut: Any, signals: dict[str, str], lite: bool) -> Any:
@@ -98,18 +208,32 @@ class AxiPortMaster:
         self.master = cls(axi_bus, clock, reset=reset, reset_active_level=reset_active_level)
         self.bus = axi_bus
         self.lite = lite
+        self.clock = clock
+        self.orderings = Orderings()
+        self.handshaking = Handshaking(clock, {
+            "b": (self.master.write_if.b_channel, axi_bus.write.b.bvalid),
+            "r": (self.master.read_if.r_channel, axi_bus.read.r.rvalid),
+        })  # fmt: skip
+        # A port with PROT tied has no AxPROT: cocotbext-axi then accepts only its default.
+        self.has_prot = hasattr(axi_bus.write.aw, "awprot")
+
+    def watch_orderings(self) -> None:
+        cocotb.start_soon(_watch_orderings(self.clock, self.bus, self.orderings))
+
+    def _prot(self, prot: int) -> AxiProt:
+        return AxiProt(prot) if self.has_prot else AxiProt.NONSECURE
 
     def _user(self, user: int) -> dict[str, int]:
         return {} if self.lite else {"user": user, "size": 2}
 
     async def write(self, addr: int, data: int, prot: int = 0, user: int = 0) -> int:
         extra = {} if self.lite else {"user": user, "wuser": user, "size": 2}
-        resp = await self.master.write(addr, data.to_bytes(4, "little"), prot=AxiProt(prot),
+        resp = await self.master.write(addr, data.to_bytes(4, "little"), prot=self._prot(prot),
                                        **extra)  # fmt: skip
         return int(resp.resp)
 
     async def read(self, addr: int, prot: int = 0, user: int = 0) -> Result:
-        resp = await self.master.read(addr, 4, prot=AxiProt(prot), **self._user(user))
+        resp = await self.master.read(addr, 4, prot=self._prot(prot), **self._user(user))
         code = int(resp.resp)
         return Result(code != AxiResp.OKAY, int.from_bytes(resp.data, "little"), code)
 
@@ -174,6 +298,19 @@ class AxiPortSlave:
             axi_bus, clock, reset=reset, target=self.target, reset_active_level=reset_active_level
         )
         self.log: list[Seen] = []
+        self.orderings = Orderings()
+        w, r = self.slave.write_if, self.slave.read_if
+        self.handshaking = Handshaking(clock, {
+            "aw": (w.aw_channel, axi_bus.write.aw.awvalid),
+            "w": (w.w_channel, axi_bus.write.w.wvalid),
+            "ar": (r.ar_channel, axi_bus.read.ar.arvalid),
+        })  # fmt: skip
+        self.handshaking.aw_ready = axi_bus.write.aw.awready
+        self.handshaking.w_ready = axi_bus.write.w.wready
+        self.handshaking.w_last = getattr(axi_bus.write.w, "wlast", None)
+
+    def watch_orderings(self) -> None:
+        cocotb.start_soon(_watch_orderings(self.clock, self.bus, self.orderings))
 
     def pause(self, seed: int, ratio: float = 0.4) -> None:
         """Random back-pressure: AWREADY, WREADY and ARREADY low, BVALID and RVALID delayed,

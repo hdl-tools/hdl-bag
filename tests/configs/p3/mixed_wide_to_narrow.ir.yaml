@@ -1,0 +1,418 @@
+schema: '0.4'
+project:
+  name: mixed_wide_to_narrow
+  revision: p3
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/mixed_wide_to_narrow
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_per
+    mhz: 100
+    source: top port
+    domain: D_PER
+    reset: rst_per_n
+  - name: clk_sys
+    mhz: 100
+    source: top port
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_per_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_PER
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: ahb
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 64
+    addr_width: 32
+    domain: D_SYS
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_ahb
+        priority: null
+    slave_ports:
+      - index: 0
+        port: rom
+        priority: null
+      - index: 1
+        port: br_per
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: rom
+        region: mem
+        base: '0x4000_0000'
+        end: '0x4000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_per
+        region: win
+        base: '0x4001_0000'
+        end: '0x4001_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_ahb
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: per
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 8
+    addr_width: 32
+    domain: D_PER
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_per
+        priority: null
+    slave_ports:
+      - index: 0
+        port: byte
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: byte
+        region: regs
+        base: '0x4001_0000'
+        end: '0x4001_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_per
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: xbar
+    protocol: AXI4
+    topology: crossbar
+    data_width: 256
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: CUT_ALL_AX
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+    slave_ports:
+      - index: 0
+        port: mem
+        priority: null
+      - index: 1
+        port: br_ahb
+        priority: null
+    id_width:
+      master_side: 3
+      slave_side: 3
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 1
+        slave: br_ahb
+        region: win
+        base: '0x4000_0000'
+        end: '0x400F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: mem
+        region: mem
+        base: '0x8000_0000'
+        end: '0x800F_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: cpu
+        miss: DECERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: AXI4
+    fabric: xbar
+    data_width: 256
+    addr_width: 32
+    id_width: 3
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: byte
+    protocol: APB4
+    fabric: per
+    data_width: 8
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_PER
+    error_response: PSLVERR
+    wait_states: 0
+  - name: mem
+    protocol: AXI4
+    fabric: xbar
+    data_width: 512
+    addr_width: 32
+    id_width: 3
+    id_width_auto: true
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: rom
+    protocol: AHB-Lite
+    fabric: ahb
+    data_width: 64
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: HRESP_ERROR
+    wait_states: 0
+bridges:
+  - name: br_ahb
+    template: bag_axi2ahb
+    upstream: xbar
+    downstream: ahb
+    window_base: '0x4000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AHB-Lite
+    upstream_width: 256
+    downstream_width: 64
+    cdc: false
+  - name: br_per
+    template: bag_ahb2apb
+    upstream: ahb
+    downstream: per
+    window_base: '0x4001_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AHB-Lite
+    downstream_protocol: APB4
+    upstream_width: 64
+    downstream_width: 8
+    cdc: true
+adapters:
+  - name: xbar_dw_2_mem
+    type: dw
+    port: mem
+    fabric: xbar
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 256
+      to: 512
+    placed_in: mixed_wide_to_narrow_top
+    rtl_name: u_xbar_dw_2_mem
+port_options:
+  - port: br_ahb
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_per
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: byte
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: mem
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: rom
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+user_ports: []
+memory_map:
+  - slave: rom
+    region: mem
+    base: '0x4000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: br_ahb
+    region: win
+    base: '0x4000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: br_per
+    region: win
+    base: '0x4001_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: ahb
+  - slave: byte
+    region: regs
+    base: '0x4001_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: per
+  - slave: mem
+    region: mem
+    base: '0x8000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+hierarchy:
+  top: mixed_wide_to_narrow_top
+  wrappers: []
+  placement:
+    - instance: ahb
+      kind: fabric
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_ahb
+    - instance: br_ahb
+      kind: bridge
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_br_ahb
+    - instance: br_per
+      kind: bridge
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_br_per
+    - instance: per
+      kind: fabric
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_per
+    - instance: xbar
+      kind: fabric
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_xbar
+    - instance: xbar_dw_2_mem
+      kind: adapter
+      wrapper: mixed_wide_to_narrow_top
+      rtl_name: u_xbar_dw_2_mem
+wrapper:
+  top: mixed_wide_to_narrow_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: mixed_wide_to_narrow_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br_ahb
+      exposed: false
+      prefix: null
+    - port: br_per
+      exposed: false
+      prefix: null
+    - port: byte
+      exposed: true
+      prefix: null
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: mem
+      exposed: true
+      prefix: null
+    - port: rom
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: mixed_wide_to_narrow.xlsx
+  sha256: 13a504bef77465f46ce27173a3de04a83f6afe30a73fd98503564c1da7c33f53

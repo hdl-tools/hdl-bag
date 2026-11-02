@@ -483,12 +483,262 @@ def external_fabric() -> Cfg:
     return c
 
 
+def nested_adapters() -> Cfg:
+    """Nested sub-wrappers with adapters placed in them (closes the Phase 2 "nested config
+    with adapters" deviation): a crossbar two levels down; a master's cdc one level up from
+    it and its dw beside it; a slave's dw, fifo and multicut in a sibling branch, so those
+    links cross the top; a bridge in that branch, into an APB fabric back in the first."""
+    c = Cfg("nested_adapters", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_CPU", "clk_cpu", "rst_cpu_n")
+    c.fabric("xbar", "AXI4", 64, 32, "D_SYS", "round-robin", latency="CUT_ALL_AX",
+             max_trans=(4, 4))  # fmt: skip
+    c.fabric("per", "APB4", 32, 32, "D_SYS")
+    c.master("cpu", "AXI4", 32, 32, "D_CPU", id_width=3)
+    c.master("dbg", "AXI4-Lite", 32, 32, "D_SYS")
+    c.slave("ram", "AXI4", 128, 32, "D_SYS")
+    c.slave("uart", "APB4", 32, 12, "D_SYS")
+    c.bridge("br_per", 0x4000_0000, pass_through=False, template="bag_axi2apb")
+    c.link("cpu", "xbar", 0).link("dbg", "xbar", 1)
+    c.link("xbar", "ram", 0).link("xbar", "br_per", 1)
+    c.link("br_per", "per", 0).link("per", "uart", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("br_per", "win", 0x4000_0000, 64 * KB)
+    c.region("uart", "regs", 0x4000_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("dbg", "SLVERR").decode("br_per", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("dbg", **AXIL_NA)
+    c.option("ram", fifo=2, slice="multicut-2", **AXI4_NA)
+    c.option("br_per", **APB4_NA).option("uart", **APB4_NA)
+    top = "nested_adapters_top"
+    c.sub("ss_a", top).sub("ss_b", "ss_a").sub("ss_c", top).sub("ss_d", "ss_c")
+    c.place("xbar", "ss_b").place("per", "ss_a")
+    c.place("cpu_cdc_2_xbar", "ss_a").place("cpu_dw_2_xbar", "ss_b")
+    c.place("xbar_dw_2_ram", "ss_d").place("xbar_fifo_2_ram", "ss_c", "u_ram_fifo")
+    c.place("xbar_cut_2_ram", "ss_d").place("br_per", "ss_c")
+    return c
+
+
+def mixed_shared_chain() -> Cfg:
+    """A fixed-priority AXI4 shared bus -> bag_axi2ahb -> AHB-Lite -> bag_ahb2apb -> APB3."""
+    c = Cfg("mixed_shared_chain", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("bus", "AXI4", 32, 32, "D_SYS", "fixed-priority", topology="shared-bus",
+             max_trans=(4, 4))  # fmt: skip
+    c.fabric("ahb", "AHB-Lite", 32, 32, "D_SYS")
+    c.fabric("lp", "APB3", 32, 32, "D_SYS")
+    c.master("cpu", "AXI4", 32, 32, "D_SYS", id_width=2).master(
+        "dma", "AXI4", 32, 32, "D_SYS", id_width=2
+    )
+    c.slave("ram", "AXI4", 32, 32, "D_SYS").slave("sram", "AHB-Lite", 32, 16, "D_SYS")
+    c.slave("tmr", "APB3", 32, 12, "D_SYS")
+    c.bridge("br_ahb", 0x4000_0000, template="bag_axi2ahb")
+    c.bridge("br_lp", 0x4001_0000, pass_through=False, template="bag_ahb2apb")
+    c.link("cpu", "bus", 0, priority=1).link("dma", "bus", 1, priority=0)
+    c.link("bus", "ram", 0).link("bus", "br_ahb", 1)
+    c.link("br_ahb", "ahb", 0).link("ahb", "sram", 0).link("ahb", "br_lp", 1)
+    c.link("br_lp", "lp", 0).link("lp", "tmr", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("br_ahb", "win", 0x4000_0000, MB)
+    c.region("sram", "mem", 0x4000_0000, 64 * KB)
+    c.region("br_lp", "win", 0x4001_0000, 64 * KB)
+    c.region("tmr", "regs", 0x4001_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("dma", "SLVERR")
+    c.decode("br_ahb", "HRESP_ERROR").decode("br_lp", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("dma", **AXI4_NA).option("ram", **AXI4_NA)
+    c.option("br_ahb", **AHB_MASTER_NA).option("sram", **AHB_SLAVE_NA)
+    c.option("br_lp", **APB3_NA).option("tmr", **APB3_NA)
+    return c
+
+
+def mixed_lite_shared() -> Cfg:
+    """A round-robin AXI4-Lite shared bus with a Lite master and an AXI4 master (pc), onto
+    APB4 through bag_axi2apb and AHB-Lite through bag_axi2ahb, both from a Lite upstream."""
+    c = Cfg("mixed_lite_shared", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("cfg", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", max_trans=(2, 2))
+    c.fabric("per", "APB4", 32, 32, "D_SYS")
+    c.fabric("ahb", "AHB-Lite", 32, 32, "D_SYS")
+    c.master("mcu", "AXI4-Lite", 32, 32, "D_SYS").master("dbg", "AXI4", 32, 32, "D_SYS", id_width=2)
+    c.slave("pmu", "AXI4-Lite", 32, 12, "D_SYS").slave("uart", "APB4", 32, 12, "D_SYS")
+    c.slave("sram", "AHB-Lite", 32, 16, "D_SYS")
+    c.bridge("br_per", 0x4000_0000, pass_through=False, template="bag_axi2apb")
+    c.bridge("br_ahb", 0x5000_0000, template="bag_axi2ahb", fifo_depth=2)
+    c.link("mcu", "cfg", 0).link("dbg", "cfg", 1)
+    c.link("cfg", "pmu", 0).link("cfg", "br_per", 1).link("cfg", "br_ahb", 2)
+    c.link("br_per", "per", 0).link("per", "uart", 0)
+    c.link("br_ahb", "ahb", 0).link("ahb", "sram", 0)
+    c.region("pmu", "regs", 0x6000_0000, 4 * KB)
+    c.region("br_per", "win", 0x4000_0000, 64 * KB)
+    c.region("uart", "regs", 0x4000_0000, 4 * KB)
+    c.region("br_ahb", "win", 0x5000_0000, 64 * KB)
+    c.region("sram", "mem", 0x5000_0000, 64 * KB)
+    c.decode("mcu", "DECERR").decode("dbg", "SLVERR")
+    c.decode("br_per", "PSLVERR").decode("br_ahb", "HRESP_ERROR")
+    c.option("mcu", **AXIL_NA).option("dbg", **AXI4_NA).option("pmu", **AXIL_NA)
+    c.option("br_per", **APB4_NA).option("uart", **APB4_NA)
+    c.option("br_ahb", **AHB_MASTER_NA).option("sram", **AHB_SLAVE_NA)
+    return c
+
+
+def mixed_ahb_secure() -> Cfg:
+    """Two AHB-Lite masters -> bag_ahb2axi -> an AXI4 crossbar with a secure-only region, an
+    alias, RO and Access_Rules, shared with an AXI4 master."""
+    c = Cfg("mixed_ahb_secure", phase=3, extra_inputs=("remap_i",))
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("ahb", "AHB-Lite", 32, 32, "D_SYS", "round-robin")
+    c.fabric("xbar", "AXI4", 64, 32, "D_SYS", "round-robin", latency="CUT_ALL_AX", max_trans=(4, 4))
+    c.master("mcu", "AHB-Lite", 32, 32, "D_SYS").master("dsp", "AHB-Lite", 32, 32, "D_SYS")
+    c.master("cpu", "AXI4", 64, 32, "D_SYS", id_width=3)
+    c.slave("ram", "AXI4", 64, 32, "D_SYS").slave("rom", "AXI4", 64, 20, "D_SYS")
+    c.slave("tcm", "AHB-Lite", 32, 16, "D_SYS")
+    c.bridge("br_axi", 0x8000_0000, template="bag_ahb2axi")
+    c.link("mcu", "ahb", 0).link("dsp", "ahb", 1).link("ahb", "tcm", 0).link("ahb", "br_axi", 1)
+    c.link("cpu", "xbar", 0).link("br_axi", "xbar", 1)
+    c.link("xbar", "ram", 0).link("xbar", "rom", 1)
+    c.region("tcm", "mem", 0x0010_0000, 64 * KB)
+    c.region("br_axi", "win", 0x8000_0000, 32 * MB)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("ram", "sec", 0x8010_0000, 64 * KB, secure=True)
+    c.region("rom", "code", 0x8100_0000, 64 * KB, access="RO")
+    c.decode("mcu", "HRESP_ERROR").decode("dsp", "HRESP_ERROR")
+    c.decode("cpu", "DECERR", alias=(0x0000_0000, 64 * KB, 0x8100_0000, "remap_i"))
+    c.decode("br_axi", "SLVERR")
+    c.access("cpu", "ram", "RO")
+    c.option("mcu", **AHB_MASTER_NA).option("dsp", **AHB_MASTER_NA).option("tcm", **AHB_SLAVE_NA)
+    c.option("cpu", **AXI4_NA).option("br_axi", **AXI4_NA)
+    c.option("ram", **AXI4_NA).option("rom", **AXI4_NA)
+    return c
+
+
+def mixed_apb_masters() -> Cfg:
+    """APB masters on their own fabrics: APB3 -> bag_apb2axi -> an AXI4-Lite crossbar, APB4 ->
+    bag_apb2ahb -> AHB-Lite (64 bits, pass-through N)."""
+    c = Cfg("mixed_apb_masters", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("jtag_apb", "APB3", 32, 32, "D_SYS").fabric("dbg_apb", "APB4", 32, 32, "D_SYS")
+    c.fabric("lite", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", max_trans=(2, 2))
+    c.fabric("ahb", "AHB-Lite", 64, 32, "D_SYS")
+    c.master("jtag", "APB3", 32, 32, "D_SYS").master("dbg", "APB4", 32, 32, "D_SYS")
+    c.slave("pmu", "AXI4-Lite", 32, 12, "D_SYS").slave("sram", "AHB-Lite", 64, 16, "D_SYS")
+    c.bridge("br_lite", 0x4000_0000, template="bag_apb2axi")
+    c.bridge("br_ahb", 0x5000_0000, pass_through=False, template="bag_apb2ahb")
+    c.link("jtag", "jtag_apb", 0).link("jtag_apb", "br_lite", 0)
+    c.link("br_lite", "lite", 0).link("lite", "pmu", 0)
+    c.link("dbg", "dbg_apb", 0).link("dbg_apb", "br_ahb", 0)
+    c.link("br_ahb", "ahb", 0).link("ahb", "sram", 0)
+    c.region("br_lite", "win", 0x4000_0000, 64 * KB)
+    c.region("pmu", "regs", 0x4000_0000, 4 * KB)
+    c.region("br_ahb", "win", 0x5000_0000, 64 * KB)
+    c.region("sram", "mem", 0x5000_0000, 64 * KB)
+    c.decode("jtag", "PSLVERR").decode("dbg", "PSLVERR")
+    c.decode("br_lite", "DECERR").decode("br_ahb", "HRESP_ERROR")
+    c.option("jtag", **APB3_NA).option("dbg", **APB4_NA)
+    c.option("br_lite", **AXIL_NA).option("pmu", **AXIL_NA)
+    c.option("br_ahb", **AHB_MASTER_NA).option("sram", **AHB_SLAVE_NA)
+    return c
+
+
+def mixed_cdc_chain() -> Cfg:
+    """A crossing per bridge over four domains: AXI4 -> bag_axi2axil -> AXI4-Lite ->
+    bag_axi2apb -> APB4, with a slave in each domain, and an AXI4 slave behind a cdc."""
+    c = Cfg("mixed_cdc_chain", phase=3)
+    c.domain("D_A", "clk_a", "rst_a_n").domain("D_B", "clk_b", "rst_b_n")
+    c.domain("D_C", "clk_c", "rst_c_n").domain("D_D", "clk_d", "rst_d_n")
+    c.fabric("xbar", "AXI4", 32, 32, "D_A", "round-robin", latency="CUT_ALL_AX", max_trans=(4, 4))
+    c.fabric("lite", "AXI4-Lite", 32, 32, "D_B", "round-robin", max_trans=(2, 2))
+    c.fabric("per", "APB4", 32, 32, "D_C")
+    c.master("cpu", "AXI4", 32, 32, "D_A", id_width=3)
+    c.slave("ram", "AXI4", 32, 32, "D_A").slave("far", "AXI4", 32, 20, "D_D")
+    c.slave("pmu", "AXI4-Lite", 32, 12, "D_B").slave("uart", "APB4", 32, 12, "D_C")
+    c.bridge("br_lite", 0x4000_0000, pass_through=False, template="bag_axi2axil")
+    c.bridge("br_per", 0x4010_0000, pass_through=False, template="bag_axi2apb")
+    c.link("cpu", "xbar", 0).link("xbar", "ram", 0).link("xbar", "far", 1).link(
+        "xbar", "br_lite", 2
+    )
+    c.link("br_lite", "lite", 0).link("lite", "pmu", 0).link("lite", "br_per", 1)
+    c.link("br_per", "per", 0).link("per", "uart", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("far", "mem", 0x9000_0000, MB)
+    c.region("br_lite", "win", 0x4000_0000, 2 * MB)
+    c.region("pmu", "regs", 0x4000_0000, 4 * KB)
+    c.region("br_per", "win", 0x4010_0000, 64 * KB)
+    c.region("uart", "regs", 0x4010_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("br_lite", "SLVERR").decode("br_per", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA).option("far", **AXI4_NA)
+    c.option("br_lite", **AXIL_NA).option("pmu", **AXIL_NA)
+    c.option("br_per", **APB4_NA).option("uart", **APB4_NA)
+    return c
+
+
+def mixed_adapters_bridges() -> Cfg:
+    """Adapters and bridges together: an AXI4 crossbar with an iw slave, a Lite slave (pc), a
+    master with fifo and multicut, a Lite master (pc), bag_axi2ahb from a pass-through N window
+    with a FIFO, and a bag_ahb2apb behind it."""
+    c = Cfg("mixed_adapters_bridges", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("xbar", "AXI4", 64, 32, "D_SYS", "round-robin", latency="CUT_SLV_AX", max_trans=(4, 4))
+    c.fabric("ahb", "AHB-Lite", 32, 24, "D_SYS").fabric("per", "APB4", 32, 24, "D_SYS")
+    c.master("cpu", "AXI4", 64, 32, "D_SYS", id_width=4)
+    c.master("dbg", "AXI4-Lite", 32, 32, "D_SYS")
+    c.slave("ram", "AXI4", 64, 32, "D_SYS", id_width=2).slave("pmu", "AXI4-Lite", 32, 12, "D_SYS")
+    c.slave("sram", "AHB-Lite", 32, 16, "D_SYS").slave("uart", "APB4", 32, 12, "D_SYS")
+    c.bridge("br_ahb", 0x4000_0000, pass_through=False, template="bag_axi2ahb", fifo_depth=2)
+    c.bridge("br_per", 0x4010_0000, template="bag_ahb2apb")
+    c.link("cpu", "xbar", 0).link("dbg", "xbar", 1)
+    c.link("xbar", "ram", 0).link("xbar", "pmu", 1).link("xbar", "br_ahb", 2)
+    c.link("br_ahb", "ahb", 0).link("ahb", "sram", 0).link("ahb", "br_per", 1)
+    c.link("br_per", "per", 0).link("per", "uart", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.region("pmu", "regs", 0x6000_0000, 4 * KB)
+    c.region("br_ahb", "win", 0x4000_0000, 2 * MB)
+    c.region("sram", "mem", 0x4000_0000, 64 * KB)
+    c.region("br_per", "win", 0x4010_0000, 64 * KB)
+    c.region("uart", "regs", 0x4010_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("dbg", "SLVERR")
+    c.decode("br_ahb", "HRESP_ERROR").decode("br_per", "PSLVERR")
+    c.option("cpu", fifo=2, slice="multicut-2", **AXI4_NA).option("dbg", **AXIL_NA)
+    c.option("ram", **AXI4_NA).option("pmu", **AXIL_NA)
+    c.option("br_ahb", **AHB_MASTER_NA).option("sram", **AHB_SLAVE_NA)
+    c.option("br_per", **APB4_NA).option("uart", **APB4_NA)
+    return c
+
+
+def mixed_wide_to_narrow() -> Cfg:
+    """Width across the chain: a 256-bit AXI4 crossbar -> bag_axi2ahb (256 -> 64) ->
+    bag_ahb2apb (64 -> 8, CDC) to an 8-bit APB slave, and a 512-bit slave (dw up)."""
+    c = Cfg("mixed_wide_to_narrow", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n").domain("D_PER", "clk_per", "rst_per_n")
+    c.fabric(
+        "xbar", "AXI4", 256, 32, "D_SYS", "round-robin", latency="CUT_ALL_AX", max_trans=(4, 4)
+    )
+    c.fabric("ahb", "AHB-Lite", 64, 32, "D_SYS").fabric("per", "APB4", 8, 32, "D_PER")
+    c.master("cpu", "AXI4", 256, 32, "D_SYS", id_width=3)
+    c.slave("mem", "AXI4", 512, 32, "D_SYS").slave("rom", "AHB-Lite", 64, 16, "D_SYS")
+    c.slave("byte", "APB4", 8, 12, "D_PER")
+    c.bridge("br_ahb", 0x4000_0000, template="bag_axi2ahb")
+    c.bridge("br_per", 0x4001_0000, pass_through=False, template="bag_ahb2apb")
+    c.link("cpu", "xbar", 0).link("xbar", "mem", 0).link("xbar", "br_ahb", 1)
+    c.link("br_ahb", "ahb", 0).link("ahb", "rom", 0).link("ahb", "br_per", 1)
+    c.link("br_per", "per", 0).link("per", "byte", 0)
+    c.region("mem", "mem", 0x8000_0000, MB)
+    c.region("br_ahb", "win", 0x4000_0000, MB)
+    c.region("rom", "mem", 0x4000_0000, 64 * KB)
+    c.region("br_per", "win", 0x4001_0000, 64 * KB)
+    c.region("byte", "regs", 0x4001_0000, 4 * KB)
+    c.decode("cpu", "DECERR").decode("br_ahb", "HRESP_ERROR").decode("br_per", "PSLVERR")
+    c.option("cpu", **AXI4_NA).option("mem", **AXI4_NA)
+    c.option("br_ahb", **AHB_MASTER_NA).option("rom", **AHB_SLAVE_NA)
+    c.option("br_per", **APB4_NA).option("byte", **APB4_NA)
+    return c
+
+
 BUILT: dict[str, Callable[[], Cfg]] = {
     f.__name__: f
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
               axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one, axi_adapters,
               axil_adapters, bridges_pulp, bridges_pulp_cdc, bridges_inhouse,
-              bridges_inhouse_cdc, external_fabric)
+              bridges_inhouse_cdc, external_fabric, nested_adapters, mixed_shared_chain,
+              mixed_lite_shared, mixed_ahb_secure, mixed_apb_masters, mixed_cdc_chain,
+              mixed_adapters_bridges, mixed_wide_to_narrow)
 }  # fmt: skip
 
 
