@@ -731,6 +731,35 @@ def mixed_wide_to_narrow() -> Cfg:
     return c
 
 
+def mixed_narrow_apb() -> Cfg:
+    """bag_axi2apb onto narrow APB buses: from AXI4 to 8 and 16 bits, and from AXI4-Lite to 8
+    and 16 bits (PULP axi_lite_dw_converter cannot go to 8 bits, so that path runs on AXI4)."""
+    c = Cfg("mixed_narrow_apb", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("xbar", "AXI4", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY", max_trans=(4, 4))
+    c.fabric("lite", "AXI4-Lite", 32, 32, "D_SYS", "round-robin", max_trans=(2, 2))
+    for name, dw in (("a8", 8), ("a16", 16), ("l8", 8), ("l16", 16)):
+        c.fabric(f"apb_{name}", "APB4", dw, 32, "D_SYS")
+        c.slave(f"s_{name}", "APB4", dw, 12, "D_SYS")
+    c.master("cpu", "AXI4", 32, 32, "D_SYS", id_width=3)
+    c.slave("ram", "AXI4", 32, 32, "D_SYS")
+    c.bridge("br_lite", 0x5000_0000, template="bag_axi2axil")
+    c.link("cpu", "xbar", 0).link("xbar", "ram", 0).link("xbar", "br_lite", 1)
+    c.link("br_lite", "lite", 0)
+    for i, (name, base, up) in enumerate((("a8", 0x4000_0000, "xbar"), ("a16", 0x4001_0000, "xbar"),
+                                          ("l8", 0x5000_0000, "lite"), ("l16", 0x5001_0000, "lite"))):  # fmt: skip
+        br = f"br_{name}"
+        c.bridge(br, base, pass_through=False, template="bag_axi2apb")
+        c.link(up, br, 2 + i if up == "xbar" else i - 2)
+        c.link(br, f"apb_{name}", 0).link(f"apb_{name}", f"s_{name}", 0)
+        c.region(br, "win", base, 64 * KB).region(f"s_{name}", "regs", base, 4 * KB)
+        c.decode(br, "PSLVERR").option(br, **APB4_NA).option(f"s_{name}", **APB4_NA)
+    c.region("ram", "mem", 0x8000_0000, MB).region("br_lite", "win", 0x5000_0000, MB)
+    c.decode("cpu", "DECERR").decode("br_lite", "SLVERR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA).option("br_lite", **AXIL_NA)
+    return c
+
+
 BUILT: dict[str, Callable[[], Cfg]] = {
     f.__name__: f
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
@@ -738,7 +767,7 @@ BUILT: dict[str, Callable[[], Cfg]] = {
               axil_adapters, bridges_pulp, bridges_pulp_cdc, bridges_inhouse,
               bridges_inhouse_cdc, external_fabric, nested_adapters, mixed_shared_chain,
               mixed_lite_shared, mixed_ahb_secure, mixed_apb_masters, mixed_cdc_chain,
-              mixed_adapters_bridges, mixed_wide_to_narrow)
+              mixed_adapters_bridges, mixed_wide_to_narrow, mixed_narrow_apb)
 }  # fmt: skip
 
 

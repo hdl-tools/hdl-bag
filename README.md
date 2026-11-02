@@ -10,21 +10,21 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha. Phases 1 and 2 of 6 are done; Phase 3 (AXI) is in progress.
+Pre-alpha. Phases 1 to 3 of 6 are done.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 81 validation checks | AXI4 / AXI4-Lite fabrics, adapters and AXI bridges (Phase 3) |
-| Canonical YAML IR, byte-identical across runs | Generated cocotb tests (Phase 4) |
-| AHB-Lite single-layer bus (multi-master), APB3/APB4 decoder-mux, AHB-Lite → APB bridge | Formal checks and nightly random regression (Phase 5) |
-| Wrapper in flat or SV-interface port style, nested sub-wrappers | User guide and v1.0 release (Phase 6) |
-| C header, memory-map doc (Markdown and HTML), port map | |
+| Spec workbook template, reader and 86 validation checks | Generated cocotb tests (Phase 4) |
+| Canonical YAML IR, byte-identical across runs | Formal checks and nightly random regression (Phase 5) |
+| AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | User guide and v1.0 release (Phase 6) |
+| Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
+| Per-port adapters: protocol, width, CDC, ID width, FIFO, register slice | |
+| User-supplied fabrics (`bag_external`), with declared extra ports | |
+| Wrapper in flat or SV-interface port style, nested sub-wrappers | |
+| C header, memory-map doc (Markdown and HTML), port map, tie-off report | |
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 
-A spec that uses an AXI template still gets its collateral; `bag generate`
-then stops and names the templates that have no RTL yet.
-
-Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md).
+Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md).
 
 ## Quick start
 
@@ -49,10 +49,13 @@ Generated output (under the output directory):
 rtl/pkg/<package>.sv     parameter package (widths, decode tables)
 rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
 rtl/inhouse/*.sv         the in-house IP the design uses
+rtl/vendor/**            the vendored PULP files the design uses
+rtl/ext/<module>.sv      stub of a user-supplied fabric: replace it with your RTL
 <project>.f              file list in compile order
 sw/<project>_memmap.h    C header
 doc/memmap.md, .html     memory-map document
 doc/port_map.md          per-fabric port map
+doc/tieoffs.md           component ports tied, defaulted, fitted or unused, and why
 ```
 
 ## Requirements
