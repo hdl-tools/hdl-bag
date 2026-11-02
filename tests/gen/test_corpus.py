@@ -204,6 +204,10 @@ def test_phase_3_gate_coverage() -> None:
             if a.type == "pc":
                 have.add(f"pc:{a.params['from']}->{a.params['to']}")
         have |= {f"slice:{o.slice}" for o in s.port_options}
+        widths = {f.name: (f.protocol, f.data_width) for f in s.fabrics}
+        for b in s.bridges:
+            if b.template == "bag_axi2apb" and widths[b.downstream][1] == 8:
+                have.add(f"bag_axi2apb:{widths[b.upstream][0]}:{widths[b.upstream][1]}->8")
         axi = {f.name for f in s.fabrics if f.protocol.startswith("AXI")}
         if any(d.aliases for f in s.fabrics if f.name in axi for d in f.decode):
             have.add("alias on AXI")
@@ -222,5 +226,6 @@ def test_phase_3_gate_coverage() -> None:
         "cut:master", "cut:slave", "pc:AXI4->AXI4-Lite", "pc:AXI4-Lite->AXI4",
         "slice:multicut-2", "alias on AXI", "secure-only on AXI",
         "adapters in nested sub-wrappers",
+        "bag_axi2apb:AXI4:32->8", "bag_axi2apb:AXI4-Lite:32->8", "bag_axi2apb:AXI4-Lite:64->8",
     }  # fmt: skip
     assert required - have == set()

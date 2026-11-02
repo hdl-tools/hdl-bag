@@ -1,0 +1,911 @@
+schema: '0.4'
+project:
+  name: mixed_narrow_apb
+  revision: p3
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/mixed_narrow_apb
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_aon
+    mhz: 100
+    source: top port
+    domain: D_AON
+    reset: rst_aon_n
+  - name: clk_sys
+    mhz: 100
+    source: top port
+    domain: D_SYS
+    reset: rst_sys_n
+resets:
+  - name: rst_aon_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_AON
+  - name: rst_sys_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D_SYS
+fabrics:
+  - name: apb_a16
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 16
+    addr_width: 32
+    domain: D_SYS
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_a16
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s_a16
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s_a16
+        region: regs
+        base: '0x4001_0000'
+        end: '0x4001_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_a16
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: apb_a8
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 8
+    addr_width: 32
+    domain: D_SYS
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_a8
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s_a8
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s_a8
+        region: regs
+        base: '0x4000_0000'
+        end: '0x4000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_a8
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: apb_c8
+    protocol: APB3
+    topology: decoder-mux
+    data_width: 8
+    addr_width: 32
+    domain: D_AON
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_c8
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s_c8
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s_c8
+        region: regs
+        base: '0x6000_0000'
+        end: '0x6000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_c8
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: apb_l16
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 16
+    addr_width: 32
+    domain: D_SYS
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_l16
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s_l16
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s_l16
+        region: regs
+        base: '0x5001_0000'
+        end: '0x5001_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_l16
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: apb_l8
+    protocol: APB4
+    topology: decoder-mux
+    data_width: 8
+    addr_width: 32
+    domain: D_SYS
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_apb_mux
+    backing_ip: in-house template
+    master_ports:
+      - index: 0
+        port: br_l8
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s_l8
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s_l8
+        region: regs
+        base: '0x5000_0000'
+        end: '0x5000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_l8
+        miss: PSLVERR
+        default_slave: null
+        aliases: []
+  - name: lite
+    protocol: AXI4-Lite
+    topology: crossbar
+    data_width: 32
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 2
+    max_slv_trans: 2
+    midpoint: null
+    template: bag_axil_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: br_lite
+        priority: null
+    slave_ports:
+      - index: 0
+        port: br_l8
+        priority: null
+      - index: 1
+        port: br_l16
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: br_l8
+        region: win
+        base: '0x5000_0000'
+        end: '0x5000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_l16
+        region: win
+        base: '0x5001_0000'
+        end: '0x5001_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_lite
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+  - name: lite64
+    protocol: AXI4-Lite
+    topology: crossbar
+    data_width: 64
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 2
+    max_slv_trans: 2
+    midpoint: null
+    template: bag_axil_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: br_lite64
+        priority: null
+    slave_ports:
+      - index: 0
+        port: br_c8
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: br_c8
+        region: win
+        base: '0x6000_0000'
+        end: '0x6000_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br_lite64
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+  - name: xbar
+    protocol: AXI4
+    topology: crossbar
+    data_width: 32
+    addr_width: 32
+    domain: D_SYS
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 4
+    max_slv_trans: 4
+    midpoint: null
+    template: bag_axi_xbar
+    backing_ip: PULP
+    master_ports:
+      - index: 0
+        port: cpu
+        priority: null
+    slave_ports:
+      - index: 0
+        port: ram
+        priority: null
+      - index: 1
+        port: br_lite
+        priority: null
+      - index: 2
+        port: br_a8
+        priority: null
+      - index: 3
+        port: br_a16
+        priority: null
+      - index: 4
+        port: br_lite64
+        priority: null
+    id_width:
+      master_side: 3
+      slave_side: 3
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 2
+        slave: br_a8
+        region: win
+        base: '0x4000_0000'
+        end: '0x4000_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 3
+        slave: br_a16
+        region: win
+        base: '0x4001_0000'
+        end: '0x4001_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 1
+        slave: br_lite
+        region: win
+        base: '0x5000_0000'
+        end: '0x500F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 4
+        slave: br_lite64
+        region: win
+        base: '0x6000_0000'
+        end: '0x600F_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: ram
+        region: mem
+        base: '0x8000_0000'
+        end: '0x800F_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: cpu
+        miss: DECERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: cpu
+    protocol: AXI4
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: 3
+    user_width: 0
+    domain: D_SYS
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: ram
+    protocol: AXI4
+    fabric: xbar
+    data_width: 32
+    addr_width: 32
+    id_width: 3
+    id_width_auto: true
+    user_width: 0
+    domain: D_SYS
+    error_response: SLVERR
+    wait_states: 0
+  - name: s_a16
+    protocol: APB4
+    fabric: apb_a16
+    data_width: 16
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: PSLVERR
+    wait_states: 0
+  - name: s_a8
+    protocol: APB4
+    fabric: apb_a8
+    data_width: 8
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: PSLVERR
+    wait_states: 0
+  - name: s_c8
+    protocol: APB3
+    fabric: apb_c8
+    data_width: 8
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_AON
+    error_response: PSLVERR
+    wait_states: 0
+  - name: s_l16
+    protocol: APB4
+    fabric: apb_l16
+    data_width: 16
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: PSLVERR
+    wait_states: 0
+  - name: s_l8
+    protocol: APB4
+    fabric: apb_l8
+    data_width: 8
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D_SYS
+    error_response: PSLVERR
+    wait_states: 0
+bridges:
+  - name: br_a16
+    template: bag_axi2apb
+    upstream: xbar
+    downstream: apb_a16
+    window_base: '0x4001_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 16
+    cdc: false
+  - name: br_a8
+    template: bag_axi2apb
+    upstream: xbar
+    downstream: apb_a8
+    window_base: '0x4000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 8
+    cdc: false
+  - name: br_c8
+    template: bag_axi2apb
+    upstream: lite64
+    downstream: apb_c8
+    window_base: '0x6000_0000'
+    pass_through: false
+    fifo_depth: 2
+    upstream_protocol: AXI4-Lite
+    downstream_protocol: APB3
+    upstream_width: 64
+    downstream_width: 8
+    cdc: true
+  - name: br_l16
+    template: bag_axi2apb
+    upstream: lite
+    downstream: apb_l16
+    window_base: '0x5001_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AXI4-Lite
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 16
+    cdc: false
+  - name: br_l8
+    template: bag_axi2apb
+    upstream: lite
+    downstream: apb_l8
+    window_base: '0x5000_0000'
+    pass_through: false
+    fifo_depth: 0
+    upstream_protocol: AXI4-Lite
+    downstream_protocol: APB4
+    upstream_width: 32
+    downstream_width: 8
+    cdc: false
+  - name: br_lite
+    template: bag_axi2axil
+    upstream: xbar
+    downstream: lite
+    window_base: '0x5000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AXI4-Lite
+    upstream_width: 32
+    downstream_width: 32
+    cdc: false
+  - name: br_lite64
+    template: bag_axi2axil
+    upstream: xbar
+    downstream: lite64
+    window_base: '0x6000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AXI4-Lite
+    upstream_width: 32
+    downstream_width: 64
+    cdc: false
+adapters: []
+port_options:
+  - port: br_a16
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: br_a8
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: br_c8
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: br_l16
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: br_l8
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: br_lite
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: br_lite64
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: cpu
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: ram
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: s_a16
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: s_a8
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: s_c8
+    fifo_depth: 0
+    slice: none
+    prot: n/a
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: drive
+  - port: s_l16
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+  - port: s_l8
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: drive
+    pslverr: drive
+user_ports: []
+memory_map:
+  - slave: s_a8
+    region: regs
+    base: '0x4000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb_a8
+  - slave: br_a8
+    region: win
+    base: '0x4000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: s_a16
+    region: regs
+    base: '0x4001_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb_a16
+  - slave: br_a16
+    region: win
+    base: '0x4001_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: s_l8
+    region: regs
+    base: '0x5000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb_l8
+  - slave: br_l8
+    region: win
+    base: '0x5000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: lite
+  - slave: br_lite
+    region: win
+    base: '0x5000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: s_l16
+    region: regs
+    base: '0x5001_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb_l16
+  - slave: br_l16
+    region: win
+    base: '0x5001_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: lite
+  - slave: s_c8
+    region: regs
+    base: '0x6000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: apb_c8
+  - slave: br_c8
+    region: win
+    base: '0x6000_0000'
+    size: '0x0001_0000'
+    access: RW
+    secure: false
+    fabric: lite64
+  - slave: br_lite64
+    region: win
+    base: '0x6000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+  - slave: ram
+    region: mem
+    base: '0x8000_0000'
+    size: '0x0010_0000'
+    access: RW
+    secure: false
+    fabric: xbar
+hierarchy:
+  top: mixed_narrow_apb_top
+  wrappers: []
+  placement:
+    - instance: apb_a16
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_apb_a16
+    - instance: apb_a8
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_apb_a8
+    - instance: apb_c8
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_apb_c8
+    - instance: apb_l16
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_apb_l16
+    - instance: apb_l8
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_apb_l8
+    - instance: br_a16
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_a16
+    - instance: br_a8
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_a8
+    - instance: br_c8
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_c8
+    - instance: br_l16
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_l16
+    - instance: br_l8
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_l8
+    - instance: br_lite
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_lite
+    - instance: br_lite64
+      kind: bridge
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_br_lite64
+    - instance: lite
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_lite
+    - instance: lite64
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_lite64
+    - instance: xbar
+      kind: fabric
+      wrapper: mixed_narrow_apb_top
+      rtl_name: u_xbar
+wrapper:
+  top: mixed_narrow_apb_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: mixed_narrow_apb_pkg
+  file_header: header.txt
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br_a16
+      exposed: false
+      prefix: null
+    - port: br_a8
+      exposed: false
+      prefix: null
+    - port: br_c8
+      exposed: false
+      prefix: null
+    - port: br_l16
+      exposed: false
+      prefix: null
+    - port: br_l8
+      exposed: false
+      prefix: null
+    - port: br_lite
+      exposed: false
+      prefix: null
+    - port: br_lite64
+      exposed: false
+      prefix: null
+    - port: cpu
+      exposed: true
+      prefix: null
+    - port: ram
+      exposed: true
+      prefix: null
+    - port: s_a16
+      exposed: true
+      prefix: null
+    - port: s_a8
+      exposed: true
+      prefix: null
+    - port: s_c8
+      exposed: true
+      prefix: null
+    - port: s_l16
+      exposed: true
+      prefix: null
+    - port: s_l8
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 0.0.1
+  source: mixed_narrow_apb.xlsx
+  sha256: 202ec2a4d042702057a9ffc6fc6611631f36b6367aa892ab460e2757eb1d7c0e

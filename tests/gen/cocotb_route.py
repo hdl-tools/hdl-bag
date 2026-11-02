@@ -659,6 +659,110 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
 
 
 @cocotb.test(timeout_time=50, timeout_unit="us")
+async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
+    """Every AXI4 crossbar, master and AXI4 slave with no adapter between: with the slave
+    taking requests but holding R, reads on one ID reach it until Max mst trans at least."""
+    masters, slaves, clocks = await _bring_up(dut)
+    adapted = {a.port for a in SPEC.adapters}
+    checked = 0
+    for f in SPEC.fabrics:
+        if f.template != "bag_axi_xbar" or not f.max_mst_trans:
+            continue
+        ports = {p.port for p in f.master_ports} | {p.port for p in f.slave_ports}
+        for m in SPEC.masters:
+            if m.name not in ports or m.name in adapted or not m.id_width:
+                continue
+            words = _private_words(m, 0, f.max_mst_trans + 2, direct=True)
+            exp = route(SPEC, m.name, words[0], False, False, {}) if words else None
+            if exp is None or exp.slave not in ports or exp.slave in adapted:
+                continue
+            drv, slave = masters[m.name], slaves[exp.slave]
+            n = len(slave.log)
+            # The slave model holds only 5 reads by itself (2 AR, 2 R, 1 in hand): lift that, so
+            # the count is the fabric's limit and not the model's.
+            read_if = slave.slave.read_if
+            limits = (
+                read_if.ar_channel.queue_occupancy_limit,
+                read_if.r_channel.queue_occupancy_limit,
+            )
+            read_if.ar_channel.queue_occupancy_limit = read_if.r_channel.queue_occupancy_limit = -1
+            read_if.r_channel.pause = True
+            reads = [cocotb.start_soon(drv.master.read(a, 4, arid=0, size=2, prot=drv._prot(0)))
+                     for a in words]  # fmt: skip
+            await ClockCycles(clocks[f.domain], 100)
+            taken = sum(not e.write for e in slave.log[n:])
+            read_if.r_channel.pause = False
+            await Combine(*reads)
+            read_if.ar_channel.queue_occupancy_limit, read_if.r_channel.queue_occupancy_limit = (
+                limits
+            )
+            assert taken >= f.max_mst_trans, (
+                f"{f.name}: {taken} reads on one ID reached {exp.slave}, "
+                f"Max mst trans is {f.max_mst_trans}"
+            )
+            checked += 1
+    dut._log.info("Crossbar per-ID limits: %d checks", checked)
+
+
+@cocotb.test(timeout_time=200, timeout_unit="us")
+async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> None:
+    """Every AXI master to every APB slave narrower than 32 bits behind bag_axi2apb: a word
+    becomes one access per APB word, at the right addresses with the right lanes; a byte
+    write touches only its lane; an error on any beat reaches the master."""
+    masters, slaves, _ = await _bring_up(dut)
+    axi2apb = {b.name for b in SPEC.bridges if b.template == "bag_axi2apb"}
+    checked = 0
+    for m in SPEC.masters:
+        if m.protocol not in AXI:
+            continue
+        for s in SPEC.slaves:
+            if s.protocol not in ("APB3", "APB4") or s.data_width >= 32:
+                continue
+            word = next(r for r in SPEC.memory_map if r.slave == s.name).base + 0x40
+            if word >= 1 << m.addr_width:
+                continue
+            outs = [route(SPEC, m.name, word, w, False, {}) for w in (True, False)]
+            if any(o.slave != s.name or o.slave_error or o.masked or not axi2apb & set(o.bridges)
+                   for o in outs):  # fmt: skip
+                continue
+            drv, sl, addr, nbytes = (
+                masters[m.name],
+                slaves[s.name],
+                outs[0].address,
+                s.data_width // 8,
+            )
+            value, label = 0x4433_2211, f"{m.name} -> {s.name}"
+            beats = list(range(addr, addr + 4, nbytes))
+            lanes = [(value >> (8 * (a - addr))) & ((1 << s.data_width) - 1) for a in beats]
+            n = len(sl.log)
+            assert await drv.write(word, value) == 0, f"{label} write"
+            seen = [e for e in sl.log[n:] if e.write]
+            assert [(e.addr, e.data) for e in seen] == list(zip(beats, lanes, strict=True)), (
+                f"{label}: {[(hex(e.addr), hex(e.data)) for e in seen]}"
+            )
+            assert [sl.mem[a] for a in beats] == lanes, f"{label}: memory"
+            r = await drv.read(word)
+            assert not r.err and r.data == value, f"{label}: read {r.data:#x}"
+            # APB3 has no PSTRB: a partial write onto a wider APB word cannot be expressed.
+            if nbytes == 1 or s.protocol == "APB4":
+                n = len(sl.log)
+                assert await drv.byte_write(word + 1, 0x5A) == 0, f"{label} byte write"
+                seen = [e for e in sl.log[n:] if e.write]
+                assert [e.addr for e in seen] == [addr + 1 - (addr + 1) % nbytes], f"{label} byte"
+                r = await drv.read(word)
+                assert not r.err and r.data == 0x4433_5A11, f"{label}: {r.data:#x}"
+            for beat in beats:
+                sl.err_addrs.add(beat)
+                assert await drv.write(word, value) == 2, f"{label}: write error at {beat:#x}"
+                r = await drv.read(word)
+                assert r.resp == 2, f"{label}: read error at {beat:#x}: {r.resp}"
+                sl.err_addrs.clear()
+            assert await drv.write(word, value) == 0, f"{label}: after the errors"
+            checked += 1
+    dut._log.info("Narrow APB behind bag_axi2apb: %d checks", checked)
+
+
+@cocotb.test(timeout_time=50, timeout_unit="us")
 async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
     """Every AXI master to every APB4 slave it reaches: pre-fill a word, write one byte;
     the APB slave sees that byte's PSTRB and the other bytes keep their value."""

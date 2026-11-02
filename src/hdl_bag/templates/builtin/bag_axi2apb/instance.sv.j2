@@ -1,15 +1,19 @@
 {#- SPDX-License-Identifier: Apache-2.0 -#}
 {#- Copyright 2026 The hdl-bag Authors -#}
 {#- Instantiation of bag_axi2apb. Context: hdl_bag.gen.wrapper.render_instance. "up" is the
-    bridge's slave port on the upstream fabric, "down" its master port downstream. -#}
+    bridge's slave port on the upstream fabric, "down" its master port downstream. An AXI4-Lite
+    upstream normally uses bag_axil2apb; onto an 8-bit APB it uses the AXI4 ports (PULP
+    axi_lite_dw_converter cannot go to 8 bits), with the signals it lacks taking single-beat
+    defaults (ID 0, AxLEN 0, AxSIZE = the full width, INCR, WLAST 1, AxCACHE 4'b0011). -#}
 {% set up = inst.up %}
 {% set dn = inst.down %}
 {% set fab = spec.fabrics | selectattr("name", "equalto", bridge.upstream) | first %}
 {% set uw = [1, up.user_width] | max %}
 {% set idw = [1, up.id_width] | max %}
 {% set offset = bridge_offset(bridge.name) %}
+{% set full_size = {32: 2, 64: 3, 128: 4, 256: 5, 512: 6, 1024: 7}[up.data_width] %}
 
-{% if up.protocol == "AXI4" %}
+{% if up.protocol == "AXI4" or dn.data_width == 8 %}
   // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
   bag_axi2apb #(
       .UpAddrWidth  ({{ up.addr_width }}),
@@ -30,8 +34,8 @@
       .s_awid_i    ({{ ctx.i(up, "awid", 0, idw) }}),
       .s_awaddr_i  ({{ ctx.i(up, "awaddr", 0, up.addr_width) }}),
       .s_awlen_i   ({{ ctx.i(up, "awlen", 0, 8) }}),
-      .s_awsize_i  ({{ ctx.i(up, "awsize", 0, 3) }}),
-      .s_awburst_i ({{ ctx.i(up, "awburst", 0, 2) }}),
+      .s_awsize_i  ({{ ctx.i(up, "awsize", full_size, 3) }}),
+      .s_awburst_i ({{ ctx.i(up, "awburst", 1, 2) }}),
       .s_awlock_i  ({{ ctx.i(up, "awlock", 0, 1) }}),
       .s_awcache_i ({{ ctx.i(up, "awcache", 3, 4) }}),
       .s_awprot_i  ({{ ctx.i(up, "awprot", 0, 3) }}),
@@ -42,7 +46,7 @@
       .s_awready_o ({{ ctx.o(up, "awready", 1) }}),
       .s_wdata_i   ({{ ctx.i(up, "wdata", 0, up.data_width) }}),
       .s_wstrb_i   ({{ ctx.i(up, "wstrb", 0, up.data_width // 8) }}),
-      .s_wlast_i   ({{ ctx.i(up, "wlast", 0, 1) }}),
+      .s_wlast_i   ({{ ctx.i(up, "wlast", 1, 1) }}),
       .s_wuser_i   ({{ ctx.i(up, "wuser", 0, uw) }}),
       .s_wvalid_i  ({{ ctx.i(up, "wvalid", 0, 1) }}),
       .s_wready_o  ({{ ctx.o(up, "wready", 1) }}),
@@ -54,8 +58,8 @@
       .s_arid_i    ({{ ctx.i(up, "arid", 0, idw) }}),
       .s_araddr_i  ({{ ctx.i(up, "araddr", 0, up.addr_width) }}),
       .s_arlen_i   ({{ ctx.i(up, "arlen", 0, 8) }}),
-      .s_arsize_i  ({{ ctx.i(up, "arsize", 0, 3) }}),
-      .s_arburst_i ({{ ctx.i(up, "arburst", 0, 2) }}),
+      .s_arsize_i  ({{ ctx.i(up, "arsize", full_size, 3) }}),
+      .s_arburst_i ({{ ctx.i(up, "arburst", 1, 2) }}),
       .s_arlock_i  ({{ ctx.i(up, "arlock", 0, 1) }}),
       .s_arcache_i ({{ ctx.i(up, "arcache", 3, 4) }}),
       .s_arprot_i  ({{ ctx.i(up, "arprot", 0, 3) }}),
