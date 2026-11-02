@@ -104,6 +104,10 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 lite = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
+            elif b.template == "bag_axi2apb" and fabric.data_width == 8:
+                # From AXI4-Lite this path runs on AXI4 ports at full size: axi_dw_downsizer
+                # starts at the address, so the bytes of the beat below it are not accessed.
+                lo = max(lo, 0)
             nonsec = nonsec or prot_tied(spec, b.name)
             masked = masked or pslverr_tied(spec, b.name)
             crossed.append(b.name)

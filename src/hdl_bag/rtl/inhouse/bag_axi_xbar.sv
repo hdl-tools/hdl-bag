@@ -270,7 +270,9 @@ module bag_axi_xbar #(
   localparam axi_pkg::xbar_cfg_t Cfg = '{
       NoSlvPorts:         NoMasters,
       NoMstPorts:         NoSlaves,
-      MaxMstTrans:        MaxMstTrans,
+      // + 1: axi_demux's ID counters saturate at 2^clog2(MaxTrans) - 1 (see bag_axi_guard), so
+      // Max mst trans alone would admit fewer per ID than configured.
+      MaxMstTrans:        MaxMstTrans + 1,
       MaxSlvTrans:        MaxSlvTrans,
       FallThrough:        1'b0,
       LatencyMode:        LatencyMode,

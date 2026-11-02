@@ -733,7 +733,8 @@ def mixed_wide_to_narrow() -> Cfg:
 
 def mixed_narrow_apb() -> Cfg:
     """bag_axi2apb onto narrow APB buses: from AXI4 to 8 and 16 bits, and from AXI4-Lite to 8
-    and 16 bits (PULP axi_lite_dw_converter cannot go to 8 bits, so that path runs on AXI4)."""
+    and 16 bits (PULP axi_lite_dw_converter cannot go to 8 bits, so that path runs on AXI4);
+    and from a 64-bit AXI4-Lite upstream to an 8-bit APB3, with a FIFO and a CDC."""
     c = Cfg("mixed_narrow_apb", phase=3)
     c.domain("D_SYS", "clk_sys", "rst_sys_n")
     c.fabric("xbar", "AXI4", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY", max_trans=(4, 4))
@@ -754,6 +755,18 @@ def mixed_narrow_apb() -> Cfg:
         c.link(br, f"apb_{name}", 0).link(f"apb_{name}", f"s_{name}", 0)
         c.region(br, "win", base, 64 * KB).region(f"s_{name}", "regs", base, 4 * KB)
         c.decode(br, "PSLVERR").option(br, **APB4_NA).option(f"s_{name}", **APB4_NA)
+    c.domain("D_AON", "clk_aon", "rst_aon_n")
+    c.fabric("lite64", "AXI4-Lite", 64, 32, "D_SYS", "round-robin", max_trans=(2, 2))
+    c.fabric("apb_c8", "APB3", 8, 32, "D_AON")
+    c.slave("s_c8", "APB3", 8, 12, "D_AON")
+    c.bridge("br_lite64", 0x6000_0000, template="bag_axi2axil")
+    c.bridge("br_c8", 0x6000_0000, pass_through=False, template="bag_axi2apb", fifo_depth=2)
+    c.link("xbar", "br_lite64", 4).link("br_lite64", "lite64", 0).link("lite64", "br_c8", 0)
+    c.link("br_c8", "apb_c8", 0).link("apb_c8", "s_c8", 0)
+    c.region("br_lite64", "win", 0x6000_0000, MB).region("br_c8", "win", 0x6000_0000, 64 * KB)
+    c.region("s_c8", "regs", 0x6000_0000, 4 * KB)
+    c.decode("br_lite64", "SLVERR").decode("br_c8", "PSLVERR")
+    c.option("br_lite64", **AXIL_NA).option("br_c8", **APB3_NA).option("s_c8", **APB3_NA)
     c.region("ram", "mem", 0x8000_0000, MB).region("br_lite", "win", 0x5000_0000, MB)
     c.decode("cpu", "DECERR").decode("br_lite", "SLVERR")
     c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA).option("br_lite", **AXIL_NA)
