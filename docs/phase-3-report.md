@@ -1,6 +1,6 @@
 # Phase 3 report: AXI fabrics, adapters, bridges, PULP integration
 
-Status: **gate passed in CI on `main`** at `494df94` (through #29), 2026-11-02, and locally with this report's two fixes (see the review below). The CI run of this report's PR is linked in its description. Phase 4 is waiting for owner review.
+Status: **gate passed in CI on `main`** at `494df94` (through #29), 2026-11-02, and with this report's two fixes on `main` at `fb8d9eb` (#30), merged by the owner. The CI run of #30 is linked in its description. Phase 3 is closed; Phase 4 is next.
 
 ## What was built
 
@@ -17,7 +17,7 @@ Status: **gate passed in CI on `main`** at `494df94` (through #29), 2026-11-02, 
 | Checks | `src/hdl_bag/checks/` | 5 new rules, bringing the catalogue to **86** (79 errors, 7 warnings): `CLK-CDC-RESET` and the four `USERPORT-*` rules. Every rule has a broken-workbook test. |
 | Gate corpus | `tests/configs/p3/` | 25 configs written at workbook level and resolved through `bag check` with zero findings, 16 of them mixed-protocol. demo_ss joins every corpus test. |
 | Verification | `tests/rtl/`, `tests/gen/` | cocotbext-axi models. The route model gained exact AXI response codes, PROT and AxCACHE through bridge chains, and read coverage. Directed tests per in-house bridge. AHB burst and AXI handshake monitors. All VALID/READY orderings on every channel a model answers (D38). |
-| CI | `.github/workflows/pr.yml` | Elaboration-only gate compile, pytest-xdist, and three `eda-shard` jobs balanced by recorded durations, behind one `eda` check. |
+| CI | `.github/workflows/pr.yml` | Elaboration-only gate compile, pytest-xdist, and four `eda-shard` jobs (three until known gap 10 was closed) balanced by recorded durations, behind one `eda` check. |
 
 Pull requests: #18 (vendoring), #19 (generator for AXI), #20 (fabrics), #21 (D32), #22 (adapters), #23 (D33), #24 (PULP bridges), #25 (faster eda), #26 (in-house bridges), #27 (`bag_external`), #28 (user ports), #29 (gate corpus), and this report's PR. #17 updated the README for Phase 2.
 
