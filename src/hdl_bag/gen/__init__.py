@@ -24,12 +24,12 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md
+from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md, tieoffs_md
 from hdl_bag.gen.external import opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
 from hdl_bag.gen.render import GenerateError, header
-from hdl_bag.gen.wrapper import render_harness, render_interface, render_modules
+from hdl_bag.gen.wrapper import TieOff, render_harness, render_interface, render_modules
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
@@ -114,10 +114,13 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
 
     # Sub-wrappers (children first), then the top.
     module_rels = []
-    for name, text in render_modules(netlist, style, hdr):
+    tieoffs: set[TieOff] = set()
+    for name, text in render_modules(netlist, style, hdr, tieoffs):
         rel = f"rtl/{name}.sv"
         _write(outdir, rel, text, written)
         module_rels.append(rel)
+    if spec.project.outputs.doc:
+        _write(outdir, "doc/tieoffs.md", tieoffs_md(spec, tieoffs, user_header), written)
     top_rel = module_rels[-1]
     order = [pkg_rel, *srcs, *module_rels[:-1]]
     lint_top = top

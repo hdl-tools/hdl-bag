@@ -28,6 +28,7 @@ from hdl_bag.protocols import (
     PROTO_TOKEN,
     TIE_WRITE_STROBE,
     Protocol,
+    family_signals,
     port_signals,
     signal_width,
     towards_slave,
@@ -38,12 +39,32 @@ def _width(w: int) -> str:
     return f"[{w - 1}:0] " if w > 1 else ""
 
 
+# Why a component port is not wired to a bus signal (doc/tieoffs.md).
+TIED = "tied (Port_Options)"
+ABSENT = "not on this bus"
+NARROW = "bus narrower"
+WIDE = "bus wider"
+USER = "User_Ports"
+
+
 def builtin_root() -> Path:
     return Path(str(files("hdl_bag.templates") / "builtin"))
 
 
 def interface_name(spec: Spec, bus: Bus) -> str:
     return f"{spec.project.name}_{PROTO_TOKEN[bus.protocol]}_if"
+
+
+@dataclass(frozen=True, order=True)
+class TieOff:
+    """A component port that is not simply wired to its bus signal (doc/tieoffs.md, D40)."""
+
+    instance: str
+    bus: str
+    signal: str
+    direction: str  # as the component sees it
+    value: str
+    reason: str
 
 
 @dataclass
@@ -59,6 +80,7 @@ class Scope:
     inputs_used: set[str] = field(default_factory=set)
     reserved: set[str] = field(default_factory=set)  # port names of this module
     boundary: dict[str, Boundary] = field(default_factory=dict)  # sub-wrapper boundary
+    tieoffs: set[TieOff] = field(default_factory=set)
     _declared: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -133,6 +155,8 @@ class InstanceContext:
 
     scope: Scope
     inst: Instance
+    # (bus, signal) -> what the template was given for it, to be found in the rendered text
+    used: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def i(self, bus: Bus, sig: str, default: int = 0, width: int | None = None) -> str:
         """Value for a component input of WIDTH bits (default: the bus's own width).
@@ -140,17 +164,50 @@ class InstanceContext:
         A bus narrower than the component port is zero-extended, a wider one truncated
         (D19: e.g. a 32-bit port address into a 40-bit fabric or adapter).
         """
+        self._use(bus, sig)
         w = width or Scope.width(bus, sig)
         if sig in bus.ties:
-            return self.scope.tie(bus, sig, w)
-        if sig not in bus.signals:
-            return lit(w, default)
-        ref, bw = self.scope.ref(bus, sig), Scope.width(bus, sig)
-        if bw < w:
-            return f"{{{lit(w - bw, 0)}, {ref}}}"
-        if bw > w:
-            return f"{ref}[{w - 1}:0]" if w > 1 else f"{ref}[0]"
-        return ref
+            value = self.scope.tie(bus, sig, w)
+            self._note(bus, sig, "input", value, TIED)
+        elif sig not in bus.signals:
+            value = lit(w, default)
+            self._note(bus, sig, "input", value, ABSENT)
+        else:
+            ref, bw = self.scope.ref(bus, sig), Scope.width(bus, sig)
+            value = ref
+            if bw < w:
+                self._note(bus, sig, "input", f"upper {w - bw} bits 0", NARROW)
+                value = f"{{{lit(w - bw, 0)}, {ref}}}"
+            elif bw > w:
+                self._note(bus, sig, "input", f"upper {bw - w} bits dropped", WIDE)
+                value = f"{ref}[{w - 1}:0]" if w > 1 else f"{ref}[0]"
+        self.used[(bus.name, sig)] = value
+        return value
+
+    def _use(self, bus: Bus, sig: str) -> None:
+        """Record that the template connected SIG; a name outside the protocol is a typo."""
+        if sig not in family_signals(bus.protocol):
+            raise GenerateError(
+                f"template {self.inst.template} ({self.inst.name}): {sig} is not a "
+                f"{bus.protocol} signal"
+            )
+        self.used[(bus.name, sig)] = ""
+
+    def _note(self, bus: Bus, sig: str, direction: str, value: str, reason: str) -> None:
+        self.scope.tieoffs.add(TieOff(self.inst.name, bus.name, sig, direction, value, reason))
+
+    def check_connected(self, text: str) -> None:
+        """Every signal on an attached bus, tied ones included, must reach the component and
+        appear in what the template rendered: lint cannot see a forgotten one (D40)."""
+        inst = self.inst
+        for bus in (*inst.masters, *inst.slaves, *(b for b in (inst.up, inst.down) if b)):
+            missed = [s for s in bus.signals if (bus.name, s) not in self.used
+                      or self.used[(bus.name, s)] not in text]  # fmt: skip
+            if missed:
+                raise GenerateError(
+                    f"template {inst.template} ({inst.name}) does not connect "
+                    f"{', '.join(missed)} of {bus.name}"
+                )
 
     def o(self, bus: Bus, sig: str, width: int | None = None) -> str:
         """Target for a component output of WIDTH bits (default: the bus's own width).
@@ -158,15 +215,25 @@ class InstanceContext:
         When the widths differ, the output drives a component-width net whose low bits
         (or zero-extended value) feed the bus; bits the bus lacks go to an unused sink.
         """
+        self._use(bus, sig)
         bw = Scope.width(bus, sig)
         w = width or bw
         if sig in bus.ties or sig not in bus.signals:
-            return self.scope.sink(f"{self.inst.rtl_name}_{bus.name}_{sig}", w)
+            self._note(bus, sig, "output", "unused", TIED if sig in bus.ties else ABSENT)
+            sink = self.scope.sink(f"{self.inst.rtl_name}_{bus.name}_{sig}", w)
+            self.used[(bus.name, sig)] = sink
+            return sink
         ref = self.scope.ref(bus, sig)
         if bw == w:
+            self.used[(bus.name, sig)] = ref
             return ref
+        if bw < w:
+            self._note(bus, sig, "output", f"upper {w - bw} bits unused", NARROW)
+        else:
+            self._note(bus, sig, "output", f"upper {bw - w} bits driven 0", WIDE)
         net = f"{self.inst.rtl_name}_{bus.name}_{sig}_fit"
         self.scope.declare(net, w)
+        self.used[(bus.name, sig)] = net
         self._fit_out(ref, bw, net, w, f"{net}_msb")
         return net
 
@@ -203,12 +270,21 @@ class InstanceContext:
         for k, bus in enumerate(buses):
             if direction == "in":
                 self.scope.assigns.append(f"  assign {name}[{k}] = {self.i(bus, sig, default, w)};")
+                self.used[(bus.name, sig)] = name
                 continue
+            self._use(bus, sig)
             if sig in bus.ties or sig not in bus.signals:
+                self._note(bus, sig, "output", "unused", TIED if sig in bus.ties else ABSENT)
+                self.used[(bus.name, sig)] = name
                 sink = self.scope.sink(f"{self.inst.rtl_name}_{bus.name}_{sig}", w)
                 self.scope.assigns.append(f"  assign {sink} = {name}[{k}];")
                 continue
+            self.used[(bus.name, sig)] = name  # the port the template connects
             bw = Scope.width(bus, sig)
+            if bw < w:
+                self._note(bus, sig, "output", f"upper {w - bw} bits unused", NARROW)
+            elif bw > w:
+                self._note(bus, sig, "output", f"upper {bw - w} bits driven 0", WIDE)
             ref = self.scope.ref(bus, sig)
             if bw == w:
                 self.scope.assigns.append(f"  assign {ref} = {name}[{k}];")
@@ -228,8 +304,11 @@ class InstanceContext:
             self.scope.inputs_used.add(u.target)
             return u.target
         if u.connection == "tie":
-            return lit(u.width, u.tie or 0)
+            value = lit(u.width, u.tie or 0)
+            self.scope.tieoffs.add(TieOff(u.instance, "-", u.port, "input", value, USER))
+            return value
         if u.connection == "open":
+            self.scope.tieoffs.add(TieOff(u.instance, "-", u.port, "output", "unused", USER))
             return self.scope.sink(f"{self.inst.rtl_name}_{u.port}", u.width)
         assert u.target is not None
         return self.clk(u.target) if u.connection == "clock" else self.rst(u.target)
@@ -256,7 +335,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
     ctx = InstanceContext(scope, inst)
     template = environment(builtin_root()).get_template(f"{inst.template}/instance.sv.j2")
     fab = inst.fabric
-    return template.render(
+    text = template.render(
         ctx=ctx,
         inst=inst,
         name=inst.rtl_name,
@@ -273,6 +352,8 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         opaque_ports=lambda i: opaque_ports(scope.spec, i),
         user_ports=lambda i: [u for u in scope.spec.user_ports if u.instance == i.name],
     )
+    ctx.check_connected(text)
+    return text
 
 
 def _port_decls(scope: Scope, netlist: Netlist) -> list[str]:
@@ -429,8 +510,10 @@ def _module(name: str, header: str, ports: list[str], scope: Scope, body: list[s
     return "\n".join(lines)
 
 
-def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str, str]]:
-    """(module name, text) for the top and every sub-wrapper, children first."""
+def render_modules(netlist: Netlist, style: str, header: str,
+                   tieoffs: set[TieOff] | None = None) -> list[tuple[str, str]]:  # fmt: skip
+    """(module name, text) for the top and every sub-wrapper, children first. TIEOFFS, if given,
+    collects the component ports that are not simply wired to a bus signal."""
     spec = netlist.spec
     p: Plan = plan(netlist)
     errors = [prob for prob in problems(netlist, p) if prob.error]
@@ -451,6 +534,8 @@ def render_modules(netlist: Netlist, style: str, header: str) -> list[tuple[str,
             scope.reserved |= {name for _, _, name in _exposed_below(spec, p, w)}
         scopes[w] = scope
     bodies = {w: [render_instance(scopes[w], i) for i in p.instances[w]] for w in p.wrappers()}
+    if tieoffs is not None:
+        tieoffs.update(t for scope in scopes.values() for t in scope.tieoffs)
 
     subs: dict[str, _Sub] = {}
     modules: list[tuple[str, str]] = []

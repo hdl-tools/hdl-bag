@@ -45,6 +45,7 @@ dev = [
     "cocotb==2.1.0",
     "cocotbext-axi==0.1.28",
     "pytest-xdist==3.8.0",
+    "pytest-split==0.11.0",
 ]
 
 [tool.hatch.build.targets.wheel]

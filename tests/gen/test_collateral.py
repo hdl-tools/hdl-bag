@@ -25,7 +25,8 @@ CONFIGS = {
     "ahb2apb_pt": TESTS / "configs" / "p2" / "ahb2apb_pt.ir.yaml",
     "ahb2apb_nested": TESTS / "configs" / "p2" / "ahb2apb_nested.ir.yaml",
 }
-FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_map.md")
+FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_map.md",
+         "doc/tieoffs.md")  # fmt: skip
 
 
 def _generate(spec: Spec, src: Path, root: Path) -> Path:

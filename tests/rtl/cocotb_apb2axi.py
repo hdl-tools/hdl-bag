@@ -15,7 +15,7 @@ from typing import Any
 import cocotb
 from axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
 from bfm import APB, APB_RESP, ApbMaster, bridge_clocks, fabric_port
-from bfm_axi import AxiPortSlave, bus
+from bfm_axi import ROUNDS, AxiPortSlave, bus
 from cocotb.triggers import ClockCycles
 
 PDW = int(os.environ.get("PDW", "32"))
@@ -146,3 +146,27 @@ async def back_to_back_transfers(dut: Any) -> None:
         else:
             assert r.data == expect[addr], hex(addr)
     assert len(w.log) - n == len(ops)  # one AXI transfer each
+
+
+@cocotb.test(timeout_time=2, timeout_unit="ms")
+async def every_handshake_ordering(dut: Any) -> None:
+    """VALID first, READY first and same cycle on the channels the slave model answers (D38);
+    lazy READY also proves the bridge's VALID does not wait for READY."""
+    m, s, w = await _setup(dut)
+    required = ("aw", "w", "ar")
+
+    async def traffic() -> None:
+        for k in range(16):
+            addr = BASE + 0xC00 + PB * k
+            assert not await m.write(addr, k & MASK, strb=FULL)
+            r = await m.read(addr)
+            assert (r.err, r.data) == (False, k & MASK)
+
+    for mode in ("eager", "lazy", "w_first", "random"):
+        s.handshaking.set(mode, seed=21)
+        await traffic()
+    for _ in range(ROUNDS):  # same-cycle handshakes come by chance: run until seen
+        if not w.orderings.missing(required):
+            break
+        await traffic()
+    assert w.orderings.missing(required) == {}, w.orderings.counts

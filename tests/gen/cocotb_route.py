@@ -19,14 +19,15 @@ cocotbext-axi through bfm_axi.py, which offers the same interface.
 
 import os
 import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import cocotb
 from bfm import AHB_M, AHB_S, APB, AhbMaster, AhbSlave, ApbMaster, ApbSlave, Beat, Port
-from bfm_axi import AxiPortMaster, AxiPortSlave, bus
+from bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, Combine, RisingEdge
+from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
 from route_model import error_words, probes, prot_tied, route
 
 from hdl_bag.ir import Spec, load
@@ -115,6 +116,8 @@ async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str,
             rst, level = reset_of(m.domain)
             masters[m.name] = AxiPortMaster(clocks[m.domain], axi, m.protocol == "AXI4-Lite",
                                             rst, level)  # fmt: skip
+            # A port lacks AxPROT only because its PROT is tied, never by a generator slip.
+            assert masters[m.name].has_prot == (not prot_tied(SPEC, m.name)), m.name
             continue
         port = _port(dut, SPEC, m.name, m.protocol, False, m.addr_width, m.data_width)
         cls = AhbMaster if m.protocol == "AHB-Lite" else ApbMaster
@@ -251,9 +254,10 @@ def _pin_sets() -> list[dict[str, bool]]:
     return sets
 
 
-# Timeouts are a few times the longest run seen (route test 70 us, others under 4 us of
-# simulated time), so a deadlocked design fails within minutes instead of hanging CI.
-@cocotb.test(timeout_time=400, timeout_unit="us")
+# Timeouts are a few times the longest run seen (the route test on demo_ss, the largest config,
+# stays under 1 ms of simulated time), so a deadlocked design fails within minutes instead of
+# hanging CI.
+@cocotb.test(timeout_time=3000, timeout_unit="us")
 async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     secure = any(r.secure for r in SPEC.memory_map)
@@ -378,9 +382,9 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
         dut._log.info("%s (%s): served %s", f.name, f.arbitration, order)
 
 
-def _private_words(m: Any, index: int, count: int) -> list[int]:
+def _private_words(m: Any, index: int, count: int, direct: bool = False) -> list[int]:
     """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
-    read back without errors."""
+    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge)."""
     for r in sorted(SPEC.memory_map, key=lambda r: r.base):
         words = [r.base + 0x100 * index + 4 * k for k in range(count)]
         if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
@@ -393,6 +397,8 @@ def _private_words(m: Any, index: int, count: int) -> list[int]:
             # takes would not read back).
             ok &= wr.slave is not None and not wr.slave_error and not wr.masked
             ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
+            if direct:
+                ok &= not wr.bridges and wr.slave in _axi_names(SPEC.slaves)
         if ok:
             return words
     return []
@@ -471,7 +477,23 @@ async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int
     return [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
+async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, base: int) -> int:
+    """AW handshakes PORT gets at its own wrapper port with SLAVE stalled: its path's capacity."""
+    aw = masters[port].bus.write.aw
+    slave.stall(True)
+    task = cocotb.start_soon(_writes(masters, [(port, base + 16 * (3 + k)) for k in range(12)]))
+    taken = 0
+    for _ in range(40):
+        await RisingEdge(clk)
+        await ReadOnly()
+        taken += int(aw.awvalid.value) & int(aw.awready.value)
+    await RisingEdge(clk)
+    slave.stall(False)
+    await task
+    return taken
+
+
+@cocotb.test(timeout_time=200, timeout_unit="us")
 async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
     """AXI fabrics with several masters on one slave, with the slave stalled so every
     request is waiting when it opens:
@@ -496,7 +518,7 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         # 16 bytes between jobs: a downsizer's extra (zero-strobe) beat of a narrow write
         # never lands on another job's address.
         base = {p.port: region.base + 0x100 * i for i, p in enumerate(ports)}
-        owner = {(a + 16 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(9)}
+        owner = {(a + 16 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(16)}
         fixed = f.arbitration == "fixed-priority"
         by_prio = [p.port for p in sorted(ports, key=lambda p: p.priority or 0)]
 
@@ -524,7 +546,12 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         mid = f.midpoint
         buffered = mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
         if not buffered:
-            jobs = [(first, base[first] + 16 * (3 + k)) for k in range(4)]
+            # Behind adapters the last-served request can arrive long after the first-served
+            # master's writes: queue more than that master's path absorbs while the slave is
+            # stalled (measured), so some still wait at the arbiter when it arrives.
+            queued = 4 if direct else await _absorbed(masters, slave, clk, first, base[first]) + 4
+            assert queued <= 12, f"{f.name}: {first} absorbs {queued - 4} writes; address plan"
+            jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
             order = await _served(masters, slave, clk, owner, jobs)
             pos = order.index(last)
@@ -534,14 +561,14 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
                 assert pos <= 1, f"{f.name}: round robin starved {last}: {order}"
             else:
                 # Requests reach the arbiter through adapter pipelines at different times,
-                # so round robin is only required never to leave the single request last.
+                # so strict alternation is not required; leaving the request last is starvation.
                 assert pos < len(order) - 1, f"{f.name}: round robin starved {last}: {order}"
         if fixed:
             n = len(slave.log)
             slave.stall(True)
-            low = cocotb.start_soon(masters[last].write(base[last] + 16 * 8, 1))
+            low = cocotb.start_soon(masters[last].write(base[last] + 16 * 12, 1))
             await ClockCycles(clk, 10)
-            high = cocotb.start_soon(masters[first].write(base[first] + 16 * 8, 2))
+            high = cocotb.start_soon(masters[first].write(base[first] + 16 * 12, 2))
             await ClockCycles(clk, 10)
             slave.stall(False)
             await Combine(low, high)
@@ -568,7 +595,8 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
         # The master with the widest ID, so per-ID limits do not bind.
         names = [p.port for p in f.master_ports if any(m.name == p.port for m in SPEC.masters)]
         m = max((x for x in SPEC.masters if x.name in names), key=lambda x: x.id_width or 0)
-        words = _private_words(m, 0, buffered + 4)
+        # The count is exact only for an AXI slave right behind the mid-point.
+        words = _private_words(m, 0, buffered + 4, direct=True)
         if not words:
             continue
         exp = route(SPEC, m.name, words[0], False, False, {})
@@ -661,3 +689,114 @@ async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
             assert not r.err and r.data == 0xFFFF_5AFF, f"{m.name} -> {s.name}: {r.data:#x}"
             checked += 1
     dut._log.info("byte writes checked: %d master/slave pairs", checked)
+
+
+@cocotb.test(timeout_time=3000, timeout_unit="us")
+async def axi_ports_take_every_handshake_ordering(dut: Any) -> None:
+    """D38. On every channel a model answers (an AXI slave's AW / W / AR, an AXI master's
+    B / R), the generated design sees READY before VALID, READY after VALID and both in the
+    same cycle, and data stays right. Lazy READY proves the design's VALID does not wait for
+    its READY, w_first that WVALID does not wait for AWREADY: either would deadlock and time
+    out. Where the design drives READY the order is its own choice: logged, not required.
+    Every AXI port must be reached on the channels its regions allow (_ordering_targets)."""
+    masters, slaves, _ = await _bring_up(dut)
+    targets, required = _ordering_targets()
+    if not required:
+        return  # no AXI ports
+    ports = {n: (slaves | masters)[n] for n in required}
+    for port in ports.values():
+        port.watch_orderings()
+
+    async def traffic() -> None:
+        for t in targets:
+            m = next(x for x in SPEC.masters if x.name == t.master)
+            for k in range(12):
+                addr, data = t.base + 4 * k, random.getrandbits(32)
+                prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+                for write in (w for w, ok in ((True, t.writes), (False, t.reads)) if ok):
+                    err, got, _ = await _access(masters[t.master], m.protocol, m.data_width, addr,
+                                                write, data, False, prot)  # fmt: skip
+                    assert not err, f"{t.master} -> {t.slave} {addr:#x}"
+                    if not write and t.writes:
+                        assert got == data, f"{t.master} -> {t.slave} {addr:#x}: read {got:#x}"
+
+    def gaps() -> dict[str, Any]:
+        out = {n: ports[n].orderings.missing(channels) for n, channels in required.items()}
+        return {n: g for n, g in out.items() if g}
+
+    for mode in ("eager", "lazy", "w_first", "random"):
+        for name, port in ports.items():
+            # w_first needs a slave's AW and W channels.
+            if mode != "w_first" or "aw" in port.handshaking.sinks:
+                port.handshaking.set(mode if mode != "w_first" or name in slaves else "eager", 31)
+        await traffic()
+    for _ in range(ROUNDS):  # same-cycle handshakes come by chance: run until seen
+        if not gaps():
+            break
+        await traffic()
+    for name, port in ports.items():
+        dut._log.info(f"handshake orderings of {name}: {port.orderings.counts}")
+    assert not gaps(), gaps()
+
+
+def _axi_names(rows: Any) -> set[str]:
+    return {x.name for x in rows if x.protocol in AXI}
+
+
+@dataclass(frozen=True)
+class _Target:
+    slave: str
+    master: str
+    base: int
+    writes: bool
+    reads: bool
+
+
+def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
+    """Traffic that reaches every AXI port, and the channels each must then have seen in every
+    order. A slave whose regions are all read-only cannot see AW or W, nor one all write-only
+    AR; a master that reaches nothing it can read back still has B or R. A port with no
+    traffic possible at all is an error: the test must not silently check less."""
+    slave_names = {s.name for s in SPEC.slaves}
+    width = {m.name: m.addr_width for m in SPEC.masters}
+    # Secure regions need a master that can say secure: not APB3, not PROT-tied (route knows).
+    able = {m.name for m in SPEC.masters if m.protocol != "APB3"}
+
+    def reach(master: str, r: Any, write: bool) -> bool:
+        if r.base + 48 >= 1 << width[master] or (r.secure and master not in able):
+            return False
+        return all((e := route(SPEC, master, r.base + 4 * k, write, False, {})).slave == r.slave
+                   and not e.slave_error for k in range(12))  # fmt: skip
+
+    def target(r: Any, master: str) -> _Target | None:
+        writes, reads = reach(master, r, True), reach(master, r, False)
+        return _Target(r.slave, master, r.base, writes, reads) if writes or reads else None
+
+    regions = sorted((r for r in SPEC.memory_map if r.slave in slave_names),
+                     key=lambda r: (r.access != "RW", r.secure, r.base))  # fmt: skip
+    found: list[_Target] = []
+    for s in sorted(_axi_names(SPEC.slaves)):
+        options = [t for r in regions if r.slave == s for m in SPEC.masters
+                   if (t := target(r, m.name)) is not None]  # fmt: skip
+        assert options, f"AXI slave {s}: no master reaches it, so no ordering can be checked"
+        found.append(max(options, key=lambda t: (t.writes and t.reads, t.writes, t.reads)))
+        # A read-only and a write-only way in together cover all three of its channels.
+        if not (found[-1].writes and found[-1].reads):
+            found += [t for t in options if t.writes != found[-1].writes][:1]
+    for name in sorted(_axi_names(SPEC.masters)):
+        options = [t for r in regions if (t := target(r, name)) is not None]
+        assert options, f"AXI master {name}: it reaches no slave, so no ordering can be checked"
+        if not any(t.master == name and t.writes and t.reads for t in found):
+            found.append(max(options, key=lambda t: (t.writes and t.reads, t.writes, t.reads)))
+            if not (found[-1].writes and found[-1].reads):
+                found += [t for t in options if t.writes != found[-1].writes][:1]
+    required: dict[str, tuple[str, ...]] = {}
+    for s in _axi_names(SPEC.slaves):
+        mine = [t for t in found if t.slave == s]
+        required[s] = (*(("aw", "w") if any(t.writes for t in mine) else ()),
+                       *(("ar",) if any(t.reads for t in mine) else ()))  # fmt: skip
+    for m in _axi_names(SPEC.masters):
+        mine = [t for t in found if t.master == m]
+        required[m] = (*(("b",) if any(t.writes for t in mine) else ()),
+                       *(("r",) if any(t.reads for t in mine) else ()))  # fmt: skip
+    return found, required

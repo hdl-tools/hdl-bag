@@ -153,6 +153,21 @@ _TOWARDS_SLAVE: Final[frozenset[str]] = frozenset({
 })  # fmt: skip
 
 
+def family_signals(protocol: Protocol) -> frozenset[str]:
+    """Every signal name of PROTOCOL's family (AXI, AHB or APB). Templates may ask for a signal
+    a bus lacks, e.g. AxLEN on AXI4-Lite or PPROT on APB3, and take a default."""
+    family = {
+        Protocol.AXI4: (Protocol.AXI4, Protocol.AXI4_LITE),
+        Protocol.AXI4_LITE: (Protocol.AXI4, Protocol.AXI4_LITE),
+        Protocol.AHB_LITE: (Protocol.AHB_LITE,),
+        Protocol.APB4: (Protocol.APB4, Protocol.APB3),
+        Protocol.APB3: (Protocol.APB4, Protocol.APB3),
+    }[protocol]
+    return frozenset(
+        s for p in family for slave in (False, True) for s in port_signals(p, slave, has_user=True)
+    )
+
+
 def towards_slave(signal: str, is_slave: bool) -> bool:
     """True if SIGNAL is driven by the master side (master or interconnect) on a port.
 

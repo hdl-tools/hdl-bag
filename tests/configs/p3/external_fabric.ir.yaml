@@ -446,4 +446,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_fabric.xlsx
-  sha256: 8de7f7d8b1c648199b42387a4a0ad8a388d80f5d41f3773ffbeb5529ea7628bc
+  sha256: c78537ecdc871cb35bcea6f3f1289cf7d95dc16e0fbe34505f092ad9513c9454
