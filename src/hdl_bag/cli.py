@@ -93,6 +93,8 @@ def _generate(spec_path: Path, output: Path | None, style: str | None) -> Output
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     click.echo(f"wrote {len(out.files)} file(s) to {outdir} (top {out.top})")
+    if spec.project.outputs.tests and out.tests is None:
+        click.echo("no generated tests: BAG does not know how a user-supplied fabric behaves")
     return out
 
 
@@ -132,7 +134,7 @@ def lint_command(outdir: Path) -> None:
 def _sim(out: Outputs, test_filter: str | None = None) -> None:
     try:
         _report(run_tests(out, test_filter=test_filter))
-    except (SimUnavailable, ValueError) as exc:
+    except (SimUnavailable, ValueError, RuntimeError) as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
 
@@ -153,7 +155,9 @@ def flow(spec: Path, output: Path | None, style: str | None) -> None:
     """check -> generate -> lint -> elaborate -> sim. Formal comes in Phase 5."""
     out = _generate(spec, output, style)
     _report(lint(sources(out), out.top, out.root, incdirs=include_dirs(out)))
-    _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out), build=False))
+    # Simulation builds the C++ model itself, so build it here only if nothing will.
+    _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out),
+                           build=out.tests is None))  # fmt: skip
     if out.tests is None:
         click.echo(
             "no generated tests (Generate cocotb unit tests is N, or a user-supplied fabric)"

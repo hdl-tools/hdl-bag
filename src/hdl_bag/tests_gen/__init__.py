@@ -11,6 +11,7 @@ Importing this module does not import cocotb.
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from hdl_bag import __version__
 from hdl_bag.gen.render import header
 from hdl_bag.ir.model import Spec
 
@@ -68,9 +69,10 @@ def applicable_tests(spec: Spec) -> list[str]:
 
 def render_tests(spec: Spec, user_header: str | None) -> str:
     """The generated cocotb module: the banner, then one test per entry of TESTS that applies."""
-    head = ""
+    # First, so a user's text on the next line cannot be read as an encoding declaration.
+    head = "# coding: utf-8\n"
     if user_header:  # verbatim, as comments: it is usually written for SystemVerilog
-        head = "".join(f"# {line}".rstrip() + "\n" for line in user_header.splitlines())
+        head += "".join(f"# {line}".rstrip() + "\n" for line in user_header.splitlines())
     lines = [
         head + header(spec, None, "#").rstrip("\n"),
         f'"""cocotb tests for {spec.project.name}: `bag sim <output directory>` runs them."""',
@@ -82,7 +84,8 @@ def render_tests(spec: Spec, user_header: str | None) -> str:
         "",
         "from hdl_bag.tests_gen import route_tests",
         "",
-        f'route_tests.load_spec(Path(__file__).with_name("{spec.project.name}.ir.yaml"))',
+        f'route_tests.load_spec(Path(__file__).with_name("{spec.project.name}.ir.yaml"), '
+        f'generated_by="{__version__}")',
     ]
     for t in TESTS:
         if t.applies(spec):
