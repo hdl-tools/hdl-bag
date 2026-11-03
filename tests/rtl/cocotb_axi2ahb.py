@@ -17,11 +17,21 @@ import random
 from typing import Any
 
 import cocotb
-from axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
-from bfm import AHB_S, AHB_S_RESP, NONSEQ, SEQ, AhbSlave, bridge_clocks, fabric_port, value
-from bfm_axi import ROUNDS, Handshaking, bus
 from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 from cocotbext.axi import AxiBurstType, AxiLiteMaster, AxiLockType, AxiMaster, AxiProt, AxiResp
+
+from hdl_bag.tests_gen.axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
+from hdl_bag.tests_gen.bfm import (
+    AHB_S,
+    AHB_S_RESP,
+    NONSEQ,
+    SEQ,
+    AhbSlave,
+    bridge_clocks,
+    fabric_port,
+    value,
+)
+from hdl_bag.tests_gen.bfm_axi import ROUNDS, Handshaking, bus
 
 ADW = int(os.environ.get("ADW", "32"))
 HDW = int(os.environ.get("HDW", "32"))

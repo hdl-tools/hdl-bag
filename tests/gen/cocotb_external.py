@@ -5,12 +5,17 @@
 mcu -> sys -> bag_ahb2apb (pass-through N) -> peri -> uart; and the user ports (D41)
 seen at the top."""
 
+import os
+from pathlib import Path
 from typing import Any
 
 import cocotb
-from bfm import Beat
 from cocotb.triggers import Timer
-from cocotb_route import _bring_up
+
+from hdl_bag.tests_gen.bfm import Beat
+from hdl_bag.tests_gen.route_tests import _bring_up, load_spec
+
+load_spec(Path(os.environ["BAG_IR"]))
 
 
 @cocotb.test(timeout_time=200, timeout_unit="us")

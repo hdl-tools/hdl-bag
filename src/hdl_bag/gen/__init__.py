@@ -15,6 +15,8 @@ Output layout (relative to the output directory)::
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
+    tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
+    tests/<project>.ir.yaml    the IR those tests read
     bag_outputs.json           every file written (with sha256), the top and the file list
 """
 
@@ -30,6 +32,7 @@ from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import TieOff, render_harness, render_interface, render_modules
+from hdl_bag.ir import dumps
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
@@ -53,6 +56,7 @@ class Outputs:
     files: tuple[str, ...]  # posix paths relative to root
     top: str  # lint / compile top module
     filelist: str
+    tests: str | None = None  # the generated cocotb module, if any
 
 
 def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
@@ -89,7 +93,7 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     # An opaque template (bag_external) has no RTL of BAG's own: the user supplies it.
     missing = [t for t in used if not (m := registry.get(t)) or not (m.rtl or m.opaque)]
     if missing:
-        _manifest(outdir, written, None, None)
+        _manifest(outdir, written, None, None, None)
         raise MissingRtl(missing)
     top = spec.hierarchy.top
 
@@ -140,8 +144,18 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     filelist = f"{spec.project.name}.f"
     incdirs = "".join(f"+incdir+{d}\n" for d in src.incdirs)
     _write(outdir, filelist, incdirs + "".join(f"{p}\n" for p in order), written)
-    _manifest(outdir, written, lint_top, filelist)
-    return Outputs(outdir, tuple(sorted(written)), lint_top, filelist)
+    # The tests drive the fabrics through the top, so a user-supplied fabric, whose behaviour
+    # BAG does not know, has none (D8).
+    opaque = any((m := registry.get(t)) and m.opaque for t in used)
+    tests = None
+    if spec.project.outputs.tests and not opaque:
+        from hdl_bag.tests_gen import render_tests
+
+        tests = f"tests/{spec.project.name}_tests.py"
+        _write(outdir, tests, render_tests(spec, user_header), written)
+        _write(outdir, f"tests/{spec.project.name}.ir.yaml", dumps(spec), written)
+    _manifest(outdir, written, lint_top, filelist, tests)
+    return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests)
 
 
 MANIFEST = "bag_outputs.json"
@@ -152,7 +166,9 @@ def load_outputs(root: Path) -> Outputs:
     data = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
-    return Outputs(root, tuple(sorted(data["files"])), data["top"], data["filelist"])
+    return Outputs(
+        root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests")
+    )
 
 
 def sources(out: Outputs) -> list[Path]:
@@ -166,7 +182,9 @@ def include_dirs(out: Outputs) -> list[Path]:
     return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
 
 
-def _manifest(root: Path, written: list[str], top: str | None, filelist: str | None) -> None:
+def _manifest(
+    root: Path, written: list[str], top: str | None, filelist: str | None, tests: str | None
+) -> None:
     # Remove files a previous run wrote that this run did not (e.g. after a style change).
     old = root / MANIFEST
     if old.is_file():
@@ -174,7 +192,7 @@ def _manifest(root: Path, written: list[str], top: str | None, filelist: str | N
             if rel not in written:
                 (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
-    data = {"files": entries, "top": top, "filelist": filelist}
+    data = {"files": entries, "top": top, "filelist": filelist, "tests": tests}
     text = json.dumps(data, indent=2, sort_keys=True) + "\n"
     with (root / MANIFEST).open("w", encoding="utf-8", newline="\n") as f:
         f.write(text)

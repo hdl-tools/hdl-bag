@@ -13,8 +13,10 @@ import random
 from typing import Any
 
 import cocotb
-from axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
-from bfm import (
+from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
+
+from hdl_bag.tests_gen.axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
+from hdl_bag.tests_gen.bfm import (
     AHB_M,
     AHB_M_RESP,
     BUSY,
@@ -27,8 +29,7 @@ from bfm import (
     fabric_port,
     value,
 )
-from bfm_axi import ROUNDS, AxiPortSlave, bus
-from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
+from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortSlave, bus
 
 HDW = int(os.environ.get("HDW", "32"))
 ADW = int(os.environ.get("ADW", "32"))

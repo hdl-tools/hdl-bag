@@ -13,10 +13,11 @@ import random
 from typing import Any
 
 import cocotb
-from axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
-from bfm import APB, APB_RESP, ApbMaster, bridge_clocks, fabric_port
-from bfm_axi import ROUNDS, AxiPortSlave, bus
 from cocotb.triggers import ClockCycles
+
+from hdl_bag.tests_gen.axi_watch import AXI4_SIGS, LITE_SIGS, AxiWatch
+from hdl_bag.tests_gen.bfm import APB, APB_RESP, ApbMaster, bridge_clocks, fabric_port
+from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortSlave, bus
 
 PDW = int(os.environ.get("PDW", "32"))
 ADW = int(os.environ.get("ADW", "32"))

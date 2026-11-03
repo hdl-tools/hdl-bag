@@ -11,9 +11,19 @@ port naming, address truncation, tie-offs and reset conditioning.
 from typing import Any
 
 import cocotb
-from bfm import AHB_M, AHB_S, APB, AhbMaster, AhbResult, AhbSlave, ApbSlave, wrapper_port
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
+
+from hdl_bag.tests_gen.bfm import (
+    AHB_M,
+    AHB_S,
+    APB,
+    AhbMaster,
+    AhbResult,
+    AhbSlave,
+    ApbSlave,
+    wrapper_port,
+)
 
 
 async def _setup(dut: Any) -> tuple[AhbMaster, AhbSlave, ApbSlave, ApbSlave]:
