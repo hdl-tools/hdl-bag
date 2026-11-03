@@ -264,6 +264,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     secure = any(r.secure for r in SPEC.memory_map)
     checked = errors = 0
+    reached: set[str] = set()
     for pins in _pin_sets():
         for x, on in pins.items():
             getattr(dut, x).value = int(on)
@@ -341,7 +342,9 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             elif not write and written == exp and not exp.slave_error:
                                 assert got == data, f"{where}: read {got:#x}, wrote {data:#x}"
                         checked += 1
+                        reached.add(m.name)
     assert checked > 0 and errors > 0, (checked, errors)
+    assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
 

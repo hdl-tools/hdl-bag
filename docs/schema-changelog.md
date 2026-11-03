@@ -8,7 +8,8 @@ Changes from 0.4, approved by the owner (known gap 1 of the Phase 3 report):
 
 - **Notes:** Fabrics > Max mst trans and Max slv trans now state what each limits on each path. The old notes did not match PULP. Bridges > FIFO depth says that bridges handling one transfer at a time ignore it.
 - **demo\_ss sample:** `br_ahb2main` FIFO depth is 0, not 2. `bag_ahb2axi` has no FIFO, so the RTL does not change.
-- No sheet, column or dropdown-list changes, and the IR gains nothing. A 0.4 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.5 and it reads the same.
+- **New warning:** BRIDGE-FIFO-IGNORED, for a FIFO depth above 0 on `bag_ahb2apb`, `bag_ahb2axi`, `bag_apb2axi` or `bag_apb2ahb`.
+- No sheet, column or dropdown-list changes, and the IR gains nothing. A 0.4 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.5 and it reads the same, apart from that warning.
 
 ## 0.4 (2026-11-01, hdl-bag 0.0.x)
 

@@ -36,6 +36,8 @@ def run_cocotb(
 ) -> None:
     """Build SOURCES with TOP, run every @cocotb.test in MODULE that TEST_FILTER selects and
     require all to pass."""
+    expected = len(cocotb_tests(module, test_filter))
+    assert expected > 0, f"{test_filter!r} selects no test in {module.name}"
     from cocotb_tools.check_results import get_results
     from cocotb_tools.runner import get_runner
 
@@ -63,7 +65,6 @@ def run_cocotb(
         extra_env={**(env or {}), "COCOTB_RANDOM_SEED": str(SEED), "PYTHONPATH": path},
     )
     total, failed = get_results(results)
-    expected = len(cocotb_tests(module, test_filter))
     assert (total, failed) == (expected, 0), (
         f"{failed} of {total} cocotb tests failed (expected {expected} tests); seed {SEED}"
     )

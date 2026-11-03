@@ -1,76 +1,298 @@
 {
- "golden/demo_ss-flat": 88,
- "golden/demo_ss-sv-interface": 88,
- "p2/ahb2apb_cdc-flat": 26,
- "p2/ahb2apb_cdc-sv-interface": 26,
- "p2/ahb2apb_nested-flat": 26,
- "p2/ahb2apb_nested-sv-interface": 26,
- "p2/ahb2apb_pt-flat": 26,
- "p2/ahb2apb_pt-sv-interface": 26,
- "p2/ahb_fixed-flat": 14,
- "p2/ahb_fixed-sv-interface": 14,
- "p2/ahb_rr-flat": 18,
- "p2/ahb_rr-sv-interface": 18,
- "p2/ahb_single-flat": 22,
- "p2/ahb_single-sv-interface": 22,
- "p2/apb3_wide-flat": 40,
- "p2/apb3_wide-sv-interface": 40,
- "p2/apb4_min-flat": 12,
- "p2/apb4_min-sv-interface": 12,
- "p2/apb4_rules-flat": 28,
- "p2/apb4_rules-sv-interface": 28,
- "p2/multi-flat": 48,
- "p2/multi-sv-interface": 48,
- "p2/nested_deep-flat": 42,
- "p2/nested_deep-sv-interface": 42,
- "p3/axi_adapters-flat": 24,
- "p3/axi_adapters-sv-interface": 24,
- "p3/axi_shared_fixed-flat": 14,
- "p3/axi_shared_fixed-sv-interface": 14,
- "p3/axi_shared_one-flat": 6,
- "p3/axi_shared_one-sv-interface": 6,
- "p3/axi_shared_rr-flat": 18,
- "p3/axi_shared_rr-sv-interface": 18,
- "p3/axi_xbar_pow2-flat": 20,
- "p3/axi_xbar_pow2-sv-interface": 20,
- "p3/axi_xbar_rules-flat": 24,
- "p3/axi_xbar_rules-sv-interface": 24,
- "p3/axil_adapters-flat": 12,
- "p3/axil_adapters-sv-interface": 12,
- "p3/axil_shared_fixed-flat": 10,
- "p3/axil_shared_fixed-sv-interface": 10,
- "p3/axil_shared_one-flat": 6,
- "p3/axil_shared_one-sv-interface": 6,
- "p3/axil_shared_rr-flat": 10,
- "p3/axil_shared_rr-sv-interface": 10,
- "p3/axil_xbar_rules-flat": 24,
- "p3/axil_xbar_rules-sv-interface": 24,
- "p3/bridges_inhouse-flat": 90,
- "p3/bridges_inhouse-sv-interface": 90,
- "p3/bridges_inhouse_cdc-flat": 60,
- "p3/bridges_inhouse_cdc-sv-interface": 60,
- "p3/bridges_pulp-flat": 56,
- "p3/bridges_pulp-sv-interface": 56,
- "p3/bridges_pulp_cdc-flat": 68,
- "p3/bridges_pulp_cdc-sv-interface": 68,
- "p3/external_fabric-flat": 114,
- "p3/external_fabric-sv-interface": 114,
- "p3/mixed_adapters_bridges-flat": 38,
- "p3/mixed_adapters_bridges-sv-interface": 38,
- "p3/mixed_ahb_secure-flat": 26,
- "p3/mixed_ahb_secure-sv-interface": 26,
- "p3/mixed_apb_masters-flat": 38,
- "p3/mixed_apb_masters-sv-interface": 38,
- "p3/mixed_cdc_chain-flat": 40,
- "p3/mixed_cdc_chain-sv-interface": 40,
- "p3/mixed_lite_shared-flat": 34,
- "p3/mixed_lite_shared-sv-interface": 34,
- "p3/mixed_narrow_apb-flat": 104,
- "p3/mixed_narrow_apb-sv-interface": 104,
- "p3/mixed_shared_chain-flat": 32,
- "p3/mixed_shared_chain-sv-interface": 32,
- "p3/mixed_wide_to_narrow-flat": 34,
- "p3/mixed_wide_to_narrow-sv-interface": 34,
- "p3/nested_adapters-flat": 24,
- "p3/nested_adapters-sv-interface": 24
+ "golden/demo_ss-flat": {
+  "count": 88,
+  "which": "1ccd74cc3ac414d7"
+ },
+ "golden/demo_ss-sv-interface": {
+  "count": 88,
+  "which": "1ccd74cc3ac414d7"
+ },
+ "p2/ahb2apb_cdc-flat": {
+  "count": 26,
+  "which": "2564863893501c10"
+ },
+ "p2/ahb2apb_cdc-sv-interface": {
+  "count": 26,
+  "which": "2564863893501c10"
+ },
+ "p2/ahb2apb_nested-flat": {
+  "count": 26,
+  "which": "ae3cf1cfb54c8af3"
+ },
+ "p2/ahb2apb_nested-sv-interface": {
+  "count": 26,
+  "which": "ae3cf1cfb54c8af3"
+ },
+ "p2/ahb2apb_pt-flat": {
+  "count": 26,
+  "which": "ae3cf1cfb54c8af3"
+ },
+ "p2/ahb2apb_pt-sv-interface": {
+  "count": 26,
+  "which": "ae3cf1cfb54c8af3"
+ },
+ "p2/ahb_fixed-flat": {
+  "count": 14,
+  "which": "1aa06df3fdd0b6f1"
+ },
+ "p2/ahb_fixed-sv-interface": {
+  "count": 14,
+  "which": "1aa06df3fdd0b6f1"
+ },
+ "p2/ahb_rr-flat": {
+  "count": 18,
+  "which": "a685c92f3216a2dc"
+ },
+ "p2/ahb_rr-sv-interface": {
+  "count": 18,
+  "which": "a685c92f3216a2dc"
+ },
+ "p2/ahb_single-flat": {
+  "count": 22,
+  "which": "d1beb91c96793b8f"
+ },
+ "p2/ahb_single-sv-interface": {
+  "count": 22,
+  "which": "d1beb91c96793b8f"
+ },
+ "p2/apb3_wide-flat": {
+  "count": 40,
+  "which": "59420d3308394d33"
+ },
+ "p2/apb3_wide-sv-interface": {
+  "count": 40,
+  "which": "59420d3308394d33"
+ },
+ "p2/apb4_min-flat": {
+  "count": 12,
+  "which": "e12876d7d9611194"
+ },
+ "p2/apb4_min-sv-interface": {
+  "count": 12,
+  "which": "e12876d7d9611194"
+ },
+ "p2/apb4_rules-flat": {
+  "count": 28,
+  "which": "5c1306d0fade62d6"
+ },
+ "p2/apb4_rules-sv-interface": {
+  "count": 28,
+  "which": "5c1306d0fade62d6"
+ },
+ "p2/multi-flat": {
+  "count": 48,
+  "which": "aa5e0753ce303c4a"
+ },
+ "p2/multi-sv-interface": {
+  "count": 48,
+  "which": "aa5e0753ce303c4a"
+ },
+ "p2/nested_deep-flat": {
+  "count": 42,
+  "which": "512029988575e7c9"
+ },
+ "p2/nested_deep-sv-interface": {
+  "count": 42,
+  "which": "512029988575e7c9"
+ },
+ "p3/axi_adapters-flat": {
+  "count": 24,
+  "which": "40cabd76428a6b8a"
+ },
+ "p3/axi_adapters-sv-interface": {
+  "count": 24,
+  "which": "40cabd76428a6b8a"
+ },
+ "p3/axi_shared_fixed-flat": {
+  "count": 14,
+  "which": "b322a8c2d7e9aee8"
+ },
+ "p3/axi_shared_fixed-sv-interface": {
+  "count": 14,
+  "which": "b322a8c2d7e9aee8"
+ },
+ "p3/axi_shared_one-flat": {
+  "count": 6,
+  "which": "d874a05f1c9aef85"
+ },
+ "p3/axi_shared_one-sv-interface": {
+  "count": 6,
+  "which": "d874a05f1c9aef85"
+ },
+ "p3/axi_shared_rr-flat": {
+  "count": 18,
+  "which": "26ec5f1d08fe8e0b"
+ },
+ "p3/axi_shared_rr-sv-interface": {
+  "count": 18,
+  "which": "26ec5f1d08fe8e0b"
+ },
+ "p3/axi_xbar_pow2-flat": {
+  "count": 20,
+  "which": "2d03138276065649"
+ },
+ "p3/axi_xbar_pow2-sv-interface": {
+  "count": 20,
+  "which": "2d03138276065649"
+ },
+ "p3/axi_xbar_rules-flat": {
+  "count": 24,
+  "which": "d74f990e3c643254"
+ },
+ "p3/axi_xbar_rules-sv-interface": {
+  "count": 24,
+  "which": "d74f990e3c643254"
+ },
+ "p3/axil_adapters-flat": {
+  "count": 12,
+  "which": "f5454d4e9b34d6bf"
+ },
+ "p3/axil_adapters-sv-interface": {
+  "count": 12,
+  "which": "f5454d4e9b34d6bf"
+ },
+ "p3/axil_shared_fixed-flat": {
+  "count": 10,
+  "which": "d1a5178608b6405c"
+ },
+ "p3/axil_shared_fixed-sv-interface": {
+  "count": 10,
+  "which": "d1a5178608b6405c"
+ },
+ "p3/axil_shared_one-flat": {
+  "count": 6,
+  "which": "edc5088a9d4161f3"
+ },
+ "p3/axil_shared_one-sv-interface": {
+  "count": 6,
+  "which": "edc5088a9d4161f3"
+ },
+ "p3/axil_shared_rr-flat": {
+  "count": 10,
+  "which": "0d9ae4f70cbb81c5"
+ },
+ "p3/axil_shared_rr-sv-interface": {
+  "count": 10,
+  "which": "0d9ae4f70cbb81c5"
+ },
+ "p3/axil_xbar_rules-flat": {
+  "count": 24,
+  "which": "0dc932c41dcf0871"
+ },
+ "p3/axil_xbar_rules-sv-interface": {
+  "count": 24,
+  "which": "0dc932c41dcf0871"
+ },
+ "p3/bridges_inhouse-flat": {
+  "count": 90,
+  "which": "fa46a2c45862b170"
+ },
+ "p3/bridges_inhouse-sv-interface": {
+  "count": 90,
+  "which": "fa46a2c45862b170"
+ },
+ "p3/bridges_inhouse_cdc-flat": {
+  "count": 60,
+  "which": "6ff3faa956c8580d"
+ },
+ "p3/bridges_inhouse_cdc-sv-interface": {
+  "count": 60,
+  "which": "6ff3faa956c8580d"
+ },
+ "p3/bridges_pulp-flat": {
+  "count": 56,
+  "which": "3ec56bbc166ff594"
+ },
+ "p3/bridges_pulp-sv-interface": {
+  "count": 56,
+  "which": "3ec56bbc166ff594"
+ },
+ "p3/bridges_pulp_cdc-flat": {
+  "count": 68,
+  "which": "13b3397477e51997"
+ },
+ "p3/bridges_pulp_cdc-sv-interface": {
+  "count": 68,
+  "which": "13b3397477e51997"
+ },
+ "p3/external_fabric-flat": {
+  "count": 114,
+  "which": "95922903e9bf2075"
+ },
+ "p3/external_fabric-sv-interface": {
+  "count": 114,
+  "which": "95922903e9bf2075"
+ },
+ "p3/mixed_adapters_bridges-flat": {
+  "count": 38,
+  "which": "09c55d6871f60eed"
+ },
+ "p3/mixed_adapters_bridges-sv-interface": {
+  "count": 38,
+  "which": "09c55d6871f60eed"
+ },
+ "p3/mixed_ahb_secure-flat": {
+  "count": 26,
+  "which": "80abb8796d62b906"
+ },
+ "p3/mixed_ahb_secure-sv-interface": {
+  "count": 26,
+  "which": "80abb8796d62b906"
+ },
+ "p3/mixed_apb_masters-flat": {
+  "count": 38,
+  "which": "1fa30c63287911cf"
+ },
+ "p3/mixed_apb_masters-sv-interface": {
+  "count": 38,
+  "which": "1fa30c63287911cf"
+ },
+ "p3/mixed_cdc_chain-flat": {
+  "count": 40,
+  "which": "4c1c36f83c2056c4"
+ },
+ "p3/mixed_cdc_chain-sv-interface": {
+  "count": 40,
+  "which": "4c1c36f83c2056c4"
+ },
+ "p3/mixed_lite_shared-flat": {
+  "count": 34,
+  "which": "10d3c2d3b4eb0175"
+ },
+ "p3/mixed_lite_shared-sv-interface": {
+  "count": 34,
+  "which": "10d3c2d3b4eb0175"
+ },
+ "p3/mixed_narrow_apb-flat": {
+  "count": 104,
+  "which": "d59bd4e94cf7c60e"
+ },
+ "p3/mixed_narrow_apb-sv-interface": {
+  "count": 104,
+  "which": "d59bd4e94cf7c60e"
+ },
+ "p3/mixed_shared_chain-flat": {
+  "count": 32,
+  "which": "5ca1575b9bbc97d3"
+ },
+ "p3/mixed_shared_chain-sv-interface": {
+  "count": 32,
+  "which": "5ca1575b9bbc97d3"
+ },
+ "p3/mixed_wide_to_narrow-flat": {
+  "count": 34,
+  "which": "918b6bc94cd6d5f0"
+ },
+ "p3/mixed_wide_to_narrow-sv-interface": {
+  "count": 34,
+  "which": "918b6bc94cd6d5f0"
+ },
+ "p3/nested_adapters-flat": {
+  "count": 24,
+  "which": "24359a59f69895a0"
+ },
+ "p3/nested_adapters-sv-interface": {
+  "count": 24,
+  "which": "24359a59f69895a0"
+ }
 }

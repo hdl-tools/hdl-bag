@@ -371,7 +371,7 @@ class _Builder:
             _in("Arbitration", 14, "Crossbar: per slave port. Shared-bus: one arbiter at the N:1 mux."),
             _in("Latency mode", 15, "Crossbar only: PULP xbar spill-register placement. n/a otherwise."),
             _in("Max mst trans", 9, "Limits transactions in flight from each master. AXI4 crossbar: at least this many per ID, not in total (PULP MaxMstTrans). AXI4-Lite: this many per master (a FIFO depth). AXI4 shared bus: at least this many per ID at each master, and the depth of the mux's write FIFO, shared by all masters. Also sizes adapters on master ports."),
-            _in("Max slv trans", 9, "Limits transactions towards slaves. AXI4 crossbar: writes per slave whose data has not finished; reads are not limited (PULP MaxSlvTrans). AXI4-Lite: this many per slave, reads and writes (a FIFO depth). AXI4 shared bus: at least this many per ID, across all slaves. Also limits reads and writes through a bridge on this fabric, and sizes adapters on slave ports."),
+            _in("Max slv trans", 9, "Limits transactions towards slaves. AXI4 crossbar: writes per slave whose data has not finished; reads are not limited (PULP MaxSlvTrans). AXI4-Lite: this many per slave, reads and writes (a FIFO depth). AXI4 shared bus: at least this many per ID, across all slaves. Also limits reads and writes through a bag_axi2apb or bag_axi2axil bridge on this fabric, reads through bag_axi2ahb, and sizes adapters on slave ports."),
             _in("Backing template", 20, "BAG template that implements this fabric."),
             _in("Backing IP", 22, "Informational: IP behind the template."),
             _in("Mid-point FIFO depth", 10, "Shared-bus only: FIFO between the N:1 mux and the 1:M demux; buffers every master. n/a otherwise."),

@@ -9,9 +9,12 @@ config also passes the structural connectivity oracle and an IR-driven route sim
 through its generated top.
 """
 
+import hashlib
 import importlib.util
 import json
 import shutil
+from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 
@@ -21,8 +24,9 @@ from simrun import REPO, cocotb_tests, run_cocotb
 
 from hdl_bag.checks import run_checks
 from hdl_bag.flows import compile_design, lint
+from hdl_bag.flows.base import Finding
 from hdl_bag.gen import generate, include_dirs, sources
-from hdl_bag.ir import dumps, load, resolve
+from hdl_bag.ir import Spec, dumps, load, resolve
 from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import read_workbook
 from hdl_bag.template.builder import build_workbook
@@ -114,6 +118,28 @@ STYLES = ["flat", "sv-interface"]
 WAIVED = json.loads((CONFIG_ROOT / "waived_counts.json").read_text(encoding="utf-8"))
 
 
+def _waived_snapshot(findings: Iterable[Finding]) -> dict[str, int | str]:
+    """How many findings are waived, and which: a count alone would miss one waived finding
+    replacing another. Lines are left out, so an unrelated edit does not move it."""
+    rows = sorted(f"{f.tool} {f.file} {f.rule}" for f in findings if f.waived_by is not None)
+    return {"count": len(rows), "which": hashlib.sha256("\n".join(rows).encode()).hexdigest()[:16]}
+
+
+def test_run_cocotb_refuses_a_filter_that_selects_nothing() -> None:
+    with pytest.raises(AssertionError, match="selects no test"):
+        run_cocotb([], "top", HERE / "cocotb_route.py", "unused", test_filter="no_such_test")
+
+
+def test_waived_snapshot_sees_one_finding_replacing_another() -> None:
+    a = Finding("slang", "rtl/a.sv", 1, "unused", "warning", "m", waived_by="r")
+    b = Finding("slang", "rtl/b.sv", 1, "unused", "warning", "m", waived_by="r")
+    assert _waived_snapshot([a])["count"] == _waived_snapshot([b])["count"]
+    assert _waived_snapshot([a]) != _waived_snapshot([b])
+    assert _waived_snapshot([a]) == _waived_snapshot(
+        [replace(a, line=9), replace(b, waived_by=None)]
+    )
+
+
 def test_waived_snapshot_lists_every_gate_run() -> None:
     assert sorted(WAIVED) == sorted(f"{c}-{s}" for c in ALL for s in STYLES)
 
@@ -126,6 +152,9 @@ def test_gate_lint_and_compile(config: str, style: str) -> None:
     root = REPO / "out" / "corpus" / f"{name}_{style}"
     out = generate(load(configs / f"{name}.ir.yaml"), root, configs, style)
     files, inc = sources(out), include_dirs(out)
+    key = f"{config}-{style}"
+    seen = REPO / "out" / "waived" / f"{key.replace('/', '__')}.json"
+    seen.unlink(missing_ok=True)  # so a run that fails leaves nothing to refresh from
     lint_report = lint(files, out.top, root, incdirs=inc)
     for report in (
         lint_report,
@@ -133,13 +162,12 @@ def test_gate_lint_and_compile(config: str, style: str) -> None:
         compile_design(files, out.top, root, incdirs=inc, build=False),
     ):
         assert report.ok, report.format()
-    # A waiver must be a decision: a changed count fails until the snapshot is refreshed
+    # A waiver must be a decision: a change fails until the snapshot is refreshed
     # (scripts/waived_counts.py, from the files this writes).
-    waived = len(lint_report.findings) - len(lint_report.unwaived)
-    seen = REPO / "out" / "waived" / f"{config.replace('/', '__')}-{style}.txt"
+    waived = _waived_snapshot(lint_report.findings)
     seen.parent.mkdir(parents=True, exist_ok=True)
-    seen.write_text(str(waived), encoding="utf-8")
-    assert waived == WAIVED[f"{config}-{style}"], lint_report.format()
+    seen.write_text(json.dumps({"run": key, **waived}), encoding="utf-8")
+    assert waived == WAIVED[key], lint_report.format()
 
 
 # demo_ss alone took most of a CI shard, and a test cannot be split across shards. Nearly all
@@ -168,16 +196,22 @@ def _route_items() -> list[object]:
     return items
 
 
+def _spec(config: str) -> Spec:
+    configs, name = _split(config)
+    return load(configs / f"{name}.ir.yaml")
+
+
 def test_route_parts_cover_every_cocotb_test_and_master() -> None:
     """Each part list runs every cocotb test, and those split by master run every master."""
     module = HERE / "cocotb_route.py"
-    for parts in ROUTE_PARTS.values():
+    for config, parts in ROUTE_PARTS.items():
         ran = [n for _, f, _ in parts for n in dict.fromkeys(cocotb_tests(module, f))]
         assert sorted(set(ran)) == sorted(cocotb_tests(module))
         for test_filter in {f for _, f, _ in parts}:
             shards = [s for _, f, s in parts if f == test_filter]
             if shards != [""]:
                 count = len(shards)
+                assert count <= len(_spec(config).masters)
                 assert sorted(shards) == sorted(f"{i}/{count}" for i in range(count))
                 assert len(cocotb_tests(module, test_filter)) == 1
             else:
