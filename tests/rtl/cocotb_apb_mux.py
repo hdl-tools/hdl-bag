@@ -6,9 +6,10 @@ import os
 from typing import Any
 
 import cocotb
-from bfm import APB, APB_RESP, ApbMaster, ApbResult, ApbSlave, fabric_port
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
+
+from hdl_bag.tests_gen.bfm import APB, APB_RESP, ApbMaster, ApbResult, ApbSlave, fabric_port
 
 MISS_TO_DEFAULT = os.environ.get("MISS_TO_DEFAULT") == "1"
 NONSEC = 0b010

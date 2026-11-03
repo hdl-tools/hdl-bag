@@ -20,11 +20,12 @@ from types import ModuleType
 
 import pytest
 from hier_oracle import check
-from simrun import REPO, cocotb_tests, run_cocotb
+from simrun import REPO
 
 from hdl_bag.checks import run_checks
 from hdl_bag.flows import compile_design, lint
 from hdl_bag.flows.base import Finding
+from hdl_bag.flows.sim import cocotb_tests, run_tests, simulate
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.ir import Spec, dumps, load, resolve
 from hdl_bag.ir.to_workbook import to_workbook
@@ -126,8 +127,8 @@ def _waived_snapshot(findings: Iterable[Finding]) -> dict[str, int | str]:
 
 
 def test_run_cocotb_refuses_a_filter_that_selects_nothing() -> None:
-    with pytest.raises(AssertionError, match="selects no test"):
-        run_cocotb([], "top", HERE / "cocotb_route.py", "unused", test_filter="no_such_test")
+    with pytest.raises(ValueError, match="selects no test"):
+        simulate([], "top", HERE / "cocotb_external.py", REPO / "out", test_filter="no_such_test")
 
 
 def test_waived_snapshot_sees_one_finding_replacing_another() -> None:
@@ -201,10 +202,13 @@ def _spec(config: str) -> Spec:
     return load(configs / f"{name}.ir.yaml")
 
 
-def test_route_parts_cover_every_cocotb_test_and_master() -> None:
+def test_route_parts_cover_every_cocotb_test_and_master(tmp_path: Path) -> None:
     """Each part list runs every cocotb test, and those split by master run every master."""
-    module = HERE / "cocotb_route.py"
     for config, parts in ROUTE_PARTS.items():
+        configs, _ = _split(config)
+        out = generate(_spec(config), tmp_path / config, configs)
+        assert out.tests is not None
+        module = tmp_path / config / out.tests
         ran = [n for _, f, _ in parts for n in dict.fromkeys(cocotb_tests(module, f))]
         assert sorted(set(ran)) == sorted(cocotb_tests(module))
         for test_filter in {f for _, f, _ in parts}:
@@ -222,14 +226,11 @@ def test_route_parts_cover_every_cocotb_test_and_master() -> None:
 @pytest.mark.parametrize(("config", "part", "test_filter", "masters"), _route_items())
 def test_route_simulation(config: str, part: str, test_filter: str | None, masters: str) -> None:
     configs, name = _split(config)
-    src = configs / f"{name}.ir.yaml"
-    spec = load(src)
     tag = f"{name}_{part}" if part else name
     root = REPO / "out" / "corpus" / f"{tag}_route"
-    out = generate(spec, root, configs)  # the config's own port style
-    run_cocotb([root / f for f in sources(out)], out.top, HERE / "cocotb_route.py",
-               f"route_{tag}", env={"BAG_IR": str(src), "BAG_ROUTE_MASTERS": masters},
-               incdirs=[root / d for d in include_dirs(out)], test_filter=test_filter)  # fmt: skip
+    out = generate(_spec(config), root, configs)  # the config's own port style
+    report = run_tests(out, test_filter=test_filter, env={"BAG_ROUTE_MASTERS": masters})
+    assert report.ok, report.format()
 
 
 @pytest.mark.parametrize("config", ALL)
@@ -237,7 +238,7 @@ def test_probes_exercise_every_protection_rule(config: str) -> None:
     """Each Access_Rule (of a master port) and each RO / WO / secure-only region is hit by a
     route-simulation probe that the reference model denies, so no configured protection
     passes silently because no probe reaches it."""
-    from route_model import probes, route
+    from hdl_bag.tests_gen.route_model import probes, route
 
     configs, name = _split(config)
     spec = load(configs / f"{name}.ir.yaml")

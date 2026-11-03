@@ -8,7 +8,7 @@ import click
 
 from hdl_bag import __version__, ir
 from hdl_bag.checks import CheckResult, run_checks
-from hdl_bag.flows import Report, compile_design, lint
+from hdl_bag.flows import Report, SimUnavailable, compile_design, lint, run_tests
 from hdl_bag.gen import MissingRtl, Outputs, generate, include_dirs, load_outputs, sources
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.reader import ReaderError, read_workbook
@@ -129,15 +129,37 @@ def lint_command(outdir: Path) -> None:
     _report(lint(sources(out), out.top, outdir, incdirs=include_dirs(out)))
 
 
+def _sim(out: Outputs, test_filter: str | None = None) -> None:
+    try:
+        _report(run_tests(out, test_filter=test_filter))
+    except (SimUnavailable, ValueError) as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+
+@main.command(name="sim")
+@click.argument("outdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--filter", "test_filter", help="Run only the tests this regex finds.")
+def sim_command(outdir: Path, test_filter: str | None) -> None:
+    """Run a generated OUTDIR's cocotb tests; exit 1 on any failure. Needs hdl-bag[sim]."""
+    _sim(load_outputs(outdir), test_filter)
+
+
 @main.command()
 @click.argument("spec", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @_OUTPUT
 @_STYLE
 def flow(spec: Path, output: Path | None, style: str | None) -> None:
-    """check -> generate -> lint -> compile. Simulation and formal come in Phases 4 and 5."""
+    """check -> generate -> lint -> elaborate -> sim. Formal comes in Phase 5."""
     out = _generate(spec, output, style)
     _report(lint(sources(out), out.top, out.root, incdirs=include_dirs(out)))
-    _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out)))
+    _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out), build=False))
+    if out.tests is None:
+        click.echo(
+            "no generated tests (Generate cocotb unit tests is N, or a user-supplied fabric)"
+        )
+    else:
+        _sim(out)
 
 
 if __name__ == "__main__":

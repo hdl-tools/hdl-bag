@@ -11,7 +11,9 @@ import random
 from typing import Any
 
 import cocotb
-from bfm import (
+from cocotb.triggers import ClockCycles
+
+from hdl_bag.tests_gen.bfm import (
     AHB_S,
     AHB_S_RESP,
     APB,
@@ -22,7 +24,6 @@ from bfm import (
     bridge_clocks,
     fabric_port,
 )
-from cocotb.triggers import ClockCycles
 
 PDW = int(os.environ.get("PDW", "32"))
 HDW = int(os.environ.get("HDW", "32"))

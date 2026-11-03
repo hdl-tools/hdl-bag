@@ -14,7 +14,7 @@ Pre-alpha. Phases 1 to 3 of 6 are done.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 87 validation checks | Generated cocotb tests (Phase 4) |
+| Spec workbook template, reader and 87 validation checks | The full generated test list and mutation checks (Phase 4) |
 | Canonical YAML IR, byte-identical across runs | Formal checks and nightly random regression (Phase 5) |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | User guide and v1.0 release (Phase 6) |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
@@ -23,6 +23,7 @@ Pre-alpha. Phases 1 to 3 of 6 are done.
 | Wrapper in flat or SV-interface port style, nested sub-wrappers | |
 | C header, memory-map doc (Markdown and HTML), port map, tie-off report | |
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
+| Generated cocotb tests per config: routing, errors, arbitration, single and burst traffic, handshake orderings | |
 
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md).
 
@@ -37,7 +38,8 @@ bag check spec.xlsx                     # every check; exit 1 on any error
 bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
 bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml)
 bag lint out/                           # slang + Verilator + Verible, zero unwaived findings
-bag flow spec.xlsx -o out/              # check -> generate -> lint -> compile
+bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
+bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim
 ```
 
 `--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
@@ -56,6 +58,8 @@ sw/<project>_memmap.h    C header
 doc/memmap.md, .html     memory-map document
 doc/port_map.md          per-fabric port map
 doc/tieoffs.md           component ports tied, defaulted, fitted or unused, and why
+tests/<project>_tests.py cocotb tests that apply to this config
+tests/<project>.ir.yaml  the IR those tests read
 ```
 
 ## Requirements

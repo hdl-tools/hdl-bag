@@ -2,7 +2,7 @@
 # Copyright 2026 The hdl-bag Authors
 """IR-driven tests through a generated top (flat ports, or the flat harness).
 
-The config comes from BAG_IR.
+The generated <project>_tests.py names which of these apply and calls load_spec().
 
 * Route: every master drives every probe address (route_model), read and write, with
   the alias pins all off, one at a time and all on, secure and non-secure where it
@@ -24,17 +24,35 @@ from pathlib import Path
 from typing import Any
 
 import cocotb
-from bfm import AHB_M, AHB_S, APB, AhbMaster, AhbSlave, ApbMaster, ApbSlave, Beat, Port
-from bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
-from route_model import error_words, probes, prot_tied, route
 
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
+from hdl_bag.tests_gen.bfm import (
+    AHB_M,
+    AHB_S,
+    APB,
+    AhbMaster,
+    AhbSlave,
+    ApbMaster,
+    ApbSlave,
+    Beat,
+    Port,
+)
+from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
+from hdl_bag.tests_gen.route_model import error_words, probes, prot_tied, route
 
-SPEC = load(Path(os.environ["BAG_IR"]))
+SPEC: Spec
+
+
+def load_spec(path: Path) -> None:
+    """Set the config every test here runs on (the generated module calls this)."""
+    global SPEC
+    SPEC = load(path)
+
+
 COLUMNS = {"prot": "PROT", "lock": "LOCK / excl", "pstrb": "PSTRB", "pslverr": "PSLVERR"}
 AXI = ("AXI4", "AXI4-Lite")
 
@@ -257,7 +275,6 @@ def _pin_sets() -> list[dict[str, bool]]:
 # Timeouts are a few times the longest run seen (the route test on demo_ss, the largest config,
 # stays under 1 ms of simulated time), so a deadlocked design fails within minutes instead of
 # hanging CI.
-@cocotb.test(timeout_time=3000, timeout_unit="us")
 async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     # BAG_ROUTE_MASTERS "i/k" checks every k-th master from i (test_corpus.py's ROUTE_PARTS).
     i, k = (int(x) for x in (os.environ.get("BAG_ROUTE_MASTERS") or "0/1").split("/"))
@@ -356,7 +373,6 @@ def _reach(region: Any, ports: list[Any]) -> list[Any]:
             and not route(SPEC, p.port, region.base, True, False, {}).bridges]  # fmt: skip
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     for f in SPEC.fabrics:
@@ -409,7 +425,6 @@ def _private_words(m: Any, index: int, count: int, direct: bool = False) -> list
     return []
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
     """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
     rotates IDs): every write lands and every read returns that master's own data."""
@@ -498,7 +513,6 @@ async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, ba
     return taken
 
 
-@cocotb.test(timeout_time=200, timeout_unit="us")
 async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
     """AXI fabrics with several masters on one slave, with the slave stalled so every
     request is waiting when it opens:
@@ -586,7 +600,6 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         dut._log.info("no AXI fabric with contention")
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
     """With the slave's AR stalled, a master can issue exactly as many reads as the shared
     bus's mid-point holds: FIFO depth + 2 per register slice (each cut is a 2-entry spill
@@ -629,7 +642,6 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
         dut._log.info("%s: mid-point held %d reads", f.name, accepted)
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
     """Every AXI4 master: a 4-beat INCR burst writes and reads back through the fabric; a
     4-beat burst to an unmapped or denied address is answered with the master's error on
@@ -663,7 +675,6 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
     dut._log.info("AXI4 bursts: %d checks", checked)
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
     """Every AXI4 crossbar, master and AXI4 slave with no adapter between: with the slave
     taking requests but holding R, reads on one ID reach it until Max mst trans at least."""
@@ -709,7 +720,6 @@ async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
     dut._log.info("Crossbar per-ID limits: %d checks", checked)
 
 
-@cocotb.test(timeout_time=200, timeout_unit="us")
 async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> None:
     """Every AXI master to every APB slave narrower than 32 bits behind bag_axi2apb: a word
     becomes one access per APB word, at the right addresses with the right lanes; a byte
@@ -767,7 +777,6 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
     dut._log.info("Narrow APB behind bag_axi2apb: %d checks", checked)
 
 
-@cocotb.test(timeout_time=50, timeout_unit="us")
 async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
     """Every AXI master to every APB4 slave it reaches: pre-fill a word, write one byte;
     the APB slave sees that byte's PSTRB and the other bytes keep their value."""
@@ -800,7 +809,6 @@ async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
     dut._log.info("byte writes checked: %d master/slave pairs", checked)
 
 
-@cocotb.test(timeout_time=3000, timeout_unit="us")
 async def axi_ports_take_every_handshake_ordering(dut: Any) -> None:
     """D38. On every channel a model answers (an AXI slave's AW / W / AR, an AXI master's
     B / R), the generated design sees READY before VALID, READY after VALID and both in the

@@ -39,3 +39,12 @@ checked. Their **warnings** are counted in a separate "third-party" line and
 never fail `bag lint`; **errors** anywhere still fail. Verible, which checks
 style only, skips them. Generated and in-house code must still have zero
 unwaived findings.
+
+## Python packages for simulation
+
+The `sim` extra (`pip install hdl-bag[sim]`) installs these for `bag sim`. They are not copied into generated output.
+
+| Package | Version | Licence |
+|---|---|---|
+| cocotb | 2.1.0 | BSD-3-Clause |
+| cocotbext-axi | 0.1.28 | MIT |

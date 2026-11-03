@@ -194,6 +194,12 @@ dependencies = [
     { name = "ruamel-yaml" },
 ]
 
+[package.optional-dependencies]
+sim = [
+    { name = "cocotb" },
+    { name = "cocotbext-axi" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "cocotb" },
@@ -210,11 +216,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
+    { name = "cocotb", marker = "extra == 'sim'", specifier = "==2.1.0" },
+    { name = "cocotbext-axi", marker = "extra == 'sim'", specifier = "==0.1.28" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
 ]
+provides-extras = ["sim"]
 
 [package.metadata.requires-dev]
 dev = [

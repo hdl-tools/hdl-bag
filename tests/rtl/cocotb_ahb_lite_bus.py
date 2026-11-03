@@ -7,7 +7,10 @@ import random
 from typing import Any
 
 import cocotb
-from bfm import (
+from cocotb.clock import Clock
+from cocotb.triggers import ClockCycles, Combine
+
+from hdl_bag.tests_gen.bfm import (
     AHB_M,
     AHB_M_RESP,
     AHB_S,
@@ -21,8 +24,6 @@ from bfm import (
     Beat,
     fabric_port,
 )
-from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, Combine
 
 FIXED = os.environ.get("FIXED_PRIORITY") == "1"
 INCR4 = 0b011

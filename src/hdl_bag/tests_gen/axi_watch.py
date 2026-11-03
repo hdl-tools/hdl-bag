@@ -12,9 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import cocotb
-from bfm import value
-from bfm_axi import AXI4_IDS, Orderings
 from cocotb.triggers import ReadOnly, RisingEdge
+
+from hdl_bag.tests_gen.bfm import value
+from hdl_bag.tests_gen.bfm_axi import AXI4_IDS, Orderings
 
 # AXI signal names of a Lite and an AXI4 slave model on the m_* ports.
 LITE_SIGS = ("awaddr", "awprot", "awvalid", "awready", "wdata", "wstrb", "wvalid", "wready",
