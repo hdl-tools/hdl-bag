@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: apb4_min
   revision: p2
@@ -168,4 +168,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_min.xlsx
-  sha256: c97060186bfce88cbdb53a58367173ba87e5a28bee2a010418423b152c552b69
+  sha256: 1fd30dff5e1a9fac368df89e063b77d7e78dca4fc77426da92ef02fe051aa8b1

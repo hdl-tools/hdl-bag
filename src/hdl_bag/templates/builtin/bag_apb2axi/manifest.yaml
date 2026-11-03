@@ -11,6 +11,7 @@ downstream:
   - AXI4
   - AXI4-Lite
 down_id_width: 1
+fifo_depth: false
 sources:
   - rtl/inhouse/bag_sync.sv
   - rtl/inhouse/bag_hs_apb_slv.sv

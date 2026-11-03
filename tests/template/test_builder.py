@@ -66,13 +66,20 @@ def test_blank_has_sample_structure_without_data(sample: Workbook, blank: Workbo
 
 def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
     """True if a cell difference is part of the approved delta: schema 0.2 -> 0.3, then
-    0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column)."""
+    0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column), then 0.4 -> 0.5
+    (notes, and br_ahb2main's FIFO depth, which its bridge ignores)."""
     if isinstance(old, str) and isinstance(new, str):
         renamed = old.replace("BusGen", "BAG").replace("busgen_", "bag_")
         if renamed == new:
             return True
     if (sheet, coord) == ("Project", "B6"):
-        return (old, new) == ("0.2", "0.4")
+        return (old, new) == ("0.2", "0.5")
+    if (sheet, coord, old, new) == ("Bridges", "G7", 2, 0):
+        return True
+    if isinstance(new, str) and (sheet, coord) in {("Fabrics", "I4"), ("Fabrics", "J4")}:
+        return new.startswith("Limits transactions")
+    if isinstance(new, str) and (sheet, coord) == ("Bridges", "G4"):
+        return new.startswith("Requests buffered in the bridge.")
     if sheet == "README" and old is None:
         return coord in {"A27", "B27"}  # the User_Ports row, after the last legend row
     if sheet == "Lists" and old is None:

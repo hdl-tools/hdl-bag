@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: nested_adapters
   revision: p3
@@ -423,4 +423,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: nested_adapters.xlsx
-  sha256: e8784ce003b1d09452c72839f9c6fc66c47f91329294277400506f2f0a3470b8
+  sha256: 857ba95597d1e56da75b9605a0a764059f653a9a599a80700fe88c7c9cf5eb08

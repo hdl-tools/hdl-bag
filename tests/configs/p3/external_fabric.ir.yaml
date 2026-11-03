@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: external_fabric
   revision: p3
@@ -446,4 +446,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_fabric.xlsx
-  sha256: c78537ecdc871cb35bcea6f3f1289cf7d95dc16e0fbe34505f092ad9513c9454
+  sha256: 8fb2eda4bf231e31012e52cd0ccb077e236d255210a2ecea9d9a19cb44aad610

@@ -210,7 +210,7 @@ def check_bridges(ctx: Context) -> None:
         template = ctx.text(row["Template"], required=True)
         ctx.hexval(row["Window base (hex)"])
         ctx.yes_no(row["Pass-through address"])
-        ctx.integer(row["FIFO depth"], minimum=0, required=False)
+        depth = ctx.integer(row["FIFO depth"], minimum=0, required=False)
         ctx.text(row["Notes"])
         if not template:
             continue
@@ -218,6 +218,9 @@ def check_bridges(ctx: Context) -> None:
         if m is None or m.kind != "bridge":
             ctx.report("TMPL-BRIDGE", row["Template"], f"{template} is not a bridge template")
             continue
+        if not m.fifo_depth and isinstance(depth, int) and depth > 0:
+            ctx.report("BRIDGE-FIFO-IGNORED", row["FIFO depth"],
+                       f"{template} handles one transfer at a time and ignores FIFO depth {depth}")  # fmt: skip
         if not name or ctx.defs.get(name) is not row:
             continue
         for side, allowed, attach in (

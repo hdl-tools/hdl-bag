@@ -22,7 +22,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from hdl_bag.template.data import Cell, SpecData
 from hdl_bag.template.sample_demo_ss import SAMPLE
 
-SCHEMA_VERSION: Final = "0.4"
+SCHEMA_VERSION: Final = "0.5"
 COMMENT_AUTHOR: Final = "BAG"
 
 FONT = "Arial"
@@ -370,8 +370,8 @@ class _Builder:
             _in("Clock domain", 11, ""),
             _in("Arbitration", 14, "Crossbar: per slave port. Shared-bus: one arbiter at the N:1 mux."),
             _in("Latency mode", 15, "Crossbar only: PULP xbar spill-register placement. n/a otherwise."),
-            _in("Max mst trans", 9, "Max in-flight transactions per connected master (PULP MaxMstTrans)."),
-            _in("Max slv trans", 9, "Max in-flight transactions per ID towards each connected slave (PULP MaxSlvTrans)."),
+            _in("Max mst trans", 9, "Limits transactions in flight from each master. AXI4 crossbar: at least this many per ID, not in total (PULP MaxMstTrans). AXI4-Lite: this many per master (a FIFO depth). AXI4 shared bus: at least this many per ID at each master, and the depth of the mux's write FIFO, shared by all masters. Also sizes adapters on master ports."),
+            _in("Max slv trans", 9, "Limits transactions towards slaves. AXI4 crossbar: writes per slave whose data has not finished; reads are not limited (PULP MaxSlvTrans). AXI4-Lite: this many per slave, reads and writes (a FIFO depth). AXI4 shared bus: at least this many per ID, across all slaves. Also limits reads and writes through a bag_axi2apb or bag_axi2axil bridge on this fabric, reads through bag_axi2ahb, and sizes adapters on slave ports."),
             _in("Backing template", 20, "BAG template that implements this fabric."),
             _in("Backing IP", 22, "Informational: IP behind the template."),
             _in("Mid-point FIFO depth", 10, "Shared-bus only: FIFO between the N:1 mux and the 1:M demux; buffers every master. n/a otherwise."),
@@ -485,7 +485,7 @@ class _Builder:
             _drv("Downstream fabric", 12, "Derived: Topology row with this bridge as Source.", "=" + fabric_of_source("A{r}")),
             _in("Window base (hex)", 14, "Must match the bridge's first region in Memory_Map."),
             _in("Pass-through address", 11, "Y = downstream sees full system address; N = offset from window base."),
-            _in("FIFO depth", 8, "Requests buffered in the bridge."),
+            _in("FIFO depth", 8, "Requests buffered in the bridge. Bridges that handle one transfer at a time ignore it, with a warning."),
             _in("Notes", 34, ""),
             _drv("Upstream protocol", 11, "", "=" + fab_lookup("B", "C{r}")),
             _drv("Downstream protocol", 11, "", "=" + fab_lookup("B", "D{r}")),

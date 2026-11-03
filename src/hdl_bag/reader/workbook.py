@@ -30,7 +30,7 @@ class Table:
     stop_labels: tuple[str, ...] = ()  # column-A section labels that end the table
 
 
-# Input columns of every table (schema 0.4). tests/reader keeps these equal to the
+# Input columns of every table (schema 0.5). tests/reader keeps these equal to the
 # builder's input columns.
 CLOCKS = Table("Clocks", ("Clock", "Freq (MHz)", "Source", "Domain", "Reset", "Notes"))
 RESETS = Table(

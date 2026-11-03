@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_wide_to_narrow
   revision: p3
@@ -415,4 +415,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_wide_to_narrow.xlsx
-  sha256: 13a504bef77465f46ce27173a3de04a83f6afe30a73fd98503564c1da7c33f53
+  sha256: 25e883ab6188bd76dd5aced1d46879729854b7863d1b319bd430b483dd434bd4

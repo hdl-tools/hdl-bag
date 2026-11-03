@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_shared_chain
   revision: p3
@@ -421,4 +421,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_shared_chain.xlsx
-  sha256: be4bbc704cd01a4cc1bd570c93477ad65ed11912bc5b0057f82b0c732a507719
+  sha256: 0b8a0d29c91932bd81c9273fa049fc906aba8d55f66ce6d98761d4fdfe774bf8

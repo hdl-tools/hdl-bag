@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: apb3_wide
   revision: p2
@@ -444,4 +444,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb3_wide.xlsx
-  sha256: 38005b1eba8ec33aa5cd92aaf782ab792f0a5f018cf0e0ad0ccdfbd994253ade
+  sha256: de0bea1046961ee4ddeb53fc74de4ac42196b88e4066ff69bbdf6d3c6e0822ad

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: bridges_pulp
   revision: p3
@@ -634,4 +634,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_pulp.xlsx
-  sha256: 994649bf9fea69752d38bf2be790e8833925fd99e68a333d4c334b06c356ef70
+  sha256: a8ddddd494d19845fa951b2b1865f418bdfe7ab50c6c7835035a265d9c3f5cc4

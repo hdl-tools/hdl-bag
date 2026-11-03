@@ -259,13 +259,16 @@ def _pin_sets() -> list[dict[str, bool]]:
 # hanging CI.
 @cocotb.test(timeout_time=3000, timeout_unit="us")
 async def every_master_reaches_what_the_model_says(dut: Any) -> None:
+    # BAG_ROUTE_MASTERS "i/k" checks every k-th master from i (test_corpus.py's ROUTE_PARTS).
+    i, k = (int(x) for x in (os.environ.get("BAG_ROUTE_MASTERS") or "0/1").split("/"))
     masters, slaves, _ = await _bring_up(dut)
     secure = any(r.secure for r in SPEC.memory_map)
     checked = errors = 0
+    reached: set[str] = set()
     for pins in _pin_sets():
         for x, on in pins.items():
             getattr(dut, x).value = int(on)
-        for m in SPEC.masters:
+        for m in SPEC.masters[i::k]:
             nonsec_options = [False, True] if secure and not prot_tied(SPEC, m.name) else [False]
             for nonsec in nonsec_options:
                 for addr in probes(SPEC):
@@ -339,7 +342,9 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             elif not write and written == exp and not exp.slave_error:
                                 assert got == data, f"{where}: read {got:#x}, wrote {data:#x}"
                         checked += 1
+                        reached.add(m.name)
     assert checked > 0 and errors > 0, (checked, errors)
+    assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
 

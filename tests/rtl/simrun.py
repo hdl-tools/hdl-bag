@@ -3,6 +3,7 @@
 """Build and run one cocotb module on Verilator; shared by the eda simulation tests."""
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,14 @@ RTL_TESTS = Path(__file__).parent
 
 # Fixed so a failure reproduces; cocotb derives each test's seed from it and the name.
 SEED = int(os.environ.get("BAG_COCOTB_SEED", "20261031"))
+_TEST = re.compile(r"@cocotb\.test\([^)]*\)\s*\nasync def (\w+)")
+
+
+def cocotb_tests(module: Path, test_filter: str | None = None) -> list[str]:
+    """The @cocotb.test names in MODULE that TEST_FILTER (cocotb's regex) selects."""
+    names = _TEST.findall(module.read_text())
+    assert len(names) == module.read_text().count("@cocotb.test("), module
+    return [n for n in names if test_filter is None or re.search(test_filter, f"{module.stem}.{n}")]
 
 
 def run_cocotb(
@@ -23,8 +32,12 @@ def run_cocotb(
     params: dict[str, int] | None = None,
     env: dict[str, str] | None = None,
     incdirs: list[Path] | None = None,
+    test_filter: str | None = None,
 ) -> None:
-    """Build SOURCES with TOP, run every @cocotb.test in MODULE and require all to pass."""
+    """Build SOURCES with TOP, run every @cocotb.test in MODULE that TEST_FILTER selects and
+    require all to pass."""
+    expected = len(cocotb_tests(module, test_filter))
+    assert expected > 0, f"{test_filter!r} selects no test in {module.name}"
     from cocotb_tools.check_results import get_results
     from cocotb_tools.runner import get_runner
 
@@ -48,10 +61,10 @@ def run_cocotb(
         test_dir=module.parent,
         build_dir=build_dir,
         results_xml=str(build_dir / "results.xml"),
+        test_filter=test_filter,
         extra_env={**(env or {}), "COCOTB_RANDOM_SEED": str(SEED), "PYTHONPATH": path},
     )
     total, failed = get_results(results)
-    expected = module.read_text().count("@cocotb.test(")
     assert (total, failed) == (expected, 0), (
         f"{failed} of {total} cocotb tests failed (expected {expected} tests); seed {SEED}"
     )

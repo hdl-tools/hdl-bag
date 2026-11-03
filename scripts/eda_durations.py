@@ -2,8 +2,14 @@
 # Copyright 2026 The hdl-bag Authors
 """Refresh tests/eda_durations.json, which balances the CI eda shards (pytest-split).
 
-Run the eda tests with ``--durations=0 --durations-min=0`` in the tools image, saving the
-output, then pass that log here:
+Use CI's own timings: local ones do not transfer to the runners, where a cold C++ build
+dominates. CI logs them, so for a finished run:
+
+    gh run view RUN --log | cut -f3- | sed -E 's/^[0-9TZ:.-]+ //' > out/eda.log
+    uv run python scripts/eda_durations.py out/eda.log
+
+Or locally, run the eda tests with ``--durations=0 --durations-min=0`` in the tools image,
+saving the output, then pass that log here:
 
     uv run pytest -m eda -n 4 --durations=0 --durations-min=0 > out/eda.log
     uv run python scripts/eda_durations.py out/eda.log

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: axi_xbar_pow2
   revision: p3
@@ -306,4 +306,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_xbar_pow2.xlsx
-  sha256: b0604da9ee3c91d27675357ee62588ef2e562897a56708787e3add19d1618892
+  sha256: 2904e6833ed99035727f26af609d801b354b168ede90771bf86785388d8c56a9

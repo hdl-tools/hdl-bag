@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: axi_adapters
   revision: p3
@@ -605,4 +605,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_adapters.xlsx
-  sha256: 843cf68d1be8e48643b4b3d92b4e356c196f6c9c9ccda64e9ec2a96a6a36e6fb
+  sha256: 2b8fdff5482dc36e351c490d8ae921a55c7d2b6c8e8ba91d4e041eb3474c2c85

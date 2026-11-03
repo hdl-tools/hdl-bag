@@ -93,7 +93,7 @@ BRIDGES: Final[list[list[Cell]]] = [
     ["br_main2per", "bag_axi2apb", "0x4000_0000", "Y", 2,
      "AXI4 -> AXI4-Lite -> APB4 (PULP axi_to_axi_lite + axi_lite_to_apb)"],
     ["br_ahb2aon", "bag_ahb2apb", "0x5000_0000", "Y", 0, "In-house AHB-Lite -> APB4 bridge"],
-    ["br_ahb2main", "bag_ahb2axi", "0x1000_0000", "Y", 2,
+    ["br_ahb2main", "bag_ahb2axi", "0x1000_0000", "Y", 0,
      "In-house AHB-Lite -> AXI4 bridge; gives mcu0 access to sram0 and peripherals. "
      "AXI side ID width 1"],
     ["br_main2cfg", "bag_axi2axil", "0x4100_0000", "Y", 0,

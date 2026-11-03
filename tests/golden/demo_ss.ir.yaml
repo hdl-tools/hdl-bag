@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: demo_ss
   revision: r4
@@ -595,7 +595,7 @@ bridges:
     downstream: main_xbar
     window_base: '0x1000_0000'
     pass_through: true
-    fifo_depth: 2
+    fifo_depth: 0
     upstream_protocol: AHB-Lite
     downstream_protocol: AXI4
     upstream_width: 32
@@ -1222,4 +1222,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: demo_ss.xlsx
-  sha256: daa49f6e4c1afde33891de0dcabd99921c01f2e71fe3110d8427ee8d976d4c5a
+  sha256: 3794cdd54b9afbc8634d308aeb1882dd83b96c114fb3860b33d91c56af4d8461

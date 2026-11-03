@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_ahb_secure
   revision: p3
@@ -394,4 +394,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_ahb_secure.xlsx
-  sha256: 81aaa696d0be21c0bc154484643555e2c147799b461b1bba86ee2837b44485f5
+  sha256: c94afc2cd7e7f3e61f09bf838f78102466728c0fa6012c7fe1d97fa60c815728

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_apb_masters
   revision: p3
@@ -400,4 +400,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_apb_masters.xlsx
-  sha256: f9c22f22045264f3e9eeb9c2443a0f2467dc5df93c124768db2917303947af19
+  sha256: 827e26d770ec05337924f58553d4d7ff0690e844ac61918349ca75aa043a7bec

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_cdc_chain
   revision: p3
@@ -478,4 +478,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_cdc_chain.xlsx
-  sha256: 51317ca9cefc7f37de71cc5cfcc33deef6957d0923bcdbf63e33e1893d3d8540
+  sha256: 2692c595f200886145834c725127673d115ae9063d47bed59320e7c967f06e25

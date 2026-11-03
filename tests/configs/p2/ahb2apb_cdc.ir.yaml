@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: ahb2apb_cdc
   revision: p2
@@ -326,4 +326,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb2apb_cdc.xlsx
-  sha256: 4f72fae5c7a6793095a0b11d61a8de2f74cdc452de4299c755584dfb2abedd93
+  sha256: f4e7d89d796c6f1e0354173829c8f44dbe9d0387bd67ea9cb53819a6c707717e

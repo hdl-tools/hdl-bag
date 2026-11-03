@@ -77,6 +77,7 @@ RULES: Final[dict[str, Severity]] = {
     "MM-PATH-NO-REGION": W,
     "BRIDGE-WINDOW-BASE": E,
     "BRIDGE-WINDOW-EMPTY": E,
+    "BRIDGE-FIFO-IGNORED": W,
     # address decode
     "DEC-UNKNOWN-MASTER": E,
     "DEC-DUPLICATE": E,

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: axi_shared_one
   revision: p3
@@ -155,4 +155,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_shared_one.xlsx
-  sha256: 1fa65d332b127eae4f008ed1a1377e87ed490912e3a34802859963a816538cf9
+  sha256: b52088323002eaf70401a005d034c03f38de16304daf045190452572b9df672d
