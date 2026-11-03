@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_narrow_apb
   revision: p3
@@ -908,4 +908,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_narrow_apb.xlsx
-  sha256: 202ec2a4d042702057a9ffc6fc6611631f36b6367aa892ab460e2757eb1d7c0e
+  sha256: c6742b2253619ba1ae1bc57cdaf7913f0c4a6cd56f79e0e2da2b2a0f886ad202

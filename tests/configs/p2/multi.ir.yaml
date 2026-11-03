@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: multi
   revision: p2
@@ -584,4 +584,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: multi.xlsx
-  sha256: 52c54303009ab6e6ce41ab53d5f7e532b68c85194c16f33382ccf6218fe60d9f
+  sha256: 730e53a143af90a94e8d68a2d9898c5aeecfcce85e19508ff81aa2be1a6b7441

@@ -35,6 +35,8 @@ class Manifest(BaseModel):
     # bridge: AXI ID width the bridge drives on an AXI4 downstream bus (it is a master
     # there); the checks' fabric ID-width derivation assumes the same value.
     down_id_width: int | None = None
+    # bridge: False when it handles one transfer at a time and ignores Bridges > FIFO depth.
+    fifo_depth: bool = True
     param_map: dict[str, str] = {}  # BAG parameter -> backing-IP parameter
     port_map: dict[str, str] = {}  # standard bus signal -> backing-IP port / struct field
     sources: tuple[str, ...] = ()  # Bender target "bender:<pkg>:<module>" or repo file paths

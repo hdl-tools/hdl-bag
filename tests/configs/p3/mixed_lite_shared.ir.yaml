@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_lite_shared
   revision: p3
@@ -432,4 +432,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_lite_shared.xlsx
-  sha256: 710105c775c24d605e6f19be355e27e3430f7da0ac02c733962543e870a1360d
+  sha256: 48609e4e0d8b64538207f2098471fe04be1e49004655bafd878aec334e7a9077

@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: ahb_fixed
   revision: p2
@@ -308,4 +308,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_fixed.xlsx
-  sha256: c52a3dd356c4a87d942829d4cbd800671cb4a7eb98d86aab17cc1b926297f179
+  sha256: 5844b4ffc2fec183b0cc8825aba0d44dc70c8405be32ea49b60cab68b9f5c417

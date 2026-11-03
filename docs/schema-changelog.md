@@ -2,6 +2,14 @@
 
 The workbook's sheets, column order, dropdown lists and spare-row formulas are the schema. `bag check` refuses a workbook whose Project > Spec schema version differs from the release's.
 
+## 0.5 (2026-11-03, hdl-bag 0.0.x)
+
+Changes from 0.4, approved by the owner (known gap 1 of the Phase 3 report):
+
+- **Notes:** Fabrics > Max mst trans and Max slv trans now state what each limits on each path. The old notes did not match PULP. Bridges > FIFO depth says that bridges handling one transfer at a time ignore it.
+- **demo\_ss sample:** `br_ahb2main` FIFO depth is 0, not 2. `bag_ahb2axi` has no FIFO, so the RTL does not change.
+- No sheet, column or dropdown-list changes, and the IR gains nothing. A 0.4 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.5 and it reads the same.
+
 ## 0.4 (2026-11-01, hdl-bag 0.0.x)
 
 Changes from 0.3, approved by the owner (D41):

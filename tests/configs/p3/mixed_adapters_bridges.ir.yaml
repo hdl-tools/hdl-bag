@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: mixed_adapters_bridges
   revision: p3
@@ -563,4 +563,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_adapters_bridges.xlsx
-  sha256: b932b375d32fda069a7059461c3c39421a4feff89bdb465f651aa47571d71259
+  sha256: 881cfa08aab0d13467741676e8a02f1f73687aa041e2ae849356b096348bca56

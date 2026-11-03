@@ -1,4 +1,4 @@
-schema: '0.4'
+schema: '0.5'
 project:
   name: apb4_rules
   revision: p2
@@ -288,4 +288,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_rules.xlsx
-  sha256: 514d7a923c98f0d1bf98d1d2175b0c1b1a873f067c20c5e4ca0688f1b0fee060
+  sha256: 8a2cb2c7f5d1e414abadcea4af2a10855b592f8c717e7d3bbf56b010bee56741
