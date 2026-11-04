@@ -226,6 +226,7 @@ class ApbSlave:
     err_addrs: set[int] = field(default_factory=set)
     mem: dict[int, int] = field(default_factory=dict)  # by APB-word address
     log: list[Access] = field(default_factory=list)  # raw PADDR / PSTRB per completed access
+    written: list[tuple[int, int]] = field(default_factory=list)  # (address, value) per byte stored
     trace: list[tuple[int, int]] | None = None  # shared (slave id, PADDR) order of accesses
     ident: int = 0
 
@@ -281,6 +282,7 @@ class ApbSlave:
                         old = self.mem.get(word, 0)
                         for b in range(nbytes):
                             if p["pstrb"] >> b & 1:
+                                self.written.append((word + b, wdata >> (8 * b) & 0xFF))
                                 lane = 0xFF << (8 * b)
                                 old = (old & ~lane) | (wdata & lane)
                         self.mem[word] = old
@@ -392,6 +394,7 @@ class AhbSlave:
     err_exact: set[int] = field(default_factory=set)  # transfers at exactly these addresses
     mem: dict[int, int] = field(default_factory=dict)
     log: list[Access] = field(default_factory=list)
+    written: list[tuple[int, int]] = field(default_factory=list)  # (address, value) per byte stored
     trace: list[tuple[int, int]] | None = None  # shared (slave id, address) order of accesses
     ident: int = 0
 
@@ -467,6 +470,7 @@ class AhbSlave:
         word = beat.addr & ~(nbytes - 1)
         old = self.mem.get(word, 0)
         for b in range(beat.addr % nbytes, beat.addr % nbytes + (1 << beat.size)):
+            self.written.append((word + b, data >> (8 * b) & 0xFF))
             lane = 0xFF << (8 * b)
             old = (old & ~lane) | (data & lane)
         self.mem[word] = old

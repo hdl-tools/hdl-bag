@@ -19,7 +19,7 @@ cocotbext-axi through bfm_axi.py, which offers the same interface.
 
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,15 @@ from hdl_bag.tests_gen.bfm import (
     Port,
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
-from hdl_bag.tests_gen.route_model import error_words, probes, prot_tied, route
+from hdl_bag.tests_gen.route_model import (
+    check_read,
+    check_write,
+    error_words,
+    plain_word,
+    probes,
+    prot_tied,
+    route,
+)
 
 SPEC: Spec
 
@@ -270,6 +278,21 @@ def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
     return 2 if code and write and through_lite else code
 
 
+def _read_words(log: list[Any], word: int) -> set[int]:
+    """The slave words the reads in LOG touched. An AXI burst is several beats; an AXI4-Lite,
+    AHB-Lite or APB entry is one."""
+    words = set()
+    for e in log:
+        if e.write:
+            continue
+        size = (
+            1 << e.size if getattr(e, "size", None) is not None and hasattr(e, "length") else word
+        )
+        first = e.addr // size * size
+        words |= {max(e.addr, first + n * size) // word for n in range(getattr(e, "length", 0) + 1)}
+    return words
+
+
 def _pin_sets() -> list[dict[str, bool]]:
     pins = list(SPEC.wrapper.extra_inputs)
     sets = [dict.fromkeys(pins, False)]
@@ -311,6 +334,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             prot = (random.getrandbits(3) & ~0b010) | int(ns) << 1
                         exp = route(SPEC, m.name, addr, write, ns, pins)
                         before = {n: len(s.log) for n, s in slaves.items()}
+                        stored = {n: len(s.written) for n, s in slaves.items()}
                         user = random.getrandbits(m.user_width) if m.user_width else 0
                         err, got, resp = await _access(masters[m.name], m.protocol,
                                                        m.data_width, addr, write, data, nonsec,
@@ -339,6 +363,11 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]} "
                                 f"write={write}, expected {exp.address:#x}"
                             )
+                            if write:
+                                check_write(where, exp, data.to_bytes(4, "little"),
+                                            slaves[exp.slave].written[stored[exp.slave] :])  # fmt: skip
+                            else:
+                                check_read(where, exp, 4, _read_words(new, exp.word_bytes))
                             seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
@@ -782,6 +811,72 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
             assert await drv.write(word, value) == 0, f"{label}: after the errors"
             checked += 1
     dut._log.info("Narrow APB behind bag_axi2apb: %d checks", checked)
+
+
+async def unaligned_axi_writes_store_only_their_bytes(dut: Any) -> None:
+    """Every AXI master to every slave it reaches: a write starting 1, 2 and 3 bytes into a
+    word stores exactly the bytes from there to the end of the word, and reads back. APB3 has
+    no PSTRB, so a partial write onto a word wider than a byte cannot be expressed."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = 0
+    for m in SPEC.masters:
+        if m.protocol not in AXI:
+            continue
+        for s in SPEC.slaves:
+            found = plain_word(SPEC, m, s)
+            if found is None or (s.protocol == "APB3" and s.data_width > 8):
+                continue
+            word, exp = found
+            drv, sl = masters[m.name], slaves[s.name]
+            for k in (1, 2, 3):
+                data = bytes(random.getrandbits(8) for _ in range(4 - k))
+                where = f"{m.name} -> {s.name} {word + k:#x}"
+                n = len(sl.written)
+                # A secure access, as plain_word's route is: the region may be secure-only.
+                extra: dict[str, Any] = {"prot": drv._prot(0)}
+                if not drv.lite:
+                    extra["size"] = 2
+                resp = await drv.master.write(word + k, data, **extra)
+                assert int(resp.resp) == 0, f"{where}: response {int(resp.resp)}"
+                shifted = replace(exp, address=exp.address + k)
+                check_write(where, shifted, data, sl.written[n:])
+                got = await drv.master.read(word + k, 4 - k, **extra)
+                assert bytes(got.data) == data, (
+                    f"{where}: read {bytes(got.data).hex()}, wrote {data.hex()}"
+                )
+                checked += 1
+    assert checked > 0
+    dut._log.info("Unaligned writes: %d checks", checked)
+
+
+async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) -> None:
+    """Every master to every slave narrower than 32 bits, whatever the path: a word becomes
+    several slave beats, and an error on any one of them must reach the master, read and
+    write. Afterwards the same word works again."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = 0
+    for m in SPEC.masters:
+        for s in SPEC.slaves:
+            found = plain_word(SPEC, m, s) if s.data_width < 32 else None
+            if found is None:
+                continue
+            word, exp = found
+            sl, step = slaves[s.name], s.data_width // 8
+            for beat in range(exp.address, exp.address + 4, step):
+                where = f"{m.name} -> {s.name} error at {beat:#x}"
+                prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+                sl.err_addrs.add(beat)
+                for write in (True, False):
+                    err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
+                                                     write, 0x1234_5678, False, prot)  # fmt: skip
+                    assert err, f"{where}: {'write' if write else 'read'} got no error"
+                sl.err_addrs.clear()
+                err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
+                                                 True, 0x1234_5678, False, prot)  # fmt: skip
+                assert not err, f"{where}: an error after it cleared"
+                checked += 1
+    assert checked > 0
+    dut._log.info("Errors on any beat: %d checks", checked)
 
 
 async def apb_byte_writes_carry_pstrb(dut: Any) -> None:

@@ -20,6 +20,7 @@ it; D28 makes it non-secure) and a master-side tied PSLVERR (PORTOPT-ERROR-MASKE
 and the corpus is warning-free).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +38,8 @@ class Outcome:
     nonsec: bool = False  # the non-secure bit as the slave sees it
     bridges: tuple[str, ...] = ()  # bridges crossed on the way
     miss: str | None = None  # fabric error: the failing fabric's miss response (DECERR, ...)
+    word_bytes: int = 4  # the slave's data width
+    words: frozenset[int] = frozenset()  # slave words (index) the access may reach
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -124,8 +127,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         error = bool(words & {e // word for e in error_words(spec, target)})
         error = error and not masked
         return Outcome(
-            target, visible, masked=masked, slave_error=error, nonsec=nonsec, bridges=tuple(crossed)
-        )
+            target, visible, masked=masked, slave_error=error, nonsec=nonsec, bridges=tuple(crossed),
+            word_bytes=word, words=frozenset(words),
+        )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
 
@@ -161,10 +165,55 @@ def error_words(spec: Spec, slave: str) -> set[int]:
             for r in spec.memory_map if r.slave == slave}  # fmt: skip
 
 
+def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
+    """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
+    no error."""
+    word = next(r for r in spec.memory_map if r.slave == slave.name).base + 0x40
+    if word >= 1 << master.addr_width:
+        return None
+    outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]
+    ok = all(o.slave == slave.name and not (o.slave_error or o.masked) for o in outs)
+    return (word, outs[0]) if ok else None
+
+
+def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]]) -> None:
+    """The bytes the slave stored for a write of DATA at EXP.address: exactly those, each once.
+    After an error a split access can have stored only part of it, but nothing else."""
+    want = {exp.address + k: b for k, b in enumerate(data)}
+    got = dict(written)
+    assert len(got) == len(written), f"{where}: a byte written twice: {_bytes(written)}"
+    if exp.slave_error or exp.masked:
+        assert got.items() <= want.items(), (
+            f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
+        )
+    else:
+        assert got == want, f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
+
+
+def check_read(where: str, exp: Outcome, length: int, seen: set[int]) -> None:
+    """The slave words a read of LENGTH bytes at EXP.address touched: all it asked for, and
+    nothing beyond what its beats can cover on the way (EXP.words)."""
+    word = exp.word_bytes
+    need = {a // word for a in range(exp.address, exp.address + length)}
+    assert need <= seen, f"{where}: read words {_words(seen, word)}, needs {_words(need, word)}"
+    extra = seen - exp.words - need
+    assert not extra, f"{where}: read words {_words(extra, word)}, beyond {_words(exp.words, word)}"
+
+
+def _bytes(rows: Iterable[tuple[int, int]]) -> list[tuple[str, str]]:
+    return [(hex(a), f"{v:02x}") for a, v in sorted(rows)]
+
+
+def _words(words: Iterable[int], size: int) -> list[str]:
+    return [hex(w * size) for w in sorted(words)]
+
+
 def probes(spec: Spec) -> list[int]:
     """Interesting addresses: per region its first, middle and last word, the error word,
-    the words just before and after it; both edges of every alias window."""
-    out: set[int] = set()
+    the words just before and after it, so the first and last word of every hole; the first
+    and last word of the address space; both edges of every alias window."""
+    out: set[int] = {0}
+    out |= {(1 << m.addr_width) - 4 for m in spec.masters}
     for r in spec.memory_map:
         out |= {r.base, r.base + r.size // 2, r.base + r.size - 4, r.base + r.size - ERROR_WORD,
                 r.base + r.size, r.base - 4}  # fmt: skip
@@ -172,4 +221,5 @@ def probes(spec: Spec) -> list[int]:
         for d in f.decode:
             for a in d.aliases:
                 out |= {a.base - 4, a.base, a.base + a.size - 4, a.base + a.size}
-    return sorted(a for a in out if 0 <= a < 1 << 32)
+    top = max((1 << m.addr_width for m in spec.masters), default=1 << 32)
+    return sorted(a for a in out if 0 <= a < top)
