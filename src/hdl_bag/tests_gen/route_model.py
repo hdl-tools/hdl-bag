@@ -38,6 +38,7 @@ class Outcome:
     nonsec: bool = False  # the non-secure bit as the slave sees it
     bridges: tuple[str, ...] = ()  # bridges crossed on the way
     miss: str | None = None  # fabric error: the failing fabric's miss response (DECERR, ...)
+    hits_error_word: bool = False  # the slave answers with an error, masked or not
     word_bytes: int = 4  # the slave's data width
     words: frozenset[int] = frozenset()  # slave words (index) the access may reach
 
@@ -125,10 +126,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         first = (visible + lo) // word * word
         words = {a // word for a in range(first, visible + hi, word)}
         error = bool(words & {e // word for e in error_words(spec, target)})
-        error = error and not masked
         return Outcome(
-            target, visible, masked=masked, slave_error=error, nonsec=nonsec, bridges=tuple(crossed),
-            word_bytes=word, words=frozenset(words),
+            target, visible, masked=masked, slave_error=error and not masked, nonsec=nonsec,
+            bridges=tuple(crossed), hits_error_word=error, word_bytes=word, words=frozenset(words),
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -165,6 +165,17 @@ def error_words(spec: Spec, slave: str) -> set[int]:
             for r in spec.memory_map if r.slave == slave}  # fmt: skip
 
 
+def takes_partial_writes(spec: Spec, slave: Any) -> bool:
+    """False when a partial write onto SLAVE's word cannot be expressed: an APB slave wider
+    than a byte with no PSTRB (APB3, or PSTRB tied)."""
+    if slave.data_width == 8 or slave.protocol not in ("APB3", "APB4"):
+        return True
+    return slave.protocol == "APB4" and _option(spec, slave.name, "pstrb") not in (
+        "tie-0",
+        "tie-default",
+    )
+
+
 def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
     no error."""
@@ -178,11 +189,12 @@ def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | Non
 
 def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]]) -> None:
     """The bytes the slave stored for a write of DATA at EXP.address: exactly those, each once.
-    After an error a split access can have stored only part of it, but nothing else."""
+    After an error a split access can have stored only part of it, but nothing else. A beat
+    with no strobes stores nothing, so one a width converter adds is not visible here."""
     want = {exp.address + k: b for k, b in enumerate(data)}
     got = dict(written)
     assert len(got) == len(written), f"{where}: a byte written twice: {_bytes(written)}"
-    if exp.slave_error or exp.masked:
+    if exp.hits_error_word:
         assert got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
         )
@@ -190,10 +202,34 @@ def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, 
         assert got == want, f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
 
 
-def check_read(where: str, exp: Outcome, length: int, seen: set[int]) -> None:
-    """The slave words a read of LENGTH bytes at EXP.address touched: all it asked for, and
-    nothing beyond what its beats can cover on the way (EXP.words)."""
+def check_split_write_error(where: str, address: int, data: bytes, step: int, failed: int,
+                            written: list[tuple[int, int]]) -> None:  # fmt: skip
+    """A write of DATA at ADDRESS, split into beats of STEP bytes, whose beat at FAILED answered
+    with an error: every beat before it stored, it did not, and nothing else did. Beats after
+    it may or may not have run."""
+    want = {address + k: b for k, b in enumerate(data)}
+    got = dict(written)
+    assert len(got) == len(written), f"{where}: a byte written twice: {_bytes(written)}"
+    assert got.items() <= want.items(), (
+        f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
+    )
+    before = {a: b for a, b in want.items() if a < failed}
+    assert before.items() <= got.items(), f"{where}: beats before the error lost: {_bytes(written)}"
+    assert not any(failed <= a < failed + step for a in got), (
+        f"{where}: stored the failed beat: {_bytes(written)}"
+    )
+
+
+def check_read(where: str, exp: Outcome, length: int, touched: list[int]) -> None:
+    """The beat addresses a read of LENGTH bytes at EXP.address made the slave take: all the
+    words it asked for, no address twice (a read can have side effects), and nothing beyond
+    what its beats can cover on the way (EXP.words). A wide slave behind a narrow fabric can
+    take two addresses in one word."""
     word = exp.word_bytes
+    seen = {a // word for a in touched}
+    assert len(set(touched)) == len(touched), (
+        f"{where}: read an address twice: {[hex(a) for a in touched]}"
+    )
     need = {a // word for a in range(exp.address, exp.address + length)}
     assert need <= seen, f"{where}: read words {_words(seen, word)}, needs {_words(need, word)}"
     extra = seen - exp.words - need

@@ -45,12 +45,14 @@ from hdl_bag.tests_gen.bfm import (
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
     check_read,
+    check_split_write_error,
     check_write,
     error_words,
     plain_word,
     probes,
     prot_tied,
     route,
+    takes_partial_writes,
 )
 
 SPEC: Spec
@@ -278,19 +280,19 @@ def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
     return 2 if code and write and through_lite else code
 
 
-def _read_words(log: list[Any], word: int) -> set[int]:
-    """The slave words the reads in LOG touched. An AXI burst is several beats; an AXI4-Lite,
-    AHB-Lite or APB entry is one."""
-    words = set()
+def _read_beats(log: list[Any], word: int) -> list[int]:
+    """The beat addresses of the reads in LOG, in order. An AXI burst is several beats; an
+    AXI4-Lite, AHB-Lite or APB entry is one."""
+    beats = []
     for e in log:
         if e.write:
             continue
-        size = (
-            1 << e.size if getattr(e, "size", None) is not None and hasattr(e, "length") else word
-        )
-        first = e.addr // size * size
-        words |= {max(e.addr, first + n * size) // word for n in range(getattr(e, "length", 0) + 1)}
-    return words
+        length, size = getattr(e, "length", 0), getattr(e, "size", None)
+        assert length == 0 or e.burst == 1, f"read at {e.addr:#x}: only INCR is modelled: {e}"
+        step = word if size is None else 1 << size
+        first = e.addr // step * step
+        beats += [max(e.addr, first + n * step) for n in range(length + 1)]
+    return beats
 
 
 def _pin_sets() -> list[dict[str, bool]]:
@@ -363,11 +365,19 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]} "
                                 f"write={write}, expected {exp.address:#x}"
                             )
+                            # APB transfers cost time and can have side effects: one
+                            # that stores nothing has no reason to exist.
+                            is_apb = next(
+                                x.protocol for x in SPEC.slaves if x.name == exp.slave
+                            ) in ("APB3", "APB4")
+                            assert not (is_apb and any(e.write and not e.strb for e in new)), (
+                                f"{where}: an APB write with no strobes"
+                            )
                             if write:
                                 check_write(where, exp, data.to_bytes(4, "little"),
                                             slaves[exp.slave].written[stored[exp.slave] :])  # fmt: skip
                             else:
-                                check_read(where, exp, 4, _read_words(new, exp.word_bytes))
+                                check_read(where, exp, 4, _read_beats(new, exp.word_bytes))
                             seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
@@ -824,14 +834,15 @@ async def unaligned_axi_writes_store_only_their_bytes(dut: Any) -> None:
             continue
         for s in SPEC.slaves:
             found = plain_word(SPEC, m, s)
-            if found is None or (s.protocol == "APB3" and s.data_width > 8):
+            if found is None or not takes_partial_writes(SPEC, s):
                 continue
             word, exp = found
             drv, sl = masters[m.name], slaves[s.name]
             for k in (1, 2, 3):
                 data = bytes(random.getrandbits(8) for _ in range(4 - k))
                 where = f"{m.name} -> {s.name} {word + k:#x}"
-                n = len(sl.written)
+                stored = {name: len(x.written) for name, x in slaves.items()}
+                n = stored[s.name]
                 # A secure access, as plain_word's route is: the region may be secure-only.
                 extra: dict[str, Any] = {"prot": drv._prot(0)}
                 if not drv.lite:
@@ -840,6 +851,9 @@ async def unaligned_axi_writes_store_only_their_bytes(dut: Any) -> None:
                 assert int(resp.resp) == 0, f"{where}: response {int(resp.resp)}"
                 shifted = replace(exp, address=exp.address + k)
                 check_write(where, shifted, data, sl.written[n:])
+                stray = [name for name, x in slaves.items()
+                         if name != s.name and len(x.written) != stored[name]]  # fmt: skip
+                assert not stray, f"{where}: also stored at {stray}"
                 got = await drv.master.read(word + k, 4 - k, **extra)
                 assert bytes(got.data) == data, (
                     f"{where}: read {bytes(got.data).hex()}, wrote {data.hex()}"
@@ -866,11 +880,15 @@ async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) ->
                 where = f"{m.name} -> {s.name} error at {beat:#x}"
                 prot = 0b0011 if m.protocol == "AHB-Lite" else 0
                 sl.err_addrs.add(beat)
+                n = len(sl.written)
                 for write in (True, False):
                     err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
                                                      write, 0x1234_5678, False, prot)  # fmt: skip
                     assert err, f"{where}: {'write' if write else 'read'} got no error"
-                sl.err_addrs.clear()
+                    if write:
+                        check_split_write_error(where, exp.address, (0x1234_5678).to_bytes(4, "little"),
+                                                step, beat, sl.written[n:])  # fmt: skip
+                sl.err_addrs.discard(beat)  # the slave's own error words stay
                 err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
                                                  True, 0x1234_5678, False, prot)  # fmt: skip
                 assert not err, f"{where}: an error after it cleared"
