@@ -261,6 +261,9 @@ class Seen:
     prot: int
     user: int = 0
     cache: int | None = None  # AxCACHE (None on AXI4-Lite)
+    length: int = 0  # AxLEN
+    size: int | None = None  # AxSIZE (None on AXI4-Lite: the full width)
+    burst: int = 1  # AxBURST (INCR on AXI4-Lite)
 
 
 class _Target:
@@ -268,18 +271,20 @@ class _Target:
 
     def __init__(self, word: int, err_addrs: set[int]) -> None:
         self.word = word
-        self.err_words = {a // word for a in err_addrs}
+        self.err_addrs = err_addrs  # by data word; the set can change during a test
         self.err_exact: set[int] = set()  # accesses starting at exactly these addresses
         self.mem: dict[int, int] = {}
+        self.written: list[tuple[int, int]] = []  # (address, value) per byte stored
 
     def _check(self, addr: int) -> None:
-        if addr // self.word in self.err_words or addr in self.err_exact:
+        if addr // self.word in {a // self.word for a in self.err_addrs} or addr in self.err_exact:
             raise ValueError(f"slave error at {addr:#x}")
 
     async def write(self, addr: int, data: bytes) -> None:
         self._check(addr)
         for i, b in enumerate(data):
             self.mem[addr + i] = b
+            self.written.append((addr + i, b))
 
     async def read(self, addr: int, length: int) -> bytes:
         self._check(addr)
@@ -325,6 +330,14 @@ class AxiPortSlave:
         for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
             ch.set_pause_generator(gen())
 
+    @property
+    def written(self) -> list[tuple[int, int]]:
+        return self.target.written
+
+    @property
+    def err_addrs(self) -> set[int]:
+        return self.target.err_addrs
+
     def stall(self, on: bool) -> None:
         """Hold the AW and AR channels not ready (requests queue up in the fabric)."""
         self.slave.write_if.aw_channel.pause = on
@@ -342,7 +355,13 @@ class AxiPortSlave:
                     prot = getattr(ch, f"{pre}prot", None)
                     user = getattr(ch, f"{pre}user", None)
                     cache = getattr(ch, f"{pre}cache", None)
+                    length = getattr(ch, f"{pre}len", None)
+                    size = getattr(ch, f"{pre}size", None)
+                    burst = getattr(ch, f"{pre}burst", None)
                     self.log.append(Seen(int(getattr(ch, f"{pre}addr").value), write,
                                          int(prot.value) if prot is not None else 0,
                                          int(user.value) if user is not None else 0,
-                                         int(cache.value) if cache is not None else None))  # fmt: skip
+                                         int(cache.value) if cache is not None else None,
+                                         int(length.value) if length is not None else 0,
+                                         int(size.value) if size is not None else None,
+                                         int(burst.value) if burst is not None else 1))  # fmt: skip

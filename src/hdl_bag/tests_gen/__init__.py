@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from hdl_bag import __version__
 from hdl_bag.gen.render import header
 from hdl_bag.ir.model import Spec
+from hdl_bag.tests_gen.route_model import plain_word, takes_partial_writes
 
 _AXI = ("AXI4", "AXI4-Lite")
 
@@ -32,6 +33,18 @@ def _narrow_apb(spec: Spec) -> bool:
         and any(s.protocol in ("APB3", "APB4") and s.data_width < 32 for s in spec.slaves)
         and any(b.template == "bag_axi2apb" for b in spec.bridges)
     )
+
+
+def _unaligned_path(spec: Spec) -> bool:
+    """An AXI master reaches, without error, a slave that can take a partial write."""
+    return any(plain_word(spec, m, s) and takes_partial_writes(spec, s)
+               for m in spec.masters if m.protocol in _AXI for s in spec.slaves)  # fmt: skip
+
+
+def _split_path(spec: Spec) -> bool:
+    """A master reaches, without error, a slave narrower than the 32-bit word it sends."""
+    return any(plain_word(spec, m, s)
+               for m in spec.masters for s in spec.slaves if s.data_width < 32)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -56,6 +69,8 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("axi4_crossbars_admit_max_mst_trans_per_id", 50, lambda s: any(
         f.template == "bag_axi_xbar" and f.max_mst_trans for f in s.fabrics)),
     GeneratedTest("narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", 200, _narrow_apb),
+    GeneratedTest("unaligned_axi_writes_store_only_their_bytes", 200, _unaligned_path),
+    GeneratedTest("an_error_on_any_beat_of_a_split_access_reaches_the_master", 200, _split_path),
     GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _axi_master(s) and any(
         x.protocol == "APB4" and x.data_width == 32 for x in s.slaves)),
     GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: _axi_master(s) or any(x.protocol in _AXI for x in s.slaves)),

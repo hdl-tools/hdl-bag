@@ -35,9 +35,10 @@ def test_demo_ss_drops_only_tests_it_has_nothing_for() -> None:
     assert set(TESTS_NOT_ON_DEMO_SS) == {t.name for t in TESTS} - set(applicable_tests(spec))
 
 
-# demo_ss has one master on its AHB-Lite bus, and no narrow APB behind bag_axi2apb.
+# demo_ss has one master on its AHB-Lite bus, and no slave narrower than 32 bits.
 TESTS_NOT_ON_DEMO_SS = (
     "arbitration_follows_the_fabric_policy",
+    "an_error_on_any_beat_of_a_split_access_reaches_the_master",
     "narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors",
 )
 
