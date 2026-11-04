@@ -98,13 +98,30 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      # A cold C++ build is most of the time here, and Verilator's makefiles use ccache when
+      # it is there. BASEDIR and NOHASHDIR let builds in different out/ directories share.
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ matrix.group }}-
+            ccache-
       - run: uv sync --locked
+      - run: ccache --zero-stats
       - run: >-
+          CCACHE_BASEDIR="$PWD"
           uv run pytest -m eda -n auto --splits 4 --group ${{ matrix.group }}
           --durations-path tests/eda_durations.json --splitting-algorithm least_duration
           --durations=0 --durations-min=0
+      - run: ccache --show-stats
+        if: always()
 
   eda:
     # The one check to require: passes only when every shard did.
