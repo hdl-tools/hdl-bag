@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_lite_shared
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -80,6 +81,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: mcu
@@ -144,6 +146,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -432,4 +435,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_lite_shared.xlsx
-  sha256: 48609e4e0d8b64538207f2098471fe04be1e49004655bafd878aec334e7a9077
+  sha256: 496e07f920624d950e19c0eca774e85ba6c23249d28e37324be7f76f819384fe

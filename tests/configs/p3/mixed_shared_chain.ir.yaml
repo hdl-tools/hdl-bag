@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_shared_chain
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -92,6 +93,7 @@ fabrics:
       slice: cut
     template: bag_axi_shared_bus
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -148,6 +150,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_lp
@@ -421,4 +424,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_shared_chain.xlsx
-  sha256: 0b8a0d29c91932bd81c9273fa049fc906aba8d55f66ce6d98761d4fdfe774bf8
+  sha256: 4604c2a9d355a440c79b11e263555b774febae4141e02223b8abe35d29bdd184

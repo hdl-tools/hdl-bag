@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axi_shared_rr
   revision: p3
@@ -45,6 +45,7 @@ fabrics:
       slice: none
     template: bag_axi_shared_bus
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: m0
@@ -368,4 +369,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_shared_rr.xlsx
-  sha256: 0dfd54c1391536ab5f33a18b9214f18c897dfbeadf92796f16f95e19c7da9f0b
+  sha256: f919bb3914ea946bfd40fd7034fa91195dd35b23bc37e707fa33ad33dad3486c

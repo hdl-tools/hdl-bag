@@ -111,6 +111,8 @@ RULES: Final[dict[str, Severity]] = {
     "WRAP-INTERNAL-PORT": E,
     "WRAP-NAME-COLLISION": E,
     # user ports (D41)
+    "EXT-MODULE-NAME": E,
+    "EXT-MODULE-SHARED": E,
     "USERPORT-INSTANCE": E,
     "USERPORT-DUPLICATE": E,
     "USERPORT-NAME": E,

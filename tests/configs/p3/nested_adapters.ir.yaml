@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: nested_adapters
   revision: p3
@@ -54,6 +54,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -91,6 +92,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -423,4 +425,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: nested_adapters.xlsx
-  sha256: 857ba95597d1e56da75b9605a0a764059f653a9a599a80700fe88c7c9cf5eb08
+  sha256: 57f6cbe116d8ad7c1927e5289784ff2c23b65440f637f6f58d99bcad342d1bfa

@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: apb3_wide
   revision: p2
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: host
@@ -444,4 +445,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb3_wide.xlsx
-  sha256: de0bea1046961ee4ddeb53fc74de4ac42196b88e4066ff69bbdf6d3c6e0822ad
+  sha256: 930e0f6eaaa49df0680f7e342ab93ed476a47807bd5bcef18516979369744519

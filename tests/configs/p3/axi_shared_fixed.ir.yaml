@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axi_shared_fixed
   revision: p3
@@ -45,6 +45,7 @@ fabrics:
       slice: multicut-3
     template: bag_axi_shared_bus
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: m0
@@ -297,4 +298,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_shared_fixed.xlsx
-  sha256: 35847d9574bbb051034a44bab21ec82d24ef0491f8144ab4564d4cc705482d7a
+  sha256: 30187f72024e89b86f00c9d3abda026eb541f13a15f9ebce178d14955b16f114

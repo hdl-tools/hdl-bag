@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: external_fabric
   revision: p3
@@ -54,6 +54,7 @@ fabrics:
     midpoint: null
     template: bag_external
     backing_ip: user RTL
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -93,6 +94,7 @@ fabrics:
     midpoint: null
     template: bag_external
     backing_ip: user RTL
+    external_module: null
     master_ports:
       - index: 0
         port: br_peri
@@ -130,6 +132,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: mcu
@@ -446,4 +449,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_fabric.xlsx
-  sha256: 8fb2eda4bf231e31012e52cd0ccb077e236d255210a2ecea9d9a19cb44aad610
+  sha256: 4f41916499ef9ea3ede7da897c42ad23e78d9e913f7715955d97e66e435e9faa

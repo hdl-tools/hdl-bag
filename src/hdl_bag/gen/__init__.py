@@ -28,7 +28,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md, tieoffs_md
-from hdl_bag.gen.external import opaque_module, render_stub
+from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
 from hdl_bag.gen.render import GenerateError, header
@@ -110,10 +110,22 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
     # Stubs for opaque fabrics: the user replaces them with the fabric's RTL.
+    stubs: dict[str, tuple[str, list[str]]] = {}
     for inst in netlist.instances:
         manifest = registry.get(inst.template)
         if inst.fabric is not None and manifest is not None and manifest.opaque:
             rel = f"rtl/ext/{opaque_module(spec, inst.fabric)}.sv"
+            declared = opaque_declarations(spec, inst)
+            if rel in stubs:  # a shared External module (D45): one module, so one contract
+                first, ports = stubs[rel]
+                if ports != declared:
+                    differ = sorted(set(ports) ^ set(declared))[:4]
+                    raise GenerateError(
+                        f"{inst.name} and {first} share a module but their ports differ "
+                        f"(for example through ID widths): {differ or 'their order'}"
+                    )
+                continue
+            stubs[rel] = (inst.name, declared)
             _write(outdir, rel, render_stub(spec, inst, hdr), written)
             srcs.append(rel)
 

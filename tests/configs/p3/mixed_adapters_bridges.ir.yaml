@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_adapters_bridges
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -90,6 +91,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -127,6 +129,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -563,4 +566,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_adapters_bridges.xlsx
-  sha256: 881cfa08aab0d13467741676e8a02f1f73687aa041e2ae849356b096348bca56
+  sha256: 656b44bb4b944923a9ba18a3f8122a567944489405df1ac1e0d7e10aba6d20b4

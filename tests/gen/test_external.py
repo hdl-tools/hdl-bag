@@ -12,13 +12,16 @@ import re
 from pathlib import Path
 
 import pytest
+from dsl import AXI4_NA, Cfg, resolve_cfg
 from simrun import REPO, run_cocotb
 
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.external import opaque_module, opaque_ports
 from hdl_bag.gen.netlist import Instance, build_netlist
+from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import Spec, load
 
+MB = 1 << 20
 CONFIG = REPO / "tests" / "configs" / "p3" / "external_fabric.ir.yaml"
 HERE = Path(__file__).parent
 
@@ -27,10 +30,14 @@ def _opaque(spec: Spec) -> list[Instance]:
     return [i for i in build_netlist(spec).instances if i.template == "bag_external"]
 
 
+SHARED = REPO / "tests" / "configs" / "p3" / "external_shared.ir.yaml"
+
+
+@pytest.mark.parametrize("config", [CONFIG, SHARED], ids=lambda p: p.name.split(".")[0])
 @pytest.mark.parametrize("style", ["flat", "sv-interface"])
-def test_instance_matches_the_stub(tmp_path: Path, style: str) -> None:
-    spec = load(CONFIG)
-    out = generate(spec, tmp_path, CONFIG.parent, style)
+def test_instance_matches_the_stub(tmp_path: Path, style: str, config: Path) -> None:
+    spec = load(config)
+    out = generate(spec, tmp_path, config.parent, style)
     files = [f.as_posix() for f in sources(out)]
     for inst in _opaque(spec):
         assert inst.fabric is not None
@@ -135,3 +142,74 @@ def test_wiring_with_user_fabrics() -> None:
     run_cocotb(files, out.top, HERE / "cocotb_external.py", "external_user",
                env={"BAG_IR": str(CONFIG)},
                incdirs=[root / d for d in include_dirs(out)])  # fmt: skip
+
+
+def test_external_module_names_the_module_and_ports_by_position() -> None:
+    spec = load(SHARED)
+    by_name = {i.name: i for i in _opaque(spec)}
+    noc = by_name["noc"]
+    assert noc.fabric is not None and opaque_module(spec, noc.fabric) == "my_noc"
+    ports = {p.name: p for p in opaque_ports(spec, noc)}
+    assert ports["s0_axi_awvalid"].direction == "input" and ports["s0_axi_awvalid"].port == "cpu"
+    assert ports["m0_axi_awvalid"].direction == "output" and ports["m0_axi_awvalid"].port == "ram"
+
+
+def test_blank_keeps_the_fabric_and_port_names() -> None:
+    spec = load(CONFIG)
+    noc = next(i for i in _opaque(spec) if i.name == "noc")
+    assert noc.fabric is not None and opaque_module(spec, noc.fabric) == "external_fabric_noc"
+    ports = [p.name for p in opaque_ports(spec, noc)]
+    assert "noc_cpu_axi_awaddr" in ports and "noc_ram_axi_awaddr" in ports
+    assert not any(n.startswith(("s0_", "m0_")) for n in ports)
+
+
+def test_fabrics_sharing_a_module_get_one_stub(tmp_path: Path) -> None:
+    out = generate(load(SHARED), tmp_path, SHARED.parent)
+    stubs = sorted(f for f in out.files if f.startswith("rtl/ext/"))
+    assert stubs == ["rtl/ext/my_noc.sv", "rtl/ext/shared_apb.sv"]
+    assert [f.as_posix() for f in sources(out)].count("rtl/ext/shared_apb.sv") == 1
+    top = "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "rtl").glob("*.sv"))
+    assert len(re.findall(r"^\s*shared_apb \w+ \(", top, re.M)) == 2
+
+
+def _two_noc(tmp_path: Path, id_a: int, id_b: int) -> Spec:
+    """Two AXI4 user fabrics sharing module ip. Master "second" comes first on the Topology sheet
+    of noc_a, with Port index 1, so numbering by row would be wrong."""
+    c = Cfg("two_noc", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    for f, idw, k in (("noc_a", id_a, 0), ("noc_b", id_b, 1)):
+        c.fabric(f, "AXI4", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY", max_trans=(4, 4),
+                 template="bag_external", external_module="ip")  # fmt: skip
+        first, second, ram = f"first_{k}", f"second_{k}", f"ram_{k}"
+        c.master(second, "AXI4", 32, 32, "D_SYS", id_width=idw)
+        c.master(first, "AXI4", 32, 32, "D_SYS", id_width=idw)
+        c.slave(ram, "AXI4", 32, 32, "D_SYS")
+        c.link(second, f, 1).link(first, f, 0).link(f, ram, 0)
+        c.region(ram, "mem", 0x8000_0000 + k * MB, MB)
+        c.decode(first, "DECERR").decode(second, "DECERR")
+        c.option(first, **AXI4_NA).option(second, **AXI4_NA).option(ram, **AXI4_NA)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None and not findings, findings
+    return spec
+
+
+def test_positions_follow_the_port_index_not_the_row(tmp_path: Path) -> None:
+    spec = _two_noc(tmp_path, 2, 2)
+    noc = next(i for i in _opaque(spec) if i.name == "noc_a")
+    ports = {p.name: p.port for p in opaque_ports(spec, noc)}
+    assert ports["s0_axi_awaddr"] == "first_0" and ports["s1_axi_awaddr"] == "second_0"
+
+
+def test_a_shared_stub_names_every_fabric_and_positions(tmp_path: Path) -> None:
+    spec = _two_noc(tmp_path, 2, 2)
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "rtl" / "ext" / "ip.sv").read_text(encoding="utf-8")
+    assert "noc_a" in text and "noc_b" in text
+    assert "// s0: AXI4 master attachment" in text and "first_0" not in text
+
+
+def test_fabrics_sharing_a_module_with_different_id_widths_do_not_generate(tmp_path: Path) -> None:
+    """What bag check cannot see: the ID widths come from the attached masters."""
+    spec = _two_noc(tmp_path, 2, 4)
+    with pytest.raises(GenerateError, match="share a module"):
+        generate(spec, tmp_path / "out", tmp_path)

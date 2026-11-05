@@ -2,13 +2,17 @@
 # Copyright 2026 The hdl-bag Authors
 """Opaque (user-supplied) fabrics: bag_external and any template with ``opaque: true``.
 
-BAG instantiates a module named ``<project>_<fabric>`` inside its wrapper, in the place
-a generated fabric would take, and the user supplies that module's RTL. The port contract:
+BAG instantiates a module inside its wrapper, in the place a generated fabric would take,
+and the user supplies that module's RTL. Its name is Fabrics > External module or, if that is
+blank, ``<project>_<fabric>``. The port contract:
 
 * ``clk_i`` / ``rst_ni``: the fabric's clock and conditioned (active-low) reset.
 * For each attached port, in Port-index order (master side, then slave side), the bus
   signals named by the Wrapper signal pattern with ``{port}`` = ``<fabric>_<port>``, e.g.
-  ``noc_cpu0_axi_awaddr``. Directions are the fabric's: on a master's attachment the
+  ``noc_cpu0_axi_awaddr``. With an External module, ``{port}`` is by position instead, so
+  fabrics of the same shape can share the module: ``s<k>`` for the k-th master attachment
+  (the fabric is the slave end) and ``m<k>`` for the k-th slave attachment, e.g.
+  ``s0_axi_awaddr``. Directions are the fabric's: on a master's attachment the
   fabric is the slave end, on a slave's attachment the master end. The widths are those
   of the bus at the fabric (after the port's adapters: protocol, width, CDC, ID, ...).
 
@@ -37,6 +41,7 @@ class OpaquePort:
     direction: str  # "input" / "output", as the fabric sees it
     width: int
     port: str  # the attached master, slave or bridge
+    attachment: str  # its {port} in the name: <fabric>_<port>, or s<k> / m<k> by position
 
 
 def exposed_name(u: UserPort) -> str:
@@ -45,7 +50,7 @@ def exposed_name(u: UserPort) -> str:
 
 
 def opaque_module(spec: Spec, fabric: Fabric) -> str:
-    return f"{spec.project.name}_{fabric.name}"
+    return fabric.external_module or f"{spec.project.name}_{fabric.name}"
 
 
 def opaque_ports(spec: Spec, inst: Instance) -> list[OpaquePort]:
@@ -53,10 +58,11 @@ def opaque_ports(spec: Spec, inst: Instance) -> list[OpaquePort]:
     fab = inst.fabric
     assert fab is not None
     out: list[OpaquePort] = []
-    sides = ((fab.master_ports, inst.masters), (fab.slave_ports, inst.slaves))
-    for attached, buses in sides:
-        for p, bus in zip(sorted(attached, key=lambda p: p.index), buses, strict=True):
-            prefix = f"{fab.name}_{p.port}"
+    sides = (("s", fab.master_ports, inst.masters), ("m", fab.slave_ports, inst.slaves))
+    for end, attached, buses in sides:
+        ordered = sorted(attached, key=lambda p: p.index)
+        for k, (p, bus) in enumerate(zip(ordered, buses, strict=True)):
+            prefix = f"{end}{k}" if fab.external_module else f"{fab.name}_{p.port}"
             for sig in bus.signals:
                 # Signals the master side drives flow into the fabric on a master's
                 # attachment (bus.is_slave False) and out of it on a slave's.
@@ -66,13 +72,22 @@ def opaque_ports(spec: Spec, inst: Instance) -> list[OpaquePort]:
                 name = flat_signal_name(spec.wrapper.signal_pattern, prefix,
                                         PROTO_TOKEN[bus.protocol], sig, None)  # fmt: skip
                 out.append(OpaquePort(bus, sig, name, "input" if into else "output", width,
-                                      p.port))  # fmt: skip
+                                      p.port, prefix))  # fmt: skip
     return out
 
 
 def _decl(direction: str, width: int, name: str) -> str:
     dims = f"[{width - 1}:0] " if width > 1 else ""
     return f"    {direction:<6} logic {dims}{name}"
+
+
+def opaque_declarations(spec: Spec, inst: Instance) -> list[str]:
+    """The user module's ports for INST, in order: fabrics sharing a module must agree on these."""
+    fab = inst.fabric
+    assert fab is not None
+    rows = [_decl(p.direction, p.width, p.name) for p in opaque_ports(spec, inst)]
+    rows += [_decl(u.direction, u.width, u.port) for u in spec.user_ports if u.instance == fab.name]
+    return [_decl("input", 1, "clk_i"), _decl("input", 1, "rst_ni"), *rows]
 
 
 def render_stub(spec: Spec, inst: Instance, header: str) -> str:
@@ -87,7 +102,8 @@ def render_stub(spec: Spec, inst: Instance, header: str) -> str:
     for p in ports:
         if p.port != last:
             role = "master" if not p.bus.is_slave else "slave"
-            rows.append(f"    // {p.port}: {p.bus.protocol} {role} attachment")
+            label = p.attachment if fab.external_module else p.port
+            rows.append(f"    // {label}: {p.bus.protocol} {role} attachment")
             last = p.port
         rows.append(_decl(p.direction, p.width, p.name))
     users = [u for u in spec.user_ports if u.instance == fab.name]
@@ -105,9 +121,11 @@ def render_stub(spec: Spec, inst: Instance, header: str) -> str:
     body += ["", "  logic unused;", "  assign unused = ^{"]
     body += [f"      {n}{',' if k < len(inputs) - 1 else ''}" for k, n in enumerate(inputs)]
     body += ["  };"]
+    sharing = sorted(f.name for f in spec.fabrics if f.external_module == module)
+    who = ", ".join(sharing) if len(sharing) > 1 else fab.name
     text = [
         header.rstrip("\n"),
-        f"// Stub for {fab.name}, a user-supplied {fab.protocol} fabric (bag_external): it",
+        f"// Stub for {who}, a user-supplied {fab.protocol} fabric (bag_external): it",
         "// accepts and answers nothing. Replace this file with the fabric's RTL: a module",
         f"// {module} with exactly these ports (see hdl_bag.gen.external).",
         "",

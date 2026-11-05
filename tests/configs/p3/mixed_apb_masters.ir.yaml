@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_apb_masters
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -80,6 +81,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: dbg
@@ -117,6 +119,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: jtag
@@ -154,6 +157,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_lite
@@ -400,4 +404,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_apb_masters.xlsx
-  sha256: 827e26d770ec05337924f58553d4d7ff0690e844ac61918349ca75aa043a7bec
+  sha256: b571322313e0ff26e11cc7629d9d5b57145b9da93d258447acdb26a36858dc49

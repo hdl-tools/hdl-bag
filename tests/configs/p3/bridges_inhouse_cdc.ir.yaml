@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: bridges_inhouse_cdc
   revision: p3
@@ -65,6 +65,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -112,6 +113,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_aon
@@ -151,6 +153,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: dbg
@@ -198,6 +201,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_lite
@@ -235,6 +239,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_rom
@@ -272,6 +277,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -703,4 +709,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_inhouse_cdc.xlsx
-  sha256: ad9fe354db4856dab7d82b34c5cae792d6e9b374bd855aa452c5f85a12953657
+  sha256: cc3fa49e6c2290455f543256ce092fcfe0924c1b957bb1ce963fbfeaf9d955c1

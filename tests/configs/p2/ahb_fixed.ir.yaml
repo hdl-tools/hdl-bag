@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: ahb_fixed
   revision: p2
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: m0
@@ -308,4 +309,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_fixed.xlsx
-  sha256: 5844b4ffc2fec183b0cc8825aba0d44dc70c8405be32ea49b60cab68b9f5c417
+  sha256: 5e34937932d113d5f96e5da09e61854619797abf207e78d8175a73cbfbfbc27e

@@ -77,6 +77,11 @@ class Context:
         v = self._parsed(cell, parse)
         return v if isinstance(v, str) else None
 
+    def external_module(self, row: Row) -> str | None:
+        """Fabrics > External module; n/a means blank, as on the other optional settings."""
+        value = self.text(row["External module"])
+        return None if value == "n/a" else value
+
     def name(self, cell: Cell, required: bool = True, lowercase: bool = True) -> str | None:
         """An instance, port, region or wrapper name (lowercase SV identifier)."""
 

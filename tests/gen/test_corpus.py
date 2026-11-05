@@ -71,7 +71,7 @@ ROUTED = [c for c in ALL if not _opaque(c)]
 
 
 def test_only_external_configs_skip_the_route_simulation() -> None:
-    assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric"]
+    assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric", "p3/external_shared"]
 
 
 def _ir_text(text: str) -> str:

@@ -42,7 +42,7 @@ def test_golden_tables() -> None:
     assert {k: len(getattr(s, k)) for k in counts} == counts
     assert s.source == "demo_ss.xlsx"
     assert len(s.sha256) == 64
-    assert s.project["Spec schema version"].value == "0.5"
+    assert s.project["Spec schema version"].value == "0.6"
     assert s.project["Spec schema version"].row == 6
     assert s.wrapper["File header"].value == "header.txt"
     # Locations follow the sheet rows.

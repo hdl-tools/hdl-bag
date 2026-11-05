@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: bridges_pulp_cdc
   revision: p3
@@ -65,6 +65,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_aon
@@ -122,6 +123,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_led
@@ -159,6 +161,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -196,6 +199,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_sys
@@ -233,6 +237,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -647,4 +652,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_pulp_cdc.xlsx
-  sha256: a70993f47934e7744b5206b6be8b13cd1d069b1085337ca759f54f194ee5df1a
+  sha256: e9107ec718bd4c5e0cfe9123ab2cc5d08ed33114097f173368ca245f8420136c

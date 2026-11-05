@@ -93,7 +93,7 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
      ["Resets row 5: Polarity 'low' is not one of active-low, active-high (VALUE-ILLEGAL)"]),
     ("PROJ-SCHEMA-VERSION", [("Project", 6, "Value", "0.2")],
-     ["Project row 6: Spec schema version '0.2' differs from '0.5' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+     ["Project row 6: Spec schema version '0.2' differs from '0.6' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
@@ -158,6 +158,38 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
       "Fabrics row 10: fabric spare_apb has no slave ports in Topology (FAB-EMPTY-SIDE)"]),
     ("FAB-NA-SETTING", [("Fabrics", 7, "Latency mode", "CUT_ALL_AX")],
      ["Fabrics row 7: Latency mode 'CUT_ALL_AX' does not apply outside a crossbar; set n/a (FAB-NA-SETTING)"]),
+    ("EXT-MODULE-NAME", [*EXT, ("Fabrics", 9, "External module", "1bad")],
+     ["Fabrics row 9: External module '1bad' is not a SystemVerilog identifier (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-reserved", [*EXT, ("Fabrics", 9, "External module", "bag_axi_guard")],
+     ["Fabrics row 9: External module 'bag_axi_guard' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-top", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_top")],
+     ["Fabrics row 9: External module 'demo_ss_bus_top' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-keyword", [*EXT, ("Fabrics", 9, "External module", "module")],
+     ["Fabrics row 9: External module 'module' is a SystemVerilog keyword (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-package", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_pkg")],
+     ["Fabrics row 9: External module 'demo_ss_bus_pkg' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-sub-wrapper", [*EXT, ("Fabrics", 9, "External module", "main_wrapper")],
+     ["Fabrics row 9: External module 'main_wrapper' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-harness", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_top_flat")],
+     ["Fabrics row 9: External module 'demo_ss_bus_top_flat' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-interface", [*EXT, ("Fabrics", 9, "External module", "demo_ss_apb4_if")],
+     ["Fabrics row 9: External module 'demo_ss_apb4_if' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-vendored", [*EXT, ("Fabrics", 9, "External module", "axi_xbar")],
+     ["Fabrics row 9: External module 'axi_xbar' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-default", [*EXT, ("Fabrics", 7, "Backing template", "bag_external"),
+                                 ("Fabrics", 9, "External module", "demo_ss_periph_apb")],
+     ["Fabrics row 9: External module 'demo_ss_periph_apb' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-case", [*EXT, ("Fabrics", 7, "Backing template", "bag_external"),
+                              ("Fabrics", 7, "External module", "My_Ip"), ("Fabrics", 9, "External module", "my_ip")],
+     ["Fabrics row 9: External module 'my_ip' differs from 'My_Ip' only in case, so their files clash on some systems (EXT-MODULE-NAME)"]),
+    ("USERPORT-NAME-position", [*EXT, ("Fabrics", 9, "External module", "mine"),
+                                *_user(5, "aon_apb", "s0_apb4_psel", "input", 1, "tie-0")],
+     ["User_Ports row 5: s0_apb4_psel is a bus or clock port BAG already connects on aon_apb (USERPORT-NAME)"]),
+    ("FAB-NA-SETTING-external", [("Fabrics", 5, "External module", "mine")],
+     ["Fabrics row 5: External module 'mine' does not apply to bag_axi_xbar; set n/a (FAB-NA-SETTING)"]),
+    ("EXT-MODULE-SHARED", [*EXT, ("Fabrics", 8, "Backing template", "bag_external"),
+                           ("Fabrics", 9, "External module", "one"), ("Fabrics", 8, "External module", "one")],
+     ["Fabrics row 9: aon_apb and ahb_bus share module one but differ in protocol, widths, attachments or user ports (EXT-MODULE-SHARED)"]),
     ("BRIDGE-FIFO-IGNORED", [("Bridges", 7, "FIFO depth", 2)],
      ["Bridges row 7: bag_ahb2axi handles one transfer at a time and ignores FIFO depth 2 (BRIDGE-FIFO-IGNORED)"]),
     ("FAB-ID-GROWTH", [("Masters", 5, "ID width (bits)", 16)],
@@ -339,6 +371,25 @@ def test_blank_template_reports_missing_settings(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("case", "edits", "expected"), CASES, ids=[c[0] for c in CASES])
 def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected: list[str]) -> None:
     assert _messages(tmp_path, edits) == expected
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        # n/a means blank, as on the other columns that may not apply.
+        [("Fabrics", 5, "External module", "n/a")],
+        [*EXT, ("Fabrics", 9, "External module", "n/a")],
+        # With position names, the name a blank External module would reserve is free.
+        [
+            *EXT,
+            ("Fabrics", 9, "External module", "mine"),
+            *_user(5, "aon_apb", "aon_apb_br_ahb2aon_apb4_psel", "input", 1, "tie-0"),
+        ],
+    ],
+    ids=["na-not-external", "na-external", "old-name-free"],
+)
+def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
+    assert _messages(tmp_path, edits) == []
 
 
 def test_every_rule_has_a_broken_workbook() -> None:

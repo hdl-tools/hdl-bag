@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_narrow_apb
   revision: p3
@@ -54,6 +54,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_a16
@@ -91,6 +92,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_a8
@@ -128,6 +130,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_c8
@@ -165,6 +168,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_l16
@@ -202,6 +206,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_l8
@@ -239,6 +244,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_lite
@@ -286,6 +292,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_lite64
@@ -323,6 +330,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -908,4 +916,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_narrow_apb.xlsx
-  sha256: c6742b2253619ba1ae1bc57cdaf7913f0c4a6cd56f79e0e2da2b2a0f886ad202
+  sha256: d2eecf50ec1f5b29265f18b03645b4aaed5331df813fae0af4fb29c20c70a4d9
