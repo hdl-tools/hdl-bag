@@ -8,6 +8,7 @@ the reference model and the bus models live in this package and need the ``sim``
 Importing this module does not import cocotb.
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -15,11 +16,16 @@ from typing import Any
 from hdl_bag import __version__
 from hdl_bag.gen.render import header
 from hdl_bag.ir.model import Spec
+from hdl_bag.naming import flat_signal_name
+from hdl_bag.protocols import PROTO_TOKEN, Protocol
 from hdl_bag.tests_gen.route_model import (
+    blocking_path,
     burst_path,
     burst_shapes,
     contention,
     crossbar_path,
+    exokay_paths,
+    forced_resp_paths,
     midpoint_path,
     narrow_apb_path,
     plain_word,
@@ -72,6 +78,12 @@ TESTS: tuple[GeneratedTest, ...] = (
         f.protocol == "AHB-Lite" and contention(s, f, secure_too=True) for f in s.fabrics)),
     GeneratedTest("concurrent_traffic_keeps_every_masters_data", 50, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+    GeneratedTest("traffic_survives_back_pressure_on_every_channel", 500, lambda s: any(
+        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+    GeneratedTest("shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not", 100, lambda s: any(
+        blocking_path(s, f) for f in s.fabrics)),
+    GeneratedTest("slave_decerr_returns_as_the_model_says", 200, lambda s: bool(forced_resp_paths(s))),
+    GeneratedTest("exclusive_accesses_carry_lock_and_exokay_unchanged", 100, lambda s: bool(exokay_paths(s))),
     GeneratedTest("axi_arbitration_rounds_starvation_and_lock", 200, lambda s: any(
         f.protocol in _AXI and contention(s, f) for f in s.fabrics)),
     GeneratedTest("axi_shared_bus_midpoint_buffers_reads", 50, lambda s: any(
@@ -87,6 +99,47 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
         x.protocol in _AXI for x in s.masters) or any(x.protocol in _AXI for x in s.slaves)),
 )  # fmt: skip
+
+
+# The test the READY shim runs (D38): all masters at once, under back-pressure.
+SHIM_TEST = "traffic_survives_back_pressure_on_every_channel"
+
+
+def ready_shim_module(top: str) -> str:
+    return f"{top}_ready_shim"
+
+
+def render_ready_shim(spec: Spec, top: str, top_text: str, user_header: str | None) -> str | None:
+    """A module with the ports of the flat top TOP, whose every AXI READY into the design is
+    driven combinationally from that channel's VALID (D38). A design that holds a VALID until it
+    sees READY then has a combinational loop, which does not settle in simulation. The models
+    drive the ports as usual and never see a difference. None if the design has no AXI port, or
+    its test does not apply."""
+    if SHIM_TEST not in applicable_tests(spec):
+        return None
+    pairs = []
+    for name, protocol, channels in (
+        *((m.name, m.protocol, ("b", "r")) for m in spec.masters),
+        *((s.name, s.protocol, ("aw", "w", "ar")) for s in spec.slaves),
+    ):
+        if protocol not in _AXI:
+            continue
+        prefix = next((p.prefix for p in spec.wrapper.ports if p.port == name), None)
+        token = PROTO_TOKEN[Protocol(protocol)]
+        for ch in channels:
+            signal = [flat_signal_name(spec.wrapper.signal_pattern, name, token, f"{ch}{x}", prefix)
+                      for x in ("valid", "ready")]  # fmt: skip
+            pairs.append((signal[0], signal[1]))
+    if not pairs:
+        return None
+    match = re.search(rf"^module {re.escape(top)} \((.*?)^\);", top_text, re.M | re.S)
+    assert match, top
+    conns = ",\n".join(f"      .{ready}({valid} & {ready})" for valid, ready in pairs)
+    return (
+        header(spec, user_header)
+        + f"\nmodule {ready_shim_module(top)} ({match[1]});\n\n"
+        + f"  {top} i_dut (\n      .*,\n{conns}\n  );\n\nendmodule\n"
+    )
 
 
 def applicable_tests(spec: Spec) -> list[str]:

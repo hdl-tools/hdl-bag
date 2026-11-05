@@ -26,7 +26,7 @@ from typing import Any
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
-from cocotbext.axi import AxiBurstType
+from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
 from hdl_bag.ir import Spec, load
@@ -47,6 +47,7 @@ from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
     FIXED,
     INCR,
+    blocking_path,
     burst_addresses,
     burst_bytes,
     burst_path,
@@ -59,6 +60,8 @@ from hdl_bag.tests_gen.route_model import (
     contention,
     crossbar_path,
     error_words,
+    exokay_paths,
+    forced_resp_paths,
     midpoint_path,
     narrow_apb_path,
     plain_word,
@@ -278,21 +281,26 @@ def _to_lite(m: Any) -> bool:
     return bool(m.protocol == "AXI4" and fabric.protocol == "AXI4-Lite")
 
 
-def _expected_resp(m: Any, exp: Any, write: bool) -> int | None:
-    """The exact AXI response an AXI master must get (None for other masters). An error from
-    beyond a bridge into AHB or APB is SLVERR (those protocols have one error response);
-    PULP axi_to_axi_lite (AXI4 onto AXI4-Lite) reports every write error as SLVERR."""
+def _expected_resp(m: Any, exp: Any, write: bool, slave_code: int | None = None) -> int | None:
+    """The exact AXI response an AXI master must get (None for other masters), if the slave
+    answers as the model says or, given SLAVE_CODE, with that. An error from beyond a bridge
+    into AHB or APB is SLVERR (those protocols have one error response); PULP axi_to_axi_lite
+    (AXI4 onto AXI4-Lite) reports every write error as SLVERR."""
     if m.protocol not in AXI:
         return None
     if exp.slave is None:
         code = 0 if exp.masked else AXI_RESP[exp.miss]
+    elif slave_code is not None:
+        code = slave_code
     else:
         code = 2 if exp.slave_error else 0
     protocols = {f.name: f.protocol for f in SPEC.fabrics}
     bridges = {b.name: b for b in SPEC.bridges}
     if any(protocols[bridges[b].downstream] not in AXI for b in exp.bridges):
         return 2 if code else 0
-    through_lite = _to_lite(m) or bool(exp.bridges)
+    slave_pc = any(a.port == exp.slave and a.type == "pc" and a.params["from"] == "AXI4"
+                   for a in SPEC.adapters)  # fmt: skip
+    through_lite = _to_lite(m) or bool(exp.bridges) or slave_pc
     return 2 if code and write and through_lite else code
 
 
@@ -453,10 +461,10 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     assert checked > 0
 
 
-async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
+async def _traffic(masters: dict[str, Any]) -> tuple[int, int]:
     """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
-    rotates IDs): every write lands and every read returns that master's own data."""
-    masters, _, _ = await _bring_up(dut)
+    rotates IDs): every write lands and every read returns that master's own data. Returns the
+    words checked and the masters that took part."""
 
     async def traffic(m: Any, words: list[int]) -> int:
         data = {a: random.getrandbits(32) for a in words}
@@ -487,7 +495,141 @@ async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
     await Combine(*tasks)
     total = sum(t.result() for t in tasks)
     assert total > 0
-    dut._log.info("concurrent traffic: %d words over %d masters", total, len(tasks))
+    return total, len(tasks)
+
+
+async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
+    """Every master's own words, all at once (_traffic)."""
+    masters, _, _ = await _bring_up(dut)
+    total, count = await _traffic(masters)
+    dut._log.info("concurrent traffic: %d words over %d masters", total, count)
+
+
+async def _bursts(masters: dict[str, Any]) -> int:
+    """Every AXI4 master at once: an 8-beat INCR burst of its own words, written and read back.
+    Returns the bursts checked."""
+
+    async def one(m: Any, word: int) -> None:
+        data = bytes(random.getrandbits(8) for _ in range(32))
+        assert await masters[m.name].burst_write(word, data) == 0, f"{m.name} burst write"
+        r = await masters[m.name].burst_read(word, 32)
+        assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst read"
+
+    plans = [
+        (m, private_words(SPEC, m, i, 8))
+        for i, m in enumerate(SPEC.masters)
+        if m.protocol == "AXI4"
+    ]
+    tasks = [cocotb.start_soon(one(m, words[0])) for m, words in plans if words]
+    if tasks:
+        await Combine(*tasks)
+    return len(tasks)
+
+
+async def traffic_survives_back_pressure_on_every_channel(dut: Any) -> None:
+    """All masters at once under random gaps, single beats and then bursts: on AXI, every channel
+    of every port, at the slaves only, then the masters only, then both; AHB-Lite and APB slaves
+    wait longer with the slaves' gaps. (The AHB-Lite and APB master models add no gaps of their
+    own.) A design that loses a beat or a response under stalls returns wrong data or times out."""
+    masters, slaves, _ = await _bring_up(dut)
+    seed = 1
+    for at_slaves, at_masters in ((True, False), (False, True), (True, True)):
+        for ports, on in ((slaves.values(), at_slaves), (masters.values(), at_masters)):
+            for port in ports:
+                seed += 1
+                if hasattr(port, "pause"):
+                    port.pause(seed) if on else port.resume()
+                elif hasattr(port, "max_wait"):
+                    port.max_wait = 4 if on else 1
+        total, count = await _traffic(masters)
+        bursts = await _bursts(masters)
+        dut._log.info("back-pressure at slaves=%s masters=%s: %d words over %d masters, %d bursts",
+                      at_slaves, at_masters, total, count, bursts)  # fmt: skip
+
+
+async def shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not(dut: Any) -> None:
+    """Master A's read waits at slave X, stalled; master B then reads slave Y. On a shared bus
+    A's request holds the head of the one path to the slaves, so B must wait for X (the cost of
+    the topology, not a bug); on a crossbar B must finish while X is stalled. Then X opens and
+    both complete, with the right data."""
+    masters, slaves, clocks = await _bring_up(dut)
+    checked = 0
+    for f in SPEC.fabrics:
+        found = blocking_path(SPEC, f)
+        if found is None:
+            continue
+        a, x, word_a, (b, y, word_b) = found
+        data_a, data_b = random.getrandbits(32), random.getrandbits(32)
+        assert await masters[a.name].write(word_a, data_a) == 0
+        assert await masters[b.name].write(word_b, data_b) == 0
+        slaves[x.name].stall(True)
+        read_a = cocotb.start_soon(masters[a.name].read(word_a))
+        await ClockCycles(clocks[f.domain], 40)
+        n = len(slaves[y.name].log)
+        read_b = cocotb.start_soon(masters[b.name].read(word_b))
+        await ClockCycles(clocks[f.domain], 200)
+        where = f"{f.name}: {b.name} -> {y.name} with {a.name} -> {x.name} stalled"
+        assert not read_a.done(), f"{f.name}: {a.name} finished through a stalled {x.name}"
+        if f.topology == "shared-bus":
+            assert not read_b.done() and len(slaves[y.name].log) == n, f"{where}: it did not wait"
+        else:
+            assert read_b.done(), f"{where}: blocked on a crossbar"
+        slaves[x.name].stall(False)
+        await Combine(read_a, read_b)
+        assert read_a.result().data == data_a, f"{f.name}: {a.name} read"
+        assert read_b.result().data == data_b, f"{f.name}: {b.name} read"
+        checked += 1
+    assert checked > 0
+    dut._log.info("head-of-line: %d fabrics", checked)
+
+
+async def slave_decerr_returns_as_the_model_says(dut: Any) -> None:
+    """Every master to every AXI slave it reaches: the slave answers DECERR, which only the
+    fabric normally does. An AXI master gets the code the path leaves it (_expected_resp);
+    AHB-Lite and APB masters get their one error. Afterwards the same word works again."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = 0
+    for m, s, word in forced_resp_paths(SPEC):
+        prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+        sl = slaves[s.name]
+        for write in (True, False):
+            exp = route(SPEC, m.name, word, write, False, {})
+            where = f"{m.name} -> {s.name} {'W' if write else 'R'}"
+            sl.forced_resp = 3
+            err, _, resp = await _access(masters[m.name], m.protocol, m.data_width, word, write,
+                                         0x1234_5678, False, prot)  # fmt: skip
+            sl.forced_resp = None
+            want = _expected_resp(m, exp, write, slave_code=3)
+            assert err, f"{where}: no error"
+            assert want is None or resp == want, f"{where}: response {resp}, expected {want}"
+            err, _, _ = await _access(masters[m.name], m.protocol, m.data_width, word, write,
+                                      0x1234_5678, False, prot)  # fmt: skip
+            assert not err, f"{where}: an error after it cleared"
+            checked += 1
+    assert checked > 0
+    dut._log.info("Forced DECERR: %d checks", checked)
+
+
+async def exclusive_accesses_carry_lock_and_exokay_unchanged(dut: Any) -> None:
+    """AXI4 master to AXI4 slave with no converter between: AxLOCK reaches the slave, and its
+    EXOKAY reaches the master. BAG does not implement exclusives; it must only not disturb them."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = 0
+    for m, s, word in exokay_paths(SPEC):
+        drv, sl = masters[m.name], slaves[s.name]
+        where = f"{m.name} -> {s.name}"
+        extra = {"lock": AxiLockType.EXCLUSIVE, "size": 2, "prot": drv._prot(0)}
+        n = len(sl.log)
+        sl.forced_resp = 1
+        wrote = await drv.master.write(word, bytes(4), **extra)
+        got = await drv.master.read(word, 4, **extra)
+        sl.forced_resp = None
+        assert [e.lock for e in sl.log[n:]] == [1, 1], f"{where}: AxLOCK {sl.log[n:]}"
+        assert int(wrote.resp) == 1, f"{where}: write response {int(wrote.resp)}"
+        assert int(got.resp) == 1, f"{where}: read response {int(got.resp)}"
+        checked += 1
+    assert checked > 0
+    dut._log.info("Exclusive: %d paths", checked)
 
 
 # --------------------------------------------------------------------------- AXI fabrics

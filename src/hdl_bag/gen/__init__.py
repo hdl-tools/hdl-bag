@@ -17,6 +17,7 @@ Output layout (relative to the output directory)::
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
     tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
     tests/<project>.ir.yaml    the IR those tests read
+    tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
     bag_outputs.json           every file written (with sha256), the top and the file list
 """
 
@@ -149,11 +150,15 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     opaque = any((m := registry.get(t)) and m.opaque for t in used)
     tests = None
     if spec.project.outputs.tests and not opaque:
-        from hdl_bag.tests_gen import render_tests
+        from hdl_bag.tests_gen import ready_shim_module, render_ready_shim, render_tests
 
         tests = f"tests/{spec.project.name}_tests.py"
         _write(outdir, tests, render_tests(spec, user_header), written)
         _write(outdir, f"tests/{spec.project.name}.ir.yaml", dumps(spec), written)
+        top_text = (outdir / f"rtl/{lint_top}.sv").read_text(encoding="utf-8")
+        shim = render_ready_shim(spec, lint_top, top_text, user_header)
+        if shim is not None:
+            _write(outdir, f"tests/{ready_shim_module(lint_top)}.sv", shim, written)
     _manifest(outdir, written, lint_top, filelist, tests)
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests)
 

@@ -131,9 +131,9 @@ def lint_command(outdir: Path) -> None:
     _report(lint(sources(out), out.top, outdir, incdirs=include_dirs(out)))
 
 
-def _sim(out: Outputs, test_filter: str | None = None) -> None:
+def _sim(out: Outputs, test_filter: str | None = None, ready_shim: bool = False) -> None:
     try:
-        _report(run_tests(out, test_filter=test_filter))
+        _report(run_tests(out, test_filter=test_filter, ready_shim=ready_shim))
     except (SimUnavailable, ValueError, RuntimeError) as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
@@ -142,9 +142,11 @@ def _sim(out: Outputs, test_filter: str | None = None) -> None:
 @main.command(name="sim")
 @click.argument("outdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--filter", "test_filter", help="Run only the tests this regex finds.")
-def sim_command(outdir: Path, test_filter: str | None) -> None:
+@click.option("--ready-shim", is_flag=True,
+              help="Run traffic with each AXI READY driven from its VALID.")  # fmt: skip
+def sim_command(outdir: Path, test_filter: str | None, ready_shim: bool) -> None:
     """Run a generated OUTDIR's cocotb tests; exit 1 on any failure. Needs hdl-bag[sim]."""
-    _sim(load_outputs(outdir), test_filter)
+    _sim(load_outputs(outdir), test_filter, ready_shim)
 
 
 @main.command()

@@ -233,6 +233,22 @@ def test_route_simulation(config: str, part: str, test_filter: str | None, maste
     assert report.ok, report.format()
 
 
+# Each needs its own C++ build, so a representative set: every AXI fabric topology, the in-house
+# and PULP bridges, adapters, and the largest config.
+READY_SHIM = ["p3/axi_shared_rr", "p3/axil_xbar_rules", "p3/axi_adapters", "p3/bridges_inhouse",
+              "p3/bridges_pulp", "golden/demo_ss"]  # fmt: skip
+
+
+@pytest.mark.eda
+@pytest.mark.parametrize("config", READY_SHIM)
+def test_ready_driven_from_valid_settles_and_carries_traffic(config: str) -> None:
+    """D38. A VALID that waits for READY would be a combinational loop through the shim."""
+    configs, name = _split(config)
+    out = generate(_spec(config), REPO / "out" / "corpus" / f"{name}_shim", configs)
+    report = run_tests(out, ready_shim=True)
+    assert report.ok, report.format()
+
+
 @pytest.mark.parametrize("config", ALL)
 def test_probes_exercise_every_protection_rule(config: str) -> None:
     """Each Access_Rule (of a master port) and each RO / WO / secure-only region is hit by a
