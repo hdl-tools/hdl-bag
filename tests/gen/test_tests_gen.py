@@ -16,7 +16,8 @@ from hdl_bag.cli import main
 from hdl_bag.flows import Report, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import load
-from hdl_bag.tests_gen import TESTS, applicable_tests, ready_shim_module
+from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
+from hdl_bag.tests_gen.route_model import blocking_path
 
 TESTS_DIR = Path(__file__).parents[1]
 DEMO = TESTS_DIR / "golden" / "demo_ss.ir.yaml"
@@ -254,3 +255,33 @@ def test_a_design_with_no_axi_port_gets_no_ready_shim(tmp_path: Path) -> None:
     assert not (tmp_path / "tests" / f"{ready_shim_module(out.top)}.sv").exists()
     result = CliRunner().invoke(main, ["sim", str(tmp_path), "--ready-shim"])
     assert result.exit_code == 1 and "no READY shim" in result.output
+
+
+def test_the_ready_shim_refuses_a_filter(tmp_path: Path) -> None:
+    assert CliRunner().invoke(main, ["generate", str(DEMO), "-o", str(tmp_path)]).exit_code == 0
+    result = CliRunner().invoke(main, ["sim", str(tmp_path), "--ready-shim", "--filter", "x"])
+    assert result.exit_code == 1 and "does not take a filter" in result.output
+
+
+def test_every_ready_shim_config_has_its_test() -> None:
+    shim_configs = (
+        "axi_shared_rr",
+        "axil_xbar_rules",
+        "axi_adapters",
+        "bridges_inhouse",
+        "bridges_pulp",
+    )
+    for config in shim_configs:
+        assert SHIM_TEST in applicable_tests(
+            load(TESTS_DIR / "configs" / "p3" / f"{config}.ir.yaml")
+        )
+    assert SHIM_TEST in applicable_tests(load(DEMO))
+
+
+def test_head_of_line_runs_on_both_topologies() -> None:
+    """The test applies only where a path exists, so a config edit could drop one side of it."""
+    seen = set()
+    for config in sorted((TESTS_DIR / "configs" / "p3").glob("*.ir.yaml")):
+        spec = load(config)
+        seen |= {f.topology for f in spec.fabrics if blocking_path(spec, f)}
+    assert seen == {"crossbar", "shared-bus"}

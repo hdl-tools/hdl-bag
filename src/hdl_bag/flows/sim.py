@@ -130,10 +130,12 @@ def run_tests(
     root = out.root.resolve()
     files, top, build = [root / f for f in sources(out)], out.top, root / "sim"
     if ready_shim:
+        if test_filter:
+            raise ValueError("--ready-shim runs its own test, so it does not take a filter")
         top = ready_shim_module(out.top)
         shim = root / "tests" / f"{top}.sv"
         if not shim.is_file():
-            raise ValueError(f"{out.root}: no READY shim (the design has no AXI port)")
+            raise ValueError(f"{out.root}: no READY shim (no AXI port, or no traffic to run)")
         files, build, test_filter = [*files, shim], root / "sim_ready_shim", SHIM_TEST
     return simulate(
         files, top, root / out.tests, build,

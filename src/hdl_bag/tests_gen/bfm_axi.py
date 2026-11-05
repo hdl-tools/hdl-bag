@@ -234,6 +234,13 @@ class AxiPortMaster:
         for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
             ch.set_pause_generator(gen())
 
+    def resume(self) -> None:
+        """No more gaps from pause()."""
+        w, r = self.master.write_if, self.master.read_if
+        for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
+            ch.set_pause_generator(None)
+            ch.pause = False
+
     def _prot(self, prot: int) -> AxiProt:
         return AxiProt(prot) if self.has_prot else AxiProt.NONSECURE
 
@@ -358,6 +365,13 @@ class AxiPortSlave:
         w, r = self.slave.write_if, self.slave.read_if
         for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
             ch.set_pause_generator(gen())
+
+    def resume(self) -> None:
+        """No more gaps from pause()."""
+        w, r = self.slave.write_if, self.slave.read_if
+        for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
+            ch.set_pause_generator(None)
+            ch.pause = False
 
     @property
     def written(self) -> list[tuple[int, int]]:

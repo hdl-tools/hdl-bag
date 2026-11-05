@@ -505,25 +505,46 @@ async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
     dut._log.info("concurrent traffic: %d words over %d masters", total, count)
 
 
+async def _bursts(masters: dict[str, Any]) -> int:
+    """Every AXI4 master at once: an 8-beat INCR burst of its own words, written and read back.
+    Returns the bursts checked."""
+
+    async def one(m: Any, word: int) -> None:
+        data = bytes(random.getrandbits(8) for _ in range(32))
+        assert await masters[m.name].burst_write(word, data) == 0, f"{m.name} burst write"
+        r = await masters[m.name].burst_read(word, 32)
+        assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst read"
+
+    plans = [
+        (m, private_words(SPEC, m, i, 8))
+        for i, m in enumerate(SPEC.masters)
+        if m.protocol == "AXI4"
+    ]
+    tasks = [cocotb.start_soon(one(m, words[0])) for m, words in plans if words]
+    if tasks:
+        await Combine(*tasks)
+    return len(tasks)
+
+
 async def traffic_survives_back_pressure_on_every_channel(dut: Any) -> None:
-    """All masters at once under random gaps: on AXI, every channel of every port, first at the
-    slaves, then the masters, then both; AHB-Lite and APB slaves wait longer. A design that loses
-    a beat or a response under stalls returns wrong data or times out."""
+    """All masters at once under random gaps, single beats and then bursts: on AXI, every channel
+    of every port, at the slaves only, then the masters only, then both; AHB-Lite and APB slaves
+    wait longer with the slaves' gaps. (The AHB-Lite and APB master models add no gaps of their
+    own.) A design that loses a beat or a response under stalls returns wrong data or times out."""
     masters, slaves, _ = await _bring_up(dut)
     seed = 1
     for at_slaves, at_masters in ((True, False), (False, True), (True, True)):
-        for port in (
-            *(slaves.values() if at_slaves else ()),
-            *(masters.values() if at_masters else ()),
-        ):
-            seed += 1
-            if hasattr(port, "pause"):
-                port.pause(seed)
-            elif hasattr(port, "max_wait"):
-                port.max_wait = 4
+        for ports, on in ((slaves.values(), at_slaves), (masters.values(), at_masters)):
+            for port in ports:
+                seed += 1
+                if hasattr(port, "pause"):
+                    port.pause(seed) if on else port.resume()
+                elif hasattr(port, "max_wait"):
+                    port.max_wait = 4 if on else 1
         total, count = await _traffic(masters)
-        dut._log.info("back-pressure at slaves=%s masters=%s: %d words over %d masters",
-                      at_slaves, at_masters, total, count)  # fmt: skip
+        bursts = await _bursts(masters)
+        dut._log.info("back-pressure at slaves=%s masters=%s: %d words over %d masters, %d bursts",
+                      at_slaves, at_masters, total, count, bursts)  # fmt: skip
 
 
 async def shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not(dut: Any) -> None:

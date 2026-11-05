@@ -113,7 +113,10 @@ def render_ready_shim(spec: Spec, top: str, top_text: str, user_header: str | No
     """A module with the ports of the flat top TOP, whose every AXI READY into the design is
     driven combinationally from that channel's VALID (D38). A design that holds a VALID until it
     sees READY then has a combinational loop, which does not settle in simulation. The models
-    drive the ports as usual and never see a difference. None if the design has no AXI port."""
+    drive the ports as usual and never see a difference. None if the design has no AXI port, or
+    its test does not apply."""
+    if SHIM_TEST not in applicable_tests(spec):
+        return None
     pairs = []
     for name, protocol, channels in (
         *((m.name, m.protocol, ("b", "r")) for m in spec.masters),
