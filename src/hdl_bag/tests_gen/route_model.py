@@ -276,6 +276,18 @@ def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
 FIXED, INCR, WRAP = 0, 1, 2
 
 
+def burst_path(spec: Spec, m: Any, index: int) -> tuple[list[int], int | None]:
+    """What the plain burst test sends for AXI4 master M, INDEX in spec.masters: 4 words it can
+    write and read back (or none), and a probe address that misses on M's own fabric (or None)."""
+    if m.protocol != "AXI4":
+        return [], None
+    miss = next((a for a in probes(spec) if a + 16 < 1 << m.addr_width and all(
+        route(spec, m.name, a + 4 * k, w, False, {}).slave is None
+        and not route(spec, m.name, a + 4 * k, w, False, {}).bridges
+        for k in range(4) for w in (True, False))), None)  # fmt: skip
+    return private_words(spec, m, index, 4), miss
+
+
 def burst_addresses(addr: int, size: int, beats: int, burst: int) -> list[int]:
     """The address of each beat of an AXI burst (AMBA AXI A3.4.1), first beat as given."""
     step = 1 << size
@@ -317,23 +329,20 @@ def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> b
     def by_width(wide: int, narrow: int) -> bool:
         return burst == WRAP or (burst == FIXED and beats > 1 and wide > narrow)
 
-    def adapters(port: str) -> bool | None:
-        """True: refused here. False: single transfers from here. None: still bursts."""
-        for a in spec.adapters:
-            if (
-                a.port == port
-                and a.type == "dw"
-                and by_width(int(a.params["from"]), int(a.params["to"]))
-            ):
+    def adapters(port: str, towards_port: bool) -> bool | None:
+        """Walk PORT's adapters in the direction of travel. True: refused here. False: single
+        transfers from here. None: still bursts."""
+        chain = sorted((a for a in spec.adapters if a.port == port), key=lambda a: a.chain_index)
+        for a in reversed(chain) if towards_port else chain:
+            if a.type == "dw" and by_width(int(a.params["from"]), int(a.params["to"])):
                 return True
-        for a in spec.adapters:
-            if a.port == port and a.type == "pc" and a.params["from"] == "AXI4":
+            if a.type == "pc" and a.params["from"] == "AXI4":
                 return burst == WRAP
         return None
 
     if burst == INCR:
         return False
-    here = adapters(m.name)
+    here = adapters(m.name, towards_port=False)
     if here is not None:
         return here
     fabrics = {f.name: f for f in spec.fabrics}
@@ -341,18 +350,25 @@ def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> b
     fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
     if fabric.protocol != "AXI4":
         return False
-    for name in exp.bridges:
-        b = bridges[name]
+    if exp.bridges:  # every bridge from AXI4 ends the bursts, so only the first matters
+        b = bridges[exp.bridges[0]]
         up, down = fabric.data_width, fabrics[b.downstream].data_width
         if b.template in ("bag_axi2axil", "bag_axi2apb"):
             return by_width(up, down)
-        if b.template == "bag_axi2ahb":
-            return up != down and by_width(up, down)
-        fabric = fabrics[b.downstream]
-        if fabric.protocol != "AXI4":
-            return False
+        assert b.template == "bag_axi2ahb", b.template
+        return up != down and by_width(up, down)
     assert exp.slave is not None
-    return adapters(exp.slave) is True
+    return adapters(exp.slave, towards_port=True) is True
+
+
+def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
+    """Bytes in the widest bus between M and its target: M's fabric, each bridge's downstream
+    fabric, and the slave."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
+    return max(max(widths) // 8, exp.word_bytes)
 
 
 def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, int]]:

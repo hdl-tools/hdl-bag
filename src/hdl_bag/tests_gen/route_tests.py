@@ -45,8 +45,11 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
+    FIXED,
+    INCR,
     burst_addresses,
     burst_bytes,
+    burst_path,
     burst_refused,
     burst_shapes,
     check_burst_write,
@@ -65,6 +68,7 @@ from hdl_bag.tests_gen.route_model import (
     pstrb_path,
     route,
     takes_partial_writes,
+    widest_on_path,
 )
 
 SPEC: Spec
@@ -300,10 +304,9 @@ def _read_beats(log: list[Any], word: int) -> list[int]:
         if e.write:
             continue
         length, size = getattr(e, "length", 0), getattr(e, "size", None)
-        assert length == 0 or e.burst == 1, f"read at {e.addr:#x}: only INCR is modelled: {e}"
         step = word if size is None else 1 << size
-        first = e.addr // step * step
-        beats += [max(e.addr, first + n * step) for n in range(length + 1)]
+        burst = getattr(e, "burst", INCR)
+        beats += burst_addresses(e.addr, step.bit_length() - 1, length + 1, burst)
     return beats
 
 
@@ -656,19 +659,13 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
     masters, _, _ = await _bring_up(dut)
     checked = 0
     for i, m in enumerate(SPEC.masters):
-        if m.protocol != "AXI4":
-            continue
-        words = private_words(SPEC, m, i, 4)
+        words, miss = burst_path(SPEC, m, i)
         if words:
             data = bytes(random.getrandbits(8) for _ in range(16))
             assert await masters[m.name].burst_write(words[0], data) == 0
             r = await masters[m.name].burst_read(words[0], 16)
             assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst"
             checked += 1
-        miss = next((a for a in probes(SPEC) if a + 16 < 1 << m.addr_width and all(
-            route(SPEC, m.name, a + 4 * k, w, False, {}).slave is None
-            and not route(SPEC, m.name, a + 4 * k, w, False, {}).bridges
-            for k in range(4) for w in (True, False))), None)  # fmt: skip
         if miss is not None:
             exp = route(SPEC, m.name, miss, True, False, {})
             want_w, want_r = _expected_resp(m, exp, True), _expected_resp(m, exp, False)
@@ -867,6 +864,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                 stored = {n: len(x.written) for n, x in slaves.items()}
                 extra = {"burst": AxiBurstType(burst), "size": size, "prot": drv._prot(0)}
                 wrote = await drv.master.write(addr, data, **extra)
+                logged = len(slaves[s.name].log)
                 got = await drv.master.read(addr, beats << size, **extra)
                 new = {n: x.written[stored[n] :] for n, x in slaves.items()}
                 if burst_refused(SPEC, m, exp, burst, beats):
@@ -883,6 +881,20 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                 assert not any(v for n, v in new.items() if n != s.name), (
                     f"{where}: stored elsewhere: {new}"
                 )
+                touched = _read_beats(slaves[s.name].log[logged:], exp.word_bytes)
+                need = {
+                    (a + offset + k) // exp.word_bytes
+                    for a in burst_addresses(addr, size, beats, burst)
+                    for k in range(1 << size)
+                }
+                seen = {a // exp.word_bytes for a in touched}
+                assert need <= seen, f"{where}: read words {sorted(seen)}, needs {sorted(need)}"
+                # A beat narrower than a bus on the way can repeat a read: split into single
+                # transfers, each narrow beat reads that bus's whole word.
+                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp):
+                    assert len(set(touched)) == len(touched), (
+                        f"{where}: read an address twice: {touched}"
+                    )
                 # What the beats leave: a FIXED burst's last beat wins.
                 last = dict(want)
                 step = 1 << size
@@ -894,6 +906,9 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                     f"{where}: read {bytes(got.data).hex()}, expected {read.hex()}"
                 )
                 checked += 1
+    assert checked + refused == sum(
+        len(burst_shapes(SPEC, m, x)) for m in SPEC.masters for x in SPEC.slaves
+    )
     assert checked + refused > 0
     dut._log.info("Burst shapes: %d passed through, %d refused", checked, refused)
 

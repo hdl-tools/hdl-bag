@@ -16,6 +16,7 @@ from hdl_bag import __version__
 from hdl_bag.gen.render import header
 from hdl_bag.ir.model import Spec
 from hdl_bag.tests_gen.route_model import (
+    burst_path,
     burst_shapes,
     contention,
     crossbar_path,
@@ -51,6 +52,14 @@ class GeneratedTest:
     applies: Callable[[Spec], bool]
 
 
+def _plain_bursts(spec: Spec) -> bool:
+    for i, m in enumerate(spec.masters):
+        words, miss = burst_path(spec, m, i)
+        if words or miss is not None:
+            return True
+    return False
+
+
 def _any_pair(spec: Spec, path: Callable[[Spec, Any, Any], Any]) -> bool:
     return any(path(spec, m, s) for m in spec.masters for s in spec.slaves)
 
@@ -67,8 +76,7 @@ TESTS: tuple[GeneratedTest, ...] = (
         f.protocol in _AXI and contention(s, f) for f in s.fabrics)),
     GeneratedTest("axi_shared_bus_midpoint_buffers_reads", 50, lambda s: any(
         midpoint_path(s, f) for f in s.fabrics)),
-    GeneratedTest("axi4_bursts_reach_slaves_and_error_paths", 50, lambda s: any(
-        m.protocol == "AXI4" for m in s.masters)),
+    GeneratedTest("axi4_bursts_reach_slaves_and_error_paths", 50, _plain_bursts),
     GeneratedTest("axi4_crossbars_admit_max_mst_trans_per_id", 50, lambda s: any(
         crossbar_path(s, f, m) for f in s.fabrics for m in s.masters)),
     GeneratedTest("narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", 200, lambda s: _any_pair(s, narrow_apb_path)),
@@ -77,7 +85,7 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("axi4_burst_shapes_match_the_model", 3000, lambda s: _any_pair(s, burst_shapes)),
     GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _any_pair(s, pstrb_path)),
     GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
-        x.protocol in _AXI for x in (*s.masters, *s.slaves))),  # type: ignore[attr-defined]
+        x.protocol in _AXI for x in s.masters) or any(x.protocol in _AXI for x in s.slaves)),
 )  # fmt: skip
 
 

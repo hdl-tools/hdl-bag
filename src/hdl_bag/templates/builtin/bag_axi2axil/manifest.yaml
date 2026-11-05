@@ -3,7 +3,7 @@
 name: bag_axi2axil
 kind: bridge
 api_version: 1
-description: 'AXI4 to AXI4-Lite from PULP blocks: inside the bridge (D10) axi_dw_converter (on AXI4, D33), axi_to_axi_lite, axi_fifo (FIFO depth), axi_cdc and the pass-through-N offset. PULP limits: WRAP bursts, non-modifiable bursts of 2 to 16 beats, non-modifiable accesses wider than the downstream bus, and (when the bridge narrows) multi-beat FIXED bursts get SLVERR; write errors return as SLVERR; USER, AxCACHE, QoS, REGION and LOCK are not carried.'
+description: 'AXI4 to AXI4-Lite from PULP blocks: inside the bridge (D10) axi_dw_converter (on AXI4, D33), axi_to_axi_lite, axi_fifo (FIFO depth), axi_cdc and the pass-through-N offset. PULP limits: WRAP bursts, non-modifiable multi-beat FIXED bursts and INCR bursts of 2 to 17 beats, non-modifiable accesses wider than the downstream bus, and (when the bridge narrows) multi-beat FIXED bursts get SLVERR; write errors return as SLVERR; USER, AxCACHE, QoS, REGION and LOCK are not carried.'
 upstream:
   - AXI4
 downstream:

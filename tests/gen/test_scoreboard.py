@@ -14,11 +14,14 @@ from hdl_bag.tests_gen.route_model import (
     Outcome,
     burst_addresses,
     burst_bytes,
+    burst_refused,
+    burst_shapes,
     check_burst_write,
     check_read,
     check_split_write_error,
     check_write,
     probes,
+    route,
 )
 
 TESTS = Path(__file__).parents[1]
@@ -148,3 +151,48 @@ def test_a_fixed_burst_writes_the_same_bytes_again() -> None:
         check_burst_write("w", want, [(0x40, 2)])  # a beat lost
     with pytest.raises(AssertionError):
         check_burst_write("w", want, [(0x40, 1), (0x41, 2)])  # it moved on
+
+
+def _refusal(config: str, master: str, slave: str, burst: int) -> bool:
+    spec = load(TESTS / "configs" / "p3" / f"{config}.ir.yaml")
+    m = next(x for x in spec.masters if x.name == master)
+    s = next(x for x in spec.slaves if x.name == slave)
+    addr = next(a for _, a, b, _, _ in burst_shapes(spec, m, s) if b == burst)
+    beats = next(n for _, _, b, _, n in burst_shapes(spec, m, s) if b == burst)
+    return burst_refused(spec, m, route(spec, m.name, addr, True, False, {}), burst, beats)
+
+
+@pytest.mark.parametrize(
+    ("slave", "fixed", "wrap", "why"),
+    [
+        ("ram", False, False, "AXI4 slave at the fabric's width: no converter"),
+        ("s_a8", True, True, "bag_axi2apb narrows 32 to 8"),
+        ("s_a16", True, True, "bag_axi2apb narrows 32 to 16"),
+        ("s_l8", False, True, "bag_axi2axil at equal widths: splits FIXED, cannot split WRAP"),
+        ("s_c8", False, True, "bag_axi2axil widens 32 to 64: FIXED passes the upsizer"),
+    ],
+)
+def test_which_bursts_a_path_refuses(slave: str, fixed: bool, wrap: bool, why: str) -> None:
+    assert _refusal("mixed_narrow_apb", "cpu", slave, FIXED) is fixed, why
+    assert _refusal("mixed_narrow_apb", "cpu", slave, WRAP) is wrap, why
+
+
+def test_the_corpus_exercises_every_burst_shape_both_ways() -> None:
+    """A config edit or a stricter burst_shapes cannot silently drop a kind of burst, or leave
+    WRAP and FIXED tested only as refused, or only as passing."""
+    seen: set[tuple[str, bool]] = set()
+    for config in CONFIGS:
+        spec = load(config)
+        for m in spec.masters:
+            for s in spec.slaves:
+                shapes = burst_shapes(spec, m, s)
+                if m.protocol == "AXI4" and shapes:
+                    assert "incr" in {x[0] for x in shapes}, (config.stem, m.name, s.name)
+                for name, addr, burst, _, beats in shapes:
+                    exp = route(spec, m.name, addr, True, False, {})
+                    seen.add((name, burst_refused(spec, m, exp, burst, beats)))
+    assert seen == {
+        ("incr", False), ("incr-long", False), ("4k-edge", False),
+        ("narrow-1", False), ("narrow-2", False), ("narrow-4", False),
+        ("fixed", False), ("fixed", True), ("wrap", False), ("wrap", True),
+    }  # fmt: skip
