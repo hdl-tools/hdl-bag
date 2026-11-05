@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axil_shared_one
   revision: p3
@@ -45,6 +45,7 @@ fabrics:
       slice: none
     template: bag_axil_shared_bus
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: m0
@@ -153,4 +154,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_shared_one.xlsx
-  sha256: e67eb73dc28442248482c4935deb80b6bb8227a733a1ebd211d6775e1d39b896
+  sha256: e13c2206c2a89c5b6489393b68a5015547f3ac9f5c2a15ce5b75651dabd8d24a

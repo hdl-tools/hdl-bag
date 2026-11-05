@@ -483,6 +483,35 @@ def external_fabric() -> Cfg:
     return c
 
 
+def external_shared() -> Cfg:
+    """External module (D45): two same-shape user APB4 fabrics share module shared_apb, each
+    behind a bag_ahb2apb bridge, and a user AXI4 crossbar has its own module my_noc. All with
+    bus ports named by position."""
+    c = Cfg("external_shared", phase=3)
+    c.domain("D_SYS", "clk_sys", "rst_sys_n")
+    c.fabric("sys", "AHB-Lite", 32, 32, "D_SYS", "round-robin")
+    c.fabric("noc", "AXI4", 32, 32, "D_SYS", "round-robin", latency="NO_LATENCY",
+             max_trans=(4, 4), template="bag_external", external_module="my_noc")  # fmt: skip
+    c.master("mcu", "AHB-Lite", 32, 32, "D_SYS").master("cpu", "AXI4", 32, 32, "D_SYS", id_width=2)
+    c.slave("ram", "AXI4", 32, 32, "D_SYS")
+    c.link("cpu", "noc", 0).link("noc", "ram", 0).link("mcu", "sys", 0)
+    c.region("ram", "mem", 0x8000_0000, MB)
+    c.decode("cpu", "DECERR").decode("mcu", "HRESP_ERROR")
+    c.option("cpu", **AXI4_NA).option("ram", **AXI4_NA).option("mcu", **AHB_MASTER_NA)
+    for k, name in enumerate(("a", "b")):
+        base = 0x5000_0000 + k * 0x10_0000
+        c.fabric(f"per_{name}", "APB4", 32, 16, "D_SYS", template="bag_external",
+                 external_module="shared_apb")  # fmt: skip
+        c.slave(f"uart_{name}", "APB4", 32, 12, "D_SYS")
+        c.bridge(f"br_{name}", base, pass_through=False, template="bag_ahb2apb")
+        c.link("sys", f"br_{name}", k).link(f"br_{name}", f"per_{name}", 0)
+        c.link(f"per_{name}", f"uart_{name}", 0)
+        c.region(f"br_{name}", "win", base, 64 * KB).region(f"uart_{name}", "regs", base, 4 * KB)
+        c.decode(f"br_{name}", "PSLVERR")
+        c.option(f"br_{name}", **APB4_NA).option(f"uart_{name}", **APB4_NA)
+    return c
+
+
 def nested_adapters() -> Cfg:
     """Nested sub-wrappers with adapters placed in them (closes the Phase 2 "nested config
     with adapters" deviation): a crossbar two levels down; a master's cdc one level up from
@@ -778,7 +807,7 @@ BUILT: dict[str, Callable[[], Cfg]] = {
     for f in (axi_xbar_rules, axil_xbar_rules, axi_xbar_pow2, axi_shared_fixed, axi_shared_rr,
               axi_shared_one, axil_shared_rr, axil_shared_fixed, axil_shared_one, axi_adapters,
               axil_adapters, bridges_pulp, bridges_pulp_cdc, bridges_inhouse,
-              bridges_inhouse_cdc, external_fabric, nested_adapters, mixed_shared_chain,
+              bridges_inhouse_cdc, external_fabric, external_shared, nested_adapters, mixed_shared_chain,
               mixed_lite_shared, mixed_ahb_secure, mixed_apb_masters, mixed_cdc_chain,
               mixed_adapters_bridges, mixed_wide_to_narrow, mixed_narrow_apb)
 }  # fmt: skip

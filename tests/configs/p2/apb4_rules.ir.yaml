@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: apb4_rules
   revision: p2
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -288,4 +289,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_rules.xlsx
-  sha256: 8a2cb2c7f5d1e414abadcea4af2a10855b592f8c717e7d3bbf56b010bee56741
+  sha256: 131555e92aab537ab8eb192284bed319a2fb9441871a361b31292b1896e7099f

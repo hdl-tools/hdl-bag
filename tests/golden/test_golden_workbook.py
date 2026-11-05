@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""The committed golden workbook: recalculated demo_ss sample (schema 0.5).
+"""The committed golden workbook: recalculated demo_ss sample (schema 0.6).
 
 Refresh it after a schema change from the ``golden-demo_ss`` CI artifact (see the
 ``golden`` job in .github/workflows/pr.yml).

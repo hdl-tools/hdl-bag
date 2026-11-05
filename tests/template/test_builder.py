@@ -67,13 +67,16 @@ def test_blank_has_sample_structure_without_data(sample: Workbook, blank: Workbo
 def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
     """True if a cell difference is part of the approved delta: schema 0.2 -> 0.3, then
     0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column), then 0.4 -> 0.5
-    (notes, and br_ahb2main's FIFO depth, which its bridge ignores)."""
+    (notes, and br_ahb2main's FIFO depth, which its bridge ignores), then 0.5 -> 0.6 (D45: the
+    External module column, last on Fabrics)."""
     if isinstance(old, str) and isinstance(new, str):
         renamed = old.replace("BusGen", "BAG").replace("busgen_", "bag_")
         if renamed == new:
             return True
     if (sheet, coord) == ("Project", "B6"):
-        return (old, new) == ("0.2", "0.5")
+        return (old, new) == ("0.2", "0.6")
+    if sheet == "Fabrics" and coord[0] == "U" and old is None:
+        return True
     if (sheet, coord, old, new) == ("Bridges", "G7", 2, 0):
         return True
     if isinstance(new, str) and (sheet, coord) in {("Fabrics", "I4"), ("Fabrics", "J4")}:
@@ -107,7 +110,7 @@ def test_port_matches_reference_except_schema_delta(sample: Workbook) -> None:
             if a[key] == b[key]:
                 continue
             if (
-                name == "Lists"
+                name in ("Lists", "Fabrics")
                 and key == "widths"
                 and all(  # 0.4: one more list column
                     b[key].get(k) == v for k, v in a[key].items()

@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: multi
   revision: p2
@@ -65,6 +65,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -132,6 +133,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: aux
@@ -173,6 +175,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_n
@@ -210,6 +213,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_y
@@ -584,4 +588,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: multi.xlsx
-  sha256: 730e53a143af90a94e8d68a2d9898c5aeecfcce85e19508ff81aa2be1a6b7441
+  sha256: 23a0e98bf2039aaa5ec2b35ac2942fa60df2a0c86a830af27720ee0b6f537824

@@ -3,6 +3,7 @@
 """Hierarchy (sub-wrappers, placement), Wrapper (exposed ports, name collisions) and
 User_Ports (extra ports of user-supplied fabrics, D41)."""
 
+import re
 from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
@@ -15,6 +16,7 @@ from hdl_bag.protocols import (
     Protocol,
     port_signals,
 )
+from hdl_bag.reader.model import Row
 from hdl_bag.reader.values import parse_connection
 
 if TYPE_CHECKING:
@@ -311,3 +313,59 @@ def check_user_ports(ctx: Context) -> None:
                            f"{owner}")  # fmt: skip
             else:
                 ctx.top_names[top] = f"User_Ports {row.where}"
+
+
+def check_external_modules(ctx: Context) -> None:
+    """Fabrics > External module (D45): a legal name, free of what BAG generates, on a
+    user-supplied fabric; fabrics that name one module must have the same shape."""
+    top = (
+        ctx.text(ctx.raw.wrapper["Top module name"])
+        if "Top module name" in ctx.raw.wrapper
+        else None
+    )
+    package = (
+        ctx.text(ctx.raw.wrapper["Package name"]) if "Package name" in ctx.raw.wrapper else None
+    )
+    generated = {top, package, *(ctx.text(r["Sub-wrapper"]) for r in ctx.raw.sub_wrappers)}
+    shapes: dict[str, tuple[Row, tuple[object, ...]]] = {}
+    for row in ctx.raw.fabrics:
+        cell = row["External module"]
+        module = ctx.text(cell)
+        name = ctx.text(row["Fabric"])
+        if module is None or name is None:
+            continue
+        template = ctx.text(row["Backing template"])
+        manifest = ctx.registry.get(template) if template else None
+        if manifest is None or not manifest.opaque:
+            ctx.report("FAB-NA-SETTING", cell,
+                       f"External module {module!r} does not apply to {template}; leave it blank")  # fmt: skip
+            continue
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module):
+            ctx.report(
+                "EXT-MODULE-NAME",
+                cell,
+                f"External module {module!r} is not a SystemVerilog identifier",
+            )
+            continue
+        if module in generated or module.startswith("bag_"):
+            ctx.report(
+                "EXT-MODULE-NAME",
+                cell,
+                f"External module {module!r} clashes with a module BAG generates",
+            )
+            continue
+        users = sorted((ctx.text(u["Port"]), ctx.text(u["Direction"]), str(u["Width (bits)"].value))
+                       for u in ctx.raw.user_ports if ctx.text(u["Instance"]) == name)  # fmt: skip
+        shape = (
+            ctx.text(row["Protocol"]), row["Data width (bits)"].value, row["Addr width (bits)"].value,
+            sum(f == name for f in ctx.master_fabric.values()),
+            sum(f == name for f in ctx.slave_fabric.values()),
+            users,
+        )  # fmt: skip
+        if module not in shapes:
+            shapes[module] = (row, shape)
+        elif shapes[module][1] != shape:
+            first = ctx.text(shapes[module][0]["Fabric"])
+            ctx.report("EXT-MODULE-SHARED", cell,
+                       f"{name} and {first} share module {module} but differ in protocol, widths, "
+                       "attachments or user ports")  # fmt: skip

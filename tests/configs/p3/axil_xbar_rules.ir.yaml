@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axil_xbar_rules
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: dma
@@ -332,4 +333,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_xbar_rules.xlsx
-  sha256: 41136a9ce515782b58a5dd9743cd8a896acc3ecdcd3a018cc196ba9ddad2507a
+  sha256: 5d391fc712b95fc1c33d8bb9377054b2cc4221a6e9620970af500ea8cd29d2e2

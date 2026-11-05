@@ -268,6 +268,7 @@ def _fabric(
         midpoint=midpoint,
         template=_req(ctx.text(r["Backing template"])),
         backing_ip=ctx.text(r["Backing IP"]),
+        external_module=ctx.text(r["External module"]),
         master_ports=tuple(
             ir.PortRef(
                 index=lk.index or 0,

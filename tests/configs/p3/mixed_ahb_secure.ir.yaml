@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_ahb_secure
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: mcu
@@ -97,6 +98,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -394,4 +396,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_ahb_secure.xlsx
-  sha256: c94afc2cd7e7f3e61f09bf838f78102466728c0fa6012c7fe1d97fa60c815728
+  sha256: 4b4c1b273e0fd4def89518fbbd6fdba19a148e8fe217bf323cdc087a604c3c55

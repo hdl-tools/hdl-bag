@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axi_adapters
   revision: p3
@@ -65,6 +65,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -605,4 +606,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_adapters.xlsx
-  sha256: 2b8fdff5482dc36e351c490d8ae921a55c7d2b6c8e8ba91d4e041eb3474c2c85
+  sha256: 4a1a248e3f4b5053f77f42a508c053e9e805bdfb4af005d36652fe21954eb595

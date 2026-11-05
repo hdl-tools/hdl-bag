@@ -53,7 +53,7 @@ def to_spec_data(spec: ir.Spec) -> SpecData:
         data.fabrics.append([
             f.name, f.protocol, f.topology, f.data_width, f.addr_width, f.domain, f.arbitration,
             _na(f.latency_mode), _na(f.max_mst_trans), _na(f.max_slv_trans), f.template, f.backing_ip,
-            mid.fifo_depth if mid else "n/a", mid.slice if mid else "n/a", None,
+            mid.fifo_depth if mid else "n/a", mid.slice if mid else "n/a", None, f.external_module,
         ])  # fmt: skip
         for mp in f.master_ports:
             data.topology.append([mp.port, f.name, mp.index, mp.priority, None])

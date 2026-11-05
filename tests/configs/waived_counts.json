@@ -223,6 +223,14 @@
   "count": 114,
   "which": "95922903e9bf2075"
  },
+ "p3/external_shared-flat": {
+  "count": 164,
+  "which": "65f9b7c8472121ed"
+ },
+ "p3/external_shared-sv-interface": {
+  "count": 164,
+  "which": "65f9b7c8472121ed"
+ },
  "p3/mixed_adapters_bridges-flat": {
   "count": 38,
   "which": "09c55d6871f60eed"

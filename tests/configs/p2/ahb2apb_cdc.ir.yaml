@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: ahb2apb_cdc
   revision: p2
@@ -54,6 +54,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -101,6 +102,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br
@@ -326,4 +328,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb2apb_cdc.xlsx
-  sha256: f4e7d89d796c6f1e0354173829c8f44dbe9d0387bd67ea9cb53819a6c707717e
+  sha256: c4511eec4efbff5341e15b6ea348a41af1b98e97822ff243416e55a37a37c54e

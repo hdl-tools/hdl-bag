@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: axi_xbar_pow2
   revision: p3
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: a
@@ -306,4 +307,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_xbar_pow2.xlsx
-  sha256: 2904e6833ed99035727f26af609d801b354b168ede90771bf86785388d8c56a9
+  sha256: 36a93f88fff4f29ba814c1707a2156ecb88ab27fbe59bf39e86a9b9f6f3a4fcb

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""IR models (schema 0.5). The YAML dump of ``Spec`` is the canonical spec.
+"""IR models (schema 0.6). The YAML dump of ``Spec`` is the canonical spec.
 
 Field order is the dump order. Every list is sorted by resolve, so equal specs give
 byte-identical files. Addresses and sizes are ints here and hex text in YAML.
@@ -131,6 +131,7 @@ class Fabric(_M):
     midpoint: Midpoint | None
     template: str
     backing_ip: str | None
+    external_module: str | None  # bag_external: the user's module, with ports named by position
     master_ports: tuple[PortRef, ...]
     slave_ports: tuple[PortRef, ...]
     id_width: IdWidth | None

@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_wide_to_narrow
   revision: p3
@@ -54,6 +54,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb
@@ -101,6 +102,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -138,6 +140,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -415,4 +418,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_wide_to_narrow.xlsx
-  sha256: 25e883ab6188bd76dd5aced1d46879729854b7863d1b319bd430b483dd434bd4
+  sha256: b034b4e92f2d1e6f79095722a59df662816089f4cd261e00ce083bf3383da3e6

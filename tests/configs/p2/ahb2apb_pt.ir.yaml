@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: demo_ss
   revision: r4
@@ -43,6 +43,7 @@ fabrics:
     midpoint: null
     template: bag_ahb_lite_bus
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: mcu0
@@ -90,6 +91,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_ahb2aon

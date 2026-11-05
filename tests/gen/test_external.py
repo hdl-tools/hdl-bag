@@ -17,6 +17,7 @@ from simrun import REPO, run_cocotb
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.external import opaque_module, opaque_ports
 from hdl_bag.gen.netlist import Instance, build_netlist
+from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import Spec, load
 
 CONFIG = REPO / "tests" / "configs" / "p3" / "external_fabric.ir.yaml"
@@ -135,3 +136,42 @@ def test_wiring_with_user_fabrics() -> None:
     run_cocotb(files, out.top, HERE / "cocotb_external.py", "external_user",
                env={"BAG_IR": str(CONFIG)},
                incdirs=[root / d for d in include_dirs(out)])  # fmt: skip
+
+
+SHARED = REPO / "tests" / "configs" / "p3" / "external_shared.ir.yaml"
+
+
+def test_external_module_names_the_module_and_ports_by_position() -> None:
+    spec = load(SHARED)
+    by_name = {i.name: i for i in _opaque(spec)}
+    noc = by_name["noc"]
+    assert noc.fabric is not None and opaque_module(spec, noc.fabric) == "my_noc"
+    ports = {p.name: p for p in opaque_ports(spec, noc)}
+    assert ports["s0_axi_awvalid"].direction == "input" and ports["s0_axi_awvalid"].port == "cpu"
+    assert ports["m0_axi_awvalid"].direction == "output" and ports["m0_axi_awvalid"].port == "ram"
+
+
+def test_blank_keeps_the_fabric_and_port_names() -> None:
+    spec = load(CONFIG)
+    noc = next(i for i in _opaque(spec) if i.name == "noc")
+    assert noc.fabric is not None and opaque_module(spec, noc.fabric) == "external_fabric_noc"
+    assert all(p.name.startswith("noc_") for p in opaque_ports(spec, noc))
+
+
+def test_fabrics_sharing_a_module_get_one_stub(tmp_path: Path) -> None:
+    out = generate(load(SHARED), tmp_path, SHARED.parent)
+    stubs = sorted(f for f in out.files if f.startswith("rtl/ext/"))
+    assert stubs == ["rtl/ext/my_noc.sv", "rtl/ext/shared_apb.sv"]
+    assert [f.as_posix() for f in sources(out)].count("rtl/ext/shared_apb.sv") == 1
+    top = "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "rtl").glob("*.sv"))
+    assert len(re.findall(r"^\s*shared_apb \w+ \(", top, re.M)) == 2
+
+
+def test_fabrics_sharing_a_module_with_different_ports_do_not_generate(tmp_path: Path) -> None:
+    """What bag check cannot see, such as an address width only the netlist settles."""
+    spec = load(SHARED)
+    wider = [
+        f.model_copy(update={"addr_width": 20}) if f.name == "per_b" else f for f in spec.fabrics
+    ]
+    with pytest.raises(GenerateError, match="share a module"):
+        generate(spec.model_copy(update={"fabrics": tuple(wider)}), tmp_path, SHARED.parent)

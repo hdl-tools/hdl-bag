@@ -1,4 +1,4 @@
-schema: '0.5'
+schema: '0.6'
 project:
   name: mixed_cdc_chain
   revision: p3
@@ -76,6 +76,7 @@ fabrics:
     midpoint: null
     template: bag_axil_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: br_lite
@@ -123,6 +124,7 @@ fabrics:
     midpoint: null
     template: bag_apb_mux
     backing_ip: in-house template
+    external_module: null
     master_ports:
       - index: 0
         port: br_per
@@ -160,6 +162,7 @@ fabrics:
     midpoint: null
     template: bag_axi_xbar
     backing_ip: PULP
+    external_module: null
     master_ports:
       - index: 0
         port: cpu
@@ -478,4 +481,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_cdc_chain.xlsx
-  sha256: 2692c595f200886145834c725127673d115ae9063d47bed59320e7c967f06e25
+  sha256: c68c65606c2aa7bd474422da1f18e292a715016555146b6792ad59b8feff2247

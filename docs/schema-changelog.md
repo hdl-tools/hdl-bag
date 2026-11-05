@@ -2,6 +2,15 @@
 
 The workbook's sheets, column order, dropdown lists and spare-row formulas are the schema. `bag check` refuses a workbook whose Project > Spec schema version differs from the release's.
 
+## 0.6 (2026-11-05, hdl-bag 0.0.x)
+
+Changes from 0.5, approved by the owner (D45):
+
+- **New column Fabrics > External module** (optional, the last column, so no other column moves). On a `bag_external` fabric it names the user's module, and bus ports are then named by position: `s<k>_` for the fabric's k-th master attachment and `m<k>_` for its k-th slave attachment. Fabrics of the same shape can share a module. Blank keeps `<project>_<fabric>` and `<fabric>_<port>_`.
+- **New errors:** EXT-MODULE-NAME and EXT-MODULE-SHARED. On any other fabric the column gives FAB-NA-SETTING.
+- **IR:** new field `external_module` on each fabric.
+- No other sheet, column or dropdown-list changes. A 0.5 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.6 and add the column header.
+
 ## 0.5 (2026-11-03, hdl-bag 0.0.x)
 
 Changes from 0.4, approved by the owner (known gap 1 of the Phase 3 report):

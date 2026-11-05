@@ -244,7 +244,7 @@ def _sample() -> "SpecData":
         wrapper={**WRAPPER_DEFAULTS, **WRAPPER},
         clocks=[list(r) for r in CLOCKS],
         resets=[list(r) for r in RESETS],
-        fabrics=[list(r) for r in FABRICS],
+        fabrics=[[*r, None] for r in FABRICS],  # External module: none in the sample
         masters=[list(r) for r in MASTERS],
         slaves=[list(r) for r in SLAVES],
         bridges=[list(r) for r in BRIDGES],
