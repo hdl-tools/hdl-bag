@@ -3,7 +3,7 @@
 name: bag_axi2apb
 kind: bridge
 api_version: 1
-description: 'AXI4/AXI4-Lite to APB4/APB3 from PULP blocks: inside the bridge (D10) width conversion (axi_dw_converter on AXI4 before axi_to_axi_lite, D33; axi_lite_dw_converter for an AXI4-Lite upstream, except onto an 8-bit APB, which it cannot reach: there the template uses the AXI4 ports with single-beat defaults), axi_fifo (FIFO depth), axi_cdc, the pass-through-N offset and axi_lite_to_apb. One APB transfer at a time; PSLVERR returns as SLVERR. PULP limits: WRAP bursts, non-modifiable bursts of 2 to 16 beats, non-modifiable accesses wider than the downstream bus, and (when the widths differ) multi-beat FIXED bursts get SLVERR; USER, AxCACHE, QoS, REGION and LOCK are not carried. APB3 has no PSTRB, so a partial write reaches an APB3 slave as a full-word write.'
+description: 'AXI4/AXI4-Lite to APB4/APB3 from PULP blocks: inside the bridge (D10) width conversion (axi_dw_converter on AXI4 before axi_to_axi_lite, D33; axi_lite_dw_converter for an AXI4-Lite upstream, except onto an 8-bit APB, which it cannot reach: there the template uses the AXI4 ports with single-beat defaults), axi_fifo (FIFO depth), axi_cdc, the pass-through-N offset and axi_lite_to_apb. One APB transfer at a time; PSLVERR returns as SLVERR. PULP limits: WRAP bursts, non-modifiable multi-beat FIXED bursts and INCR bursts of 2 to 17 beats, non-modifiable accesses wider than the downstream bus, and (when the bridge narrows) multi-beat FIXED bursts get SLVERR; USER, AxCACHE, QoS, REGION and LOCK are not carried. APB3 has no PSTRB, so a partial write reaches an APB3 slave as a full-word write.'
 upstream:
   - AXI4
   - AXI4-Lite

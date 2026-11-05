@@ -165,6 +165,254 @@ def error_words(spec: Spec, slave: str) -> set[int]:
             for r in spec.memory_map if r.slave == slave}  # fmt: skip
 
 
+# ------------------------------------------------------------------- what each test can check
+# Each returns what its test would work on, so a test applies exactly when this finds something.
+
+
+def reach(spec: Spec, region: Any, ports: list[Any]) -> list[Any]:
+    """The PORTS that can address REGION (16 bytes per port) and write it directly."""
+    widths = {m.name: m.addr_width for m in spec.masters}
+    return [p for p in ports if region.base + 16 * len(ports) < 1 << widths[p.port]
+            and route(spec, p.port, region.base, True, False, {}).slave == region.slave
+            and not route(spec, p.port, region.base, True, False, {}).bridges]  # fmt: skip
+
+
+def _master_ports(spec: Spec, fabric: Any) -> list[Any]:
+    names = {m.name for m in spec.masters}
+    return [p for p in sorted(fabric.master_ports, key=lambda p: p.index) if p.port in names]
+
+
+def contention(spec: Spec, fabric: Any, secure_too: bool = False) -> tuple[Any, list[Any]] | None:
+    """A slave region on FABRIC that several masters write directly, and those masters (by
+    Port index)."""
+    ports = _master_ports(spec, fabric)
+    regions = [
+        r for r in spec.memory_map if r.fabric == fabric.name and (secure_too or not r.secure)
+    ]
+    if len(ports) < 2 or not regions:
+        return None
+    region = max(regions, key=lambda r: len(reach(spec, r, ports)))
+    ports = reach(spec, region, ports)
+    return (region, ports) if len(ports) >= 2 else None
+
+
+def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False) -> list[int]:
+    """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
+    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge)."""
+    axi_slaves = {s.name for s in spec.slaves if s.protocol in ("AXI4", "AXI4-Lite")}
+    for r in sorted(spec.memory_map, key=lambda r: r.base):
+        words = [r.base + 0x100 * index + 4 * k for k in range(count)]
+        if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
+            continue
+        ok = True
+        for a in words:
+            wr = route(spec, m.name, a, True, False, {})
+            rd = route(spec, m.name, a, False, False, {})
+            # Both reach one slave word without error (a denied write that a default slave
+            # takes would not read back).
+            ok &= wr.slave is not None and not wr.slave_error and not wr.masked
+            ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
+            if direct:
+                ok &= not wr.bridges and wr.slave in axi_slaves
+        if ok:
+            return words
+    return []
+
+
+def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
+    """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
+    of an AXI slave right behind the mid-point, and how many reads the mid-point holds."""
+    if f.protocol not in ("AXI4", "AXI4-Lite") or f.topology != "shared-bus" or f.midpoint is None:
+        return None
+    stages = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}[f.midpoint.slice]
+    buffered = f.midpoint.fifo_depth + 2 * stages
+    names = {p.port for p in f.master_ports}
+    ms = [x for x in spec.masters if x.name in names]
+    if not ms:
+        return None
+    m = max(ms, key=lambda x: x.id_width or 0)
+    words = private_words(spec, m, 0, buffered + 4, direct=True)
+    return (m, words, buffered) if words else None
+
+
+def crossbar_path(spec: Spec, f: Any, m: Any) -> tuple[list[int], Outcome] | None:
+    """Words of an AXI4 slave on crossbar F that master M reaches with no adapter between."""
+    adapted = {a.port for a in spec.adapters}
+    if f.template != "bag_axi_xbar" or not f.max_mst_trans:
+        return None
+    ports = {p.port for p in f.master_ports} | {p.port for p in f.slave_ports}
+    if m.name not in ports or m.name in adapted or not m.id_width:
+        return None
+    words = private_words(spec, m, 0, f.max_mst_trans + 2, direct=True)
+    exp = route(spec, m.name, words[0], False, False, {}) if words else None
+    if exp is None or exp.slave not in ports or exp.slave in adapted:
+        return None
+    return words, exp
+
+
+def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
+    """Word 0x40 of S, if AXI master M reaches this APB slave narrower than 32 bits, cleanly,
+    through a bag_axi2apb."""
+    if (
+        m.protocol not in ("AXI4", "AXI4-Lite")
+        or s.protocol not in ("APB3", "APB4")
+        or s.data_width >= 32
+    ):
+        return None
+    found = plain_word(spec, m, s)
+    axi2apb = {b.name for b in spec.bridges if b.template == "bag_axi2apb"}
+    return found if found and axi2apb & set(found[1].bridges) else None
+
+
+def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
+    """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly."""
+    if m.protocol not in ("AXI4", "AXI4-Lite") or s.protocol != "APB4" or s.data_width != 32:
+        return None
+    return plain_word(spec, m, s)
+
+
+# --------------------------------------------------------------------------------------- bursts
+
+FIXED, INCR, WRAP = 0, 1, 2
+
+
+def burst_path(spec: Spec, m: Any, index: int) -> tuple[list[int], int | None]:
+    """What the plain burst test sends for AXI4 master M, INDEX in spec.masters: 4 words it can
+    write and read back (or none), and a probe address that misses on M's own fabric (or None)."""
+    if m.protocol != "AXI4":
+        return [], None
+    miss = next((a for a in probes(spec) if a + 16 < 1 << m.addr_width and all(
+        route(spec, m.name, a + 4 * k, w, False, {}).slave is None
+        and not route(spec, m.name, a + 4 * k, w, False, {}).bridges
+        for k in range(4) for w in (True, False))), None)  # fmt: skip
+    return private_words(spec, m, index, 4), miss
+
+
+def burst_addresses(addr: int, size: int, beats: int, burst: int) -> list[int]:
+    """The address of each beat of an AXI burst (AMBA AXI A3.4.1), first beat as given."""
+    step = 1 << size
+    aligned = addr // step * step
+    if burst == FIXED:
+        return [addr] * beats
+    if burst == INCR:
+        return [addr, *(aligned + n * step for n in range(1, beats))]
+    assert burst == WRAP and addr == aligned and beats in (2, 4, 8, 16), (addr, size, beats)
+    span = step * beats
+    block = addr // span * span
+    return [block + (addr - block + n * step) % span for n in range(beats)]
+
+
+def burst_bytes(addr: int, size: int, beats: int, burst: int, data: bytes) -> list[tuple[int, int]]:
+    """(address, value) of every byte a burst of aligned beats writes, in order."""
+    step = 1 << size
+    assert len(data) == step * beats and addr % step == 0, (addr, size, beats, len(data))
+    out = []
+    for n, a in enumerate(burst_addresses(addr, size, beats, burst)):
+        out += [(a + k, data[n * step + k]) for k in range(step)]
+    return out
+
+
+def check_burst_write(
+    where: str, want: list[tuple[int, int]], written: list[tuple[int, int]]
+) -> None:
+    """Exactly these bytes stored, as many times as written: a FIXED burst repeats addresses."""
+    assert sorted(written) == sorted(want), (
+        f"{where}: stored {_bytes(written)}, wrote {_bytes(want)}"
+    )
+
+
+def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> bool:
+    """Whether a converter on the way answers this AXI4 burst with SLVERR (D34; the manifests
+    of bag_dw, bag_pc and the bridges). Once a path has become single transfers (AXI4-Lite,
+    AHB-Lite, APB), what follows only ever sees those."""
+
+    def by_width(wide: int, narrow: int) -> bool:
+        return burst == WRAP or (burst == FIXED and beats > 1 and wide > narrow)
+
+    def adapters(port: str, towards_port: bool) -> bool | None:
+        """Walk PORT's adapters in the direction of travel. True: refused here. False: single
+        transfers from here. None: still bursts."""
+        chain = sorted((a for a in spec.adapters if a.port == port), key=lambda a: a.chain_index)
+        for a in reversed(chain) if towards_port else chain:
+            if a.type == "dw" and by_width(int(a.params["from"]), int(a.params["to"])):
+                return True
+            if a.type == "pc" and a.params["from"] == "AXI4":
+                return burst == WRAP
+        return None
+
+    if burst == INCR:
+        return False
+    here = adapters(m.name, towards_port=False)
+    if here is not None:
+        return here
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    if fabric.protocol != "AXI4":
+        return False
+    if exp.bridges:  # every bridge from AXI4 ends the bursts, so only the first matters
+        b = bridges[exp.bridges[0]]
+        up, down = fabric.data_width, fabrics[b.downstream].data_width
+        if b.template in ("bag_axi2axil", "bag_axi2apb"):
+            return by_width(up, down)
+        assert b.template == "bag_axi2ahb", b.template
+        return up != down and by_width(up, down)
+    assert exp.slave is not None
+    return adapters(exp.slave, towards_port=True) is True
+
+
+def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
+    """Bytes in the widest bus between M and its target: M's fabric, each bridge's downstream
+    fabric, and the slave."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
+    return max(max(widths) // 8, exp.word_bytes)
+
+
+def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, int]]:
+    """(name, address, burst, size, beats) of the bursts AXI4 master M can send to slave S,
+    each beat reaching S cleanly: full-width INCR, FIXED and WRAP; narrow INCR (where S can take
+    a partial write); and an INCR that ends exactly on a 4 KB boundary. WRAP and FIXED stay full
+    width because cocotbext-axi places lanes as if a burst only increments."""
+    found = plain_word(spec, m, s) if m.protocol == "AXI4" else None
+    if found is None:
+        return []
+    word = found[0]
+    bus = m.data_width // 8
+    full = bus.bit_length() - 1
+    block = word // (4 * bus) * (4 * bus)
+    shapes = [
+        ("incr", word // bus * bus, INCR, full, 4),
+        ("incr-long", word // bus * bus, INCR, full, 8),
+        ("fixed", word // bus * bus, FIXED, full, 2),
+        ("wrap", block + bus, WRAP, full, 4),
+        ("4k-edge", (word | 0xFFF) + 1 - 4 * bus, INCR, full, 4),
+    ]
+    if takes_partial_writes(spec, s):
+        shapes += [(f"narrow-{1 << z}", word, INCR, z, 4) for z in range(full) if z <= 2]
+
+    def clean(addr: int, size: int, beats: int, burst: int) -> bool:
+        last = addr + (beats << size)
+        if addr >> 12 != (last - 1) >> 12 or last > 1 << m.addr_width:
+            return False
+        for a in burst_addresses(addr, size, beats, burst):
+            for write in (True, False):
+                for b in range(a, a + (1 << size), 4):
+                    o = route(spec, m.name, b, write, False, {})
+                    if (
+                        o.slave != s.name
+                        or o.slave_error
+                        or o.masked
+                        or o.bridges != found[1].bridges
+                    ):
+                        return False
+        return True
+
+    return [x for x in shapes if clean(x[1], x[3], x[4], x[2])]
+
+
 def takes_partial_writes(spec: Spec, slave: Any) -> bool:
     """False when a partial write onto SLAVE's word cannot be expressed: an APB slave wider
     than a byte with no PSTRB (APB3, or PSTRB tied)."""

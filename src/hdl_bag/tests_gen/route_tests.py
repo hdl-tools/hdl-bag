@@ -26,6 +26,7 @@ from typing import Any
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
+from cocotbext.axi import AxiBurstType
 
 from hdl_bag import __version__
 from hdl_bag.ir import Spec, load
@@ -44,15 +45,30 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
+    FIXED,
+    INCR,
+    burst_addresses,
+    burst_bytes,
+    burst_path,
+    burst_refused,
+    burst_shapes,
+    check_burst_write,
     check_read,
     check_split_write_error,
     check_write,
+    contention,
+    crossbar_path,
     error_words,
+    midpoint_path,
+    narrow_apb_path,
     plain_word,
+    private_words,
     probes,
     prot_tied,
+    pstrb_path,
     route,
     takes_partial_writes,
+    widest_on_path,
 )
 
 SPEC: Spec
@@ -288,10 +304,9 @@ def _read_beats(log: list[Any], word: int) -> list[int]:
         if e.write:
             continue
         length, size = getattr(e, "length", 0), getattr(e, "size", None)
-        assert length == 0 or e.burst == 1, f"read at {e.addr:#x}: only INCR is modelled: {e}"
         step = word if size is None else 1 << size
-        first = e.addr // step * step
-        beats += [max(e.addr, first + n * step) for n in range(length + 1)]
+        burst = getattr(e, "burst", INCR)
+        beats += burst_addresses(e.addr, step.bit_length() - 1, length + 1, burst)
     return beats
 
 
@@ -411,29 +426,16 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
 
-def _reach(region: Any, ports: list[Any]) -> list[Any]:
-    """The PORTS that can address REGION (16 bytes per port) and write it directly."""
-    widths = {m.name: m.addr_width for m in SPEC.masters}
-    return [p for p in ports if region.base + 16 * len(ports) < 1 << widths[p.port]
-            and route(SPEC, p.port, region.base, True, False, {}).slave == region.slave
-            and not route(SPEC, p.port, region.base, True, False, {}).bridges]  # fmt: skip
-
-
 async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
+    checked = 0
     for f in SPEC.fabrics:
-        ports = [p for p in sorted(f.master_ports, key=lambda p: p.index)
-                 if any(m.name == p.port for m in SPEC.masters)]  # fmt: skip
-        if f.protocol != "AHB-Lite" or len(ports) < 2:
+        # The region the most masters can address and write directly; those masters write it
+        # at a distinct word each.
+        found = contention(SPEC, f, secure_too=True) if f.protocol == "AHB-Lite" else None
+        if found is None:
             continue
-        # The region the most masters can address and write directly; those masters
-        # write it at a distinct word each.
-        regions = [r for r in SPEC.memory_map if r.fabric == f.name]
-        candidates = ports
-        region = max(regions, key=lambda r: len(_reach(r, candidates)))
-        ports = _reach(region, ports)
-        if len(ports) < 2:
-            continue
+        region, ports = found
         width = next(s.addr_width for s in SPEC.slaves if s.name == region.slave)
         addrs = {p.port: region.base + 16 * i for i, p in enumerate(ports)}
         visible = {(a & ((1 << width) - 1)): p for p, a in addrs.items()}
@@ -447,28 +449,8 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
         else:
             assert sorted(order) == sorted(addrs), f"{f.name}: served {order}"
         dut._log.info("%s (%s): served %s", f.name, f.arbitration, order)
-
-
-def _private_words(m: Any, index: int, count: int, direct: bool = False) -> list[int]:
-    """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
-    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge)."""
-    for r in sorted(SPEC.memory_map, key=lambda r: r.base):
-        words = [r.base + 0x100 * index + 4 * k for k in range(count)]
-        if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
-            continue
-        ok = True
-        for a in words:
-            wr = route(SPEC, m.name, a, True, False, {})
-            rd = route(SPEC, m.name, a, False, False, {})
-            # Both reach one slave word without error (a denied write that a default slave
-            # takes would not read back).
-            ok &= wr.slave is not None and not wr.slave_error and not wr.masked
-            ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
-            if direct:
-                ok &= not wr.bridges and wr.slave in _axi_names(SPEC.slaves)
-        if ok:
-            return words
-    return []
+        checked += 1
+    assert checked > 0
 
 
 async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
@@ -500,7 +482,7 @@ async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
             assert not r.err and r.data == d, f"{m.name} {a:#x}: read {r.data:#x}, wrote {d:#x}"
         return len(data)
 
-    plans = {m.name: (m, _private_words(m, i, 8)) for i, m in enumerate(SPEC.masters)}
+    plans = {m.name: (m, private_words(SPEC, m, i, 8)) for i, m in enumerate(SPEC.masters)}
     tasks = [cocotb.start_soon(traffic(m, words)) for m, words in plans.values() if words]
     await Combine(*tasks)
     total = sum(t.result() for t in tasks)
@@ -509,19 +491,6 @@ async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
 
 
 # --------------------------------------------------------------------------- AXI fabrics
-
-
-def _contention(f: Any) -> tuple[Any, list[Any]] | None:
-    """A slave region on AXI fabric F that several masters write directly, and those
-    masters (by Port index)."""
-    ports = [p for p in sorted(f.master_ports, key=lambda p: p.index)
-             if any(m.name == p.port for m in SPEC.masters)]  # fmt: skip
-    regions = [r for r in SPEC.memory_map if r.fabric == f.name and not r.secure]
-    if len(ports) < 2 or not regions:
-        return None
-    region = max(regions, key=lambda r: len(_reach(r, ports)))
-    ports = _reach(region, ports)
-    return (region, ports) if len(ports) >= 2 else None
 
 
 async def _writes(masters: dict[str, Any], jobs: list[tuple[str, int]]) -> None:
@@ -574,7 +543,7 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
     masters, slaves, clocks = await _bring_up(dut)
     tested = 0
     for f in SPEC.fabrics:
-        if f.protocol not in AXI or (found := _contention(f)) is None:
+        if f.protocol not in AXI or (found := contention(SPEC, f)) is None:
             continue
         region, ports = found
         slave = slaves[region.slave]
@@ -642,8 +611,7 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         tested += 1
         dut._log.info("%s (%s): arbitration checked over %s", f.name, f.arbitration,
                       [p.port for p in ports])  # fmt: skip
-    if tested == 0:
-        dut._log.info("no AXI fabric with contention")
+    assert tested > 0
 
 
 async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
@@ -651,18 +619,12 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
     bus's mid-point holds: FIFO depth + 2 per register slice (each cut is a 2-entry spill
     register). AXI4-Lite guards also cap a master at Max mst trans outstanding."""
     masters, slaves, clocks = await _bring_up(dut)
+    checked = 0
     for f in SPEC.fabrics:
-        if f.protocol not in AXI or f.topology != "shared-bus" or f.midpoint is None:
+        found = midpoint_path(SPEC, f)
+        if found is None:
             continue
-        stages = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}[f.midpoint.slice]
-        buffered = f.midpoint.fifo_depth + 2 * stages
-        # The master with the widest ID, so per-ID limits do not bind.
-        names = [p.port for p in f.master_ports if any(m.name == p.port for m in SPEC.masters)]
-        m = max((x for x in SPEC.masters if x.name in names), key=lambda x: x.id_width or 0)
-        # The count is exact only for an AXI slave right behind the mid-point.
-        words = _private_words(m, 0, buffered + 4, direct=True)
-        if not words:
-            continue
+        m, words, buffered = found
         exp = route(SPEC, m.name, words[0], False, False, {})
         assert exp.slave is not None
         expected = buffered
@@ -683,9 +645,11 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
         await Combine(*reads)
         assert accepted == expected, (
             f"{f.name}: {accepted} reads accepted with the slave stalled, expected {expected} "
-            f"(FIFO {f.midpoint.fifo_depth}, {f.midpoint.slice})"
+            f"(mid-point {f.midpoint})"
         )
         dut._log.info("%s: mid-point held %d reads", f.name, accepted)
+        checked += 1
+    assert checked > 0
 
 
 async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
@@ -695,19 +659,13 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
     masters, _, _ = await _bring_up(dut)
     checked = 0
     for i, m in enumerate(SPEC.masters):
-        if m.protocol != "AXI4":
-            continue
-        words = _private_words(m, i, 4)
+        words, miss = burst_path(SPEC, m, i)
         if words:
             data = bytes(random.getrandbits(8) for _ in range(16))
             assert await masters[m.name].burst_write(words[0], data) == 0
             r = await masters[m.name].burst_read(words[0], 16)
             assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst"
             checked += 1
-        miss = next((a for a in probes(SPEC) if a + 16 < 1 << m.addr_width and all(
-            route(SPEC, m.name, a + 4 * k, w, False, {}).slave is None
-            and not route(SPEC, m.name, a + 4 * k, w, False, {}).bridges
-            for k in range(4) for w in (True, False))), None)  # fmt: skip
         if miss is not None:
             exp = route(SPEC, m.name, miss, True, False, {})
             want_w, want_r = _expected_resp(m, exp, True), _expected_resp(m, exp, False)
@@ -718,6 +676,7 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
                 f"{m.name} burst read to {miss:#x}: {r.resp}, expected {want_r}"
             )
             checked += 1
+    assert checked > 0
     dut._log.info("AXI4 bursts: %d checks", checked)
 
 
@@ -725,19 +684,14 @@ async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
     """Every AXI4 crossbar, master and AXI4 slave with no adapter between: with the slave
     taking requests but holding R, reads on one ID reach it until Max mst trans at least."""
     masters, slaves, clocks = await _bring_up(dut)
-    adapted = {a.port for a in SPEC.adapters}
     checked = 0
     for f in SPEC.fabrics:
-        if f.template != "bag_axi_xbar" or not f.max_mst_trans:
-            continue
-        ports = {p.port for p in f.master_ports} | {p.port for p in f.slave_ports}
         for m in SPEC.masters:
-            if m.name not in ports or m.name in adapted or not m.id_width:
+            found = crossbar_path(SPEC, f, m)
+            if found is None:
                 continue
-            words = _private_words(m, 0, f.max_mst_trans + 2, direct=True)
-            exp = route(SPEC, m.name, words[0], False, False, {}) if words else None
-            if exp is None or exp.slave not in ports or exp.slave in adapted:
-                continue
+            words, exp = found
+            assert exp.slave is not None
             drv, slave = masters[m.name], slaves[exp.slave]
             n = len(slave.log)
             # The slave model holds only 5 reads by itself (2 AR, 2 R, 1 in hand): lift that, so
@@ -758,11 +712,12 @@ async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
             read_if.ar_channel.queue_occupancy_limit, read_if.r_channel.queue_occupancy_limit = (
                 limits
             )
-            assert taken >= f.max_mst_trans, (
+            assert f.max_mst_trans is not None and taken >= f.max_mst_trans, (
                 f"{f.name}: {taken} reads on one ID reached {exp.slave}, "
                 f"Max mst trans is {f.max_mst_trans}"
             )
             checked += 1
+    assert checked > 0
     dut._log.info("Crossbar per-ID limits: %d checks", checked)
 
 
@@ -771,25 +726,17 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
     becomes one access per APB word, at the right addresses with the right lanes; a byte
     write touches only its lane; an error on any beat reaches the master."""
     masters, slaves, _ = await _bring_up(dut)
-    axi2apb = {b.name for b in SPEC.bridges if b.template == "bag_axi2apb"}
     checked = 0
     for m in SPEC.masters:
-        if m.protocol not in AXI:
-            continue
         for s in SPEC.slaves:
-            if s.protocol not in ("APB3", "APB4") or s.data_width >= 32:
+            found = narrow_apb_path(SPEC, m, s)
+            if found is None:
                 continue
-            word = next(r for r in SPEC.memory_map if r.slave == s.name).base + 0x40
-            if word >= 1 << m.addr_width:
-                continue
-            outs = [route(SPEC, m.name, word, w, False, {}) for w in (True, False)]
-            if any(o.slave != s.name or o.slave_error or o.masked or not axi2apb & set(o.bridges)
-                   for o in outs):  # fmt: skip
-                continue
+            word, outcome = found
             drv, sl, addr, nbytes = (
                 masters[m.name],
                 slaves[s.name],
-                outs[0].address,
+                outcome.address,
                 s.data_width // 8,
             )
             value, label = 0x4433_2211, f"{m.name} -> {s.name}"
@@ -820,6 +767,7 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
                 sl.err_addrs.clear()
             assert await drv.write(word, value) == 0, f"{label}: after the errors"
             checked += 1
+    assert checked > 0
     dut._log.info("Narrow APB behind bag_axi2apb: %d checks", checked)
 
 
@@ -897,24 +845,85 @@ async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) ->
     dut._log.info("Errors on any beat: %d checks", checked)
 
 
+async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
+    """Every AXI4 master to every slave it reaches: each burst_shapes burst, written then read.
+    If a converter on the way does not take that burst (D34), the master gets SLVERR both ways
+    and nothing is stored. Otherwise the slave stores exactly the bytes of every beat, at the
+    addresses the burst type gives, and the read returns what those beats leave there."""
+    masters, slaves, _ = await _bring_up(dut)
+    checked = refused = 0
+    for m in SPEC.masters:
+        for s in SPEC.slaves:
+            for name, addr, burst, size, beats in burst_shapes(SPEC, m, s):
+                drv = masters[m.name]
+                exp = route(SPEC, m.name, addr, True, False, {})
+                where = f"{m.name} -> {s.name} {name} {addr:#x}"
+                data = bytes(random.getrandbits(8) for _ in range(beats << size))
+                offset = exp.address - addr
+                want = [(a + offset, v) for a, v in burst_bytes(addr, size, beats, burst, data)]
+                stored = {n: len(x.written) for n, x in slaves.items()}
+                extra = {"burst": AxiBurstType(burst), "size": size, "prot": drv._prot(0)}
+                wrote = await drv.master.write(addr, data, **extra)
+                logged = len(slaves[s.name].log)
+                got = await drv.master.read(addr, beats << size, **extra)
+                new = {n: x.written[stored[n] :] for n, x in slaves.items()}
+                if burst_refused(SPEC, m, exp, burst, beats):
+                    assert int(wrote.resp) == 2, (
+                        f"{where}: write {int(wrote.resp)}, expected refusal"
+                    )
+                    assert int(got.resp) == 2, f"{where}: read {int(got.resp)}, expected refusal"
+                    assert not any(new.values()), f"{where}: refused, but stored {new}"
+                    refused += 1
+                    continue
+                assert int(wrote.resp) == 0, f"{where}: write response {int(wrote.resp)}"
+                assert int(got.resp) == 0, f"{where}: read response {int(got.resp)}"
+                check_burst_write(where, want, new[s.name])
+                assert not any(v for n, v in new.items() if n != s.name), (
+                    f"{where}: stored elsewhere: {new}"
+                )
+                touched = _read_beats(slaves[s.name].log[logged:], exp.word_bytes)
+                need = {
+                    (a + offset + k) // exp.word_bytes
+                    for a in burst_addresses(addr, size, beats, burst)
+                    for k in range(1 << size)
+                }
+                seen = {a // exp.word_bytes for a in touched}
+                assert need <= seen, f"{where}: read words {sorted(seen)}, needs {sorted(need)}"
+                # A beat narrower than a bus on the way can repeat a read: split into single
+                # transfers, each narrow beat reads that bus's whole word.
+                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp):
+                    assert len(set(touched)) == len(touched), (
+                        f"{where}: read an address twice: {touched}"
+                    )
+                # What the beats leave: a FIXED burst's last beat wins.
+                last = dict(want)
+                step = 1 << size
+                read = b"".join(
+                    bytes(last[a + offset + k] for k in range(step))
+                    for a in burst_addresses(addr, size, beats, burst)
+                )
+                assert bytes(got.data) == read, (
+                    f"{where}: read {bytes(got.data).hex()}, expected {read.hex()}"
+                )
+                checked += 1
+    assert checked + refused == sum(
+        len(burst_shapes(SPEC, m, x)) for m in SPEC.masters for x in SPEC.slaves
+    )
+    assert checked + refused > 0
+    dut._log.info("Burst shapes: %d passed through, %d refused", checked, refused)
+
+
 async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
     """Every AXI master to every APB4 slave it reaches: pre-fill a word, write one byte;
     the APB slave sees that byte's PSTRB and the other bytes keep their value."""
     masters, slaves, _ = await _bring_up(dut)
     checked = 0
     for m in SPEC.masters:
-        if m.protocol not in AXI:
-            continue
         for s in SPEC.slaves:
-            if s.protocol != "APB4" or s.data_width != 32:
+            found = pstrb_path(SPEC, m, s)
+            if found is None:
                 continue
-            region = next(r for r in SPEC.memory_map if r.slave == s.name)
-            word = region.base + 0x40
-            if word >= 1 << m.addr_width:
-                continue
-            outs = [route(SPEC, m.name, word, w, False, {}) for w in (True, False)]
-            if any(o.slave != s.name or o.slave_error or o.masked for o in outs):
-                continue
+            word = found[0]
             drv = masters[m.name]
             assert await drv.write(word, 0xFFFF_FFFF) == 0, f"{m.name} -> {s.name} pre-fill"
             n = len(slaves[s.name].log)

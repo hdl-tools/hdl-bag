@@ -3,7 +3,7 @@
 name: bag_pc
 kind: adapter
 api_version: 1
-description: 'Protocol adapter: bag_axi_to_axil (PULP axi_to_axi_lite) / bag_axil_to_axi (axi_lite_to_axi). PULP limits on AXI4 -> AXI4-Lite: WRAP bursts, and non-modifiable (AxCACHE[1] = 0) bursts of 2 to 16 beats, are answered with SLVERR; every write error is reported as SLVERR.'
+description: 'Protocol adapter: bag_axi_to_axil (PULP axi_to_axi_lite) / bag_axil_to_axi (axi_lite_to_axi). PULP limits on AXI4 -> AXI4-Lite: WRAP bursts, and non-modifiable (AxCACHE[1] = 0) multi-beat FIXED bursts and INCR bursts of 2 to 17 beats, are answered with SLVERR; every write error is reported as SLVERR.'
 protocols:
   - AXI4
   - AXI4-Lite
