@@ -75,8 +75,8 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
             return True
     if (sheet, coord) == ("Project", "B6"):
         return (old, new) == ("0.2", "0.6")
-    if sheet == "Fabrics" and coord[0] == "U" and old is None:
-        return True
+    if sheet == "Fabrics" and coord == "U4" and old is None:
+        return isinstance(new, str) and new.startswith(("External module", "bag_external only"))
     if (sheet, coord, old, new) == ("Bridges", "G7", 2, 0):
         return True
     if isinstance(new, str) and (sheet, coord) in {("Fabrics", "I4"), ("Fabrics", "J4")}:

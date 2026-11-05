@@ -41,6 +41,7 @@ class OpaquePort:
     direction: str  # "input" / "output", as the fabric sees it
     width: int
     port: str  # the attached master, slave or bridge
+    attachment: str  # its {port} in the name: <fabric>_<port>, or s<k> / m<k> by position
 
 
 def exposed_name(u: UserPort) -> str:
@@ -71,7 +72,7 @@ def opaque_ports(spec: Spec, inst: Instance) -> list[OpaquePort]:
                 name = flat_signal_name(spec.wrapper.signal_pattern, prefix,
                                         PROTO_TOKEN[bus.protocol], sig, None)  # fmt: skip
                 out.append(OpaquePort(bus, sig, name, "input" if into else "output", width,
-                                      p.port))  # fmt: skip
+                                      p.port, prefix))  # fmt: skip
     return out
 
 
@@ -101,7 +102,8 @@ def render_stub(spec: Spec, inst: Instance, header: str) -> str:
     for p in ports:
         if p.port != last:
             role = "master" if not p.bus.is_slave else "slave"
-            rows.append(f"    // {p.port}: {p.bus.protocol} {role} attachment")
+            label = p.attachment if fab.external_module else p.port
+            rows.append(f"    // {label}: {p.bus.protocol} {role} attachment")
             last = p.port
         rows.append(_decl(p.direction, p.width, p.name))
     users = [u for u in spec.user_ports if u.instance == fab.name]
@@ -119,9 +121,11 @@ def render_stub(spec: Spec, inst: Instance, header: str) -> str:
     body += ["", "  logic unused;", "  assign unused = ^{"]
     body += [f"      {n}{',' if k < len(inputs) - 1 else ''}" for k, n in enumerate(inputs)]
     body += ["  };"]
+    sharing = sorted(f.name for f in spec.fabrics if f.external_module == module)
+    who = ", ".join(sharing) if len(sharing) > 1 else fab.name
     text = [
         header.rstrip("\n"),
-        f"// Stub for {fab.name}, a user-supplied {fab.protocol} fabric (bag_external): it",
+        f"// Stub for {who}, a user-supplied {fab.protocol} fabric (bag_external): it",
         "// accepts and answers nothing. Replace this file with the fabric's RTL: a module",
         f"// {module} with exactly these ports (see hdl_bag.gen.external).",
         "",

@@ -3,12 +3,14 @@
 """Hierarchy (sub-wrappers, placement), Wrapper (exposed ports, name collisions) and
 User_Ports (extra ports of user-supplied fabrics, D41)."""
 
+import json
 import re
+from importlib.resources import files
 from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import SV_KEYWORDS, flat_signal_name
 from hdl_bag.protocols import (
     OPTIONAL_SIGNAL_NAMES,
     OPTIONAL_SIGNALS,
@@ -271,8 +273,15 @@ def check_user_ports(ctx: Context) -> None:
                 attached = [*ctx.fabric_masters.get(inst, []), *ctx.fabric_slaves.get(inst, [])]
                 sigs = {*port_signals(proto, False, has_user=True),
                         *port_signals(proto, True, has_user=True)}  # fmt: skip
-                names |= {flat_signal_name(pattern, f"{inst}_{p}", PROTO_TOKEN[proto], s, None)
-                          for p in attached for s in sigs}  # fmt: skip
+                # The names opaque_ports gives: by position with an External module.
+                if frow is not None and ctx.external_module(frow) is not None:
+                    n_masters = len(ctx.fabric_masters.get(inst, []))
+                    prefixes = [f"s{k}" for k in range(n_masters)]
+                    prefixes += [f"m{k}" for k in range(len(ctx.fabric_slaves.get(inst, [])))]
+                else:
+                    prefixes = [f"{inst}_{p}" for p in attached]
+                names |= {flat_signal_name(pattern, p, PROTO_TOKEN[proto], s, None)
+                          for p in prefixes for s in sigs}  # fmt: skip
             contract[inst] = names
         if port in contract[inst]:
             ctx.report("USERPORT-NAME", row["Port"],
@@ -315,22 +324,39 @@ def check_user_ports(ctx: Context) -> None:
                 ctx.top_names[top] = f"User_Ports {row.where}"
 
 
+def _generated_modules(ctx: Context) -> set[str]:
+    """Modules BAG can put in a design besides bag_*: the wrappers, the package, the sv-interface
+    harness and interfaces, and the vendored IP; and a user fabric's default name."""
+    settings = ctx.raw.wrapper
+    top = ctx.text(settings["Top module name"]) if "Top module name" in settings else None
+    package = ctx.text(settings["Parameter package"]) if "Parameter package" in settings else None
+    project = (
+        ctx.text(ctx.raw.project["Project name"]) if "Project name" in ctx.raw.project else None
+    )
+    out = {ctx.text(r["Sub-wrapper"]) or "" for r in ctx.raw.sub_wrappers}
+    out |= {top or "", package or "", f"{top}_flat"}
+    out |= {f"{project}_{token}_if" for token in PROTO_TOKEN.values()}
+    index = json.loads(
+        (files("hdl_bag") / "rtl" / "vendor" / "pulp" / "index.json").read_text(encoding="utf-8")
+    )
+    out |= {unit for f in index["files"] for unit in f["defines"]}
+    for row in ctx.raw.fabrics:
+        template = ctx.text(row["Backing template"])
+        manifest = ctx.registry.get(template) if template else None
+        if manifest is not None and manifest.opaque and ctx.external_module(row) is None:
+            out.add(f"{project}_{ctx.text(row['Fabric'])}")
+    return out
+
+
 def check_external_modules(ctx: Context) -> None:
     """Fabrics > External module (D45): a legal name, free of what BAG generates, on a
     user-supplied fabric; fabrics that name one module must have the same shape."""
-    top = (
-        ctx.text(ctx.raw.wrapper["Top module name"])
-        if "Top module name" in ctx.raw.wrapper
-        else None
-    )
-    package = (
-        ctx.text(ctx.raw.wrapper["Package name"]) if "Package name" in ctx.raw.wrapper else None
-    )
-    generated = {top, package, *(ctx.text(r["Sub-wrapper"]) for r in ctx.raw.sub_wrappers)}
+    generated = _generated_modules(ctx)
     shapes: dict[str, tuple[Row, tuple[object, ...]]] = {}
+    spellings: dict[str, str] = {}
     for row in ctx.raw.fabrics:
         cell = row["External module"]
-        module = ctx.text(cell)
+        module = ctx.external_module(row)
         name = ctx.text(row["Fabric"])
         if module is None or name is None:
             continue
@@ -338,7 +364,7 @@ def check_external_modules(ctx: Context) -> None:
         manifest = ctx.registry.get(template) if template else None
         if manifest is None or not manifest.opaque:
             ctx.report("FAB-NA-SETTING", cell,
-                       f"External module {module!r} does not apply to {template}; leave it blank")  # fmt: skip
+                       f"External module {module!r} does not apply to {template}; set n/a")  # fmt: skip
             continue
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module):
             ctx.report(
@@ -347,12 +373,23 @@ def check_external_modules(ctx: Context) -> None:
                 f"External module {module!r} is not a SystemVerilog identifier",
             )
             continue
+        if module in SV_KEYWORDS:
+            ctx.report(
+                "EXT-MODULE-NAME", cell, f"External module {module!r} is a SystemVerilog keyword"
+            )
+            continue
         if module in generated or module.startswith("bag_"):
             ctx.report(
                 "EXT-MODULE-NAME",
                 cell,
                 f"External module {module!r} clashes with a module BAG generates",
             )
+            continue
+        spelled = spellings.setdefault(module.casefold(), module)
+        if spelled != module:
+            ctx.report("EXT-MODULE-NAME", cell,
+                       f"External module {module!r} differs from {spelled!r} only in case, "
+                       "so their files clash on some systems")  # fmt: skip
             continue
         users = sorted((ctx.text(u["Port"]), ctx.text(u["Direction"]), str(u["Width (bits)"].value))
                        for u in ctx.raw.user_ports if ctx.text(u["Instance"]) == name)  # fmt: skip

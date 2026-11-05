@@ -119,9 +119,10 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
             if rel in stubs:  # a shared External module (D45): one module, so one contract
                 first, ports = stubs[rel]
                 if ports != declared:
+                    differ = sorted(set(ports) ^ set(declared))[:4]
                     raise GenerateError(
                         f"{inst.name} and {first} share a module but their ports differ "
-                        f"(for example through ID widths): {sorted(set(ports) ^ set(declared))[:4]}"
+                        f"(for example through ID widths): {differ or 'their order'}"
                     )
                 continue
             stubs[rel] = (inst.name, declared)

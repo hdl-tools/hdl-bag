@@ -382,7 +382,7 @@ class _Builder:
             _drv("Slave-side ID width", 11, "AXI4 only: master-side ID width + clog2(# master ports).", id_m),
             _drv("Max parallel transfers", 10, "Crossbar: min(# master ports, # slave ports). Every other topology: 1.", '=IF(C{r}="crossbar",MIN(O{r},P{r}),1)'),
             _in("Notes", 30, ""),
-            _in("External module", 20, "bag_external only, optional: the name of the user's module. Bus ports are then named by position, s<k>_ for the fabric's k-th master attachment and m<k>_ for its k-th slave attachment, so fabrics of the same shape can share a module. Blank: <project>_<fabric>, with ports named <fabric>_<port>_."),
+            _in("External module", 20, "bag_external only, optional: the name of the user's module. Bus ports are then named by position, s<k>_ for the fabric's k-th master attachment and m<k>_ for its k-th slave attachment, so fabrics of the same shape can share a module. Blank or n/a: <project>_<fabric>, with ports named <fabric>_<port>_."),
         ], "fabrics")  # fmt: skip
         self.dv(ws, self.lref["RegSlice"], "N")
         self.dv(ws, self.lref["Protocol"], "B")

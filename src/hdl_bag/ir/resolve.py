@@ -17,7 +17,7 @@ from hdl_bag.checks.context import Context
 from hdl_bag.checks.memory import access_rules
 from hdl_bag.ir import model as ir
 from hdl_bag.protocols import OPTIONAL_SIGNALS, signal_applies
-from hdl_bag.reader.model import Cell
+from hdl_bag.reader.model import Cell, Row
 from hdl_bag.reader.values import parse_connection
 from hdl_bag.template import SCHEMA_VERSION
 
@@ -44,6 +44,13 @@ def _req(value: object) -> str:
 def _int(ctx: Context, cell: Cell, minimum: int = 0) -> int | None:
     v = ctx.integer(cell, minimum, required=False)
     return v if isinstance(v, int) else None
+
+
+def _external_module(ctx: Context, row: Row) -> str | None:
+    """Only a user-supplied fabric has one: n/a, or a value the checks warned about, is none."""
+    template = ctx.text(row["Backing template"])
+    manifest = ctx.registry.get(template) if template else None
+    return ctx.external_module(row) if manifest is not None and manifest.opaque else None
 
 
 def resolve(result: CheckResult) -> ir.Spec:
@@ -268,7 +275,7 @@ def _fabric(
         midpoint=midpoint,
         template=_req(ctx.text(r["Backing template"])),
         backing_ip=ctx.text(r["Backing IP"]),
-        external_module=ctx.text(r["External module"]),
+        external_module=_external_module(ctx, r),
         master_ports=tuple(
             ir.PortRef(
                 index=lk.index or 0,

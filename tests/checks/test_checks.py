@@ -164,8 +164,29 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Fabrics row 9: External module 'bag_axi_guard' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
     ("EXT-MODULE-NAME-top", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_top")],
      ["Fabrics row 9: External module 'demo_ss_bus_top' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-keyword", [*EXT, ("Fabrics", 9, "External module", "module")],
+     ["Fabrics row 9: External module 'module' is a SystemVerilog keyword (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-package", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_pkg")],
+     ["Fabrics row 9: External module 'demo_ss_bus_pkg' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-sub-wrapper", [*EXT, ("Fabrics", 9, "External module", "main_wrapper")],
+     ["Fabrics row 9: External module 'main_wrapper' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-harness", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_top_flat")],
+     ["Fabrics row 9: External module 'demo_ss_bus_top_flat' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-interface", [*EXT, ("Fabrics", 9, "External module", "demo_ss_apb4_if")],
+     ["Fabrics row 9: External module 'demo_ss_apb4_if' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-vendored", [*EXT, ("Fabrics", 9, "External module", "axi_xbar")],
+     ["Fabrics row 9: External module 'axi_xbar' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-default", [*EXT, ("Fabrics", 7, "Backing template", "bag_external"),
+                                 ("Fabrics", 9, "External module", "demo_ss_periph_apb")],
+     ["Fabrics row 9: External module 'demo_ss_periph_apb' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    ("EXT-MODULE-NAME-case", [*EXT, ("Fabrics", 7, "Backing template", "bag_external"),
+                              ("Fabrics", 7, "External module", "My_Ip"), ("Fabrics", 9, "External module", "my_ip")],
+     ["Fabrics row 9: External module 'my_ip' differs from 'My_Ip' only in case, so their files clash on some systems (EXT-MODULE-NAME)"]),
+    ("USERPORT-NAME-position", [*EXT, ("Fabrics", 9, "External module", "mine"),
+                                *_user(5, "aon_apb", "s0_apb4_psel", "input", 1, "tie-0")],
+     ["User_Ports row 5: s0_apb4_psel is a bus or clock port BAG already connects on aon_apb (USERPORT-NAME)"]),
     ("FAB-NA-SETTING-external", [("Fabrics", 5, "External module", "mine")],
-     ["Fabrics row 5: External module 'mine' does not apply to bag_axi_xbar; leave it blank (FAB-NA-SETTING)"]),
+     ["Fabrics row 5: External module 'mine' does not apply to bag_axi_xbar; set n/a (FAB-NA-SETTING)"]),
     ("EXT-MODULE-SHARED", [*EXT, ("Fabrics", 8, "Backing template", "bag_external"),
                            ("Fabrics", 9, "External module", "one"), ("Fabrics", 8, "External module", "one")],
      ["Fabrics row 9: aon_apb and ahb_bus share module one but differ in protocol, widths, attachments or user ports (EXT-MODULE-SHARED)"]),
@@ -350,6 +371,25 @@ def test_blank_template_reports_missing_settings(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("case", "edits", "expected"), CASES, ids=[c[0] for c in CASES])
 def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected: list[str]) -> None:
     assert _messages(tmp_path, edits) == expected
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        # n/a means blank, as on the other columns that may not apply.
+        [("Fabrics", 5, "External module", "n/a")],
+        [*EXT, ("Fabrics", 9, "External module", "n/a")],
+        # With position names, the name a blank External module would reserve is free.
+        [
+            *EXT,
+            ("Fabrics", 9, "External module", "mine"),
+            *_user(5, "aon_apb", "aon_apb_br_ahb2aon_apb4_psel", "input", 1, "tie-0"),
+        ],
+    ],
+    ids=["na-not-external", "na-external", "old-name-free"],
+)
+def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
+    assert _messages(tmp_path, edits) == []
 
 
 def test_every_rule_has_a_broken_workbook() -> None:

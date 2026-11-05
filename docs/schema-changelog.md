@@ -7,7 +7,9 @@ The workbook's sheets, column order, dropdown lists and spare-row formulas are t
 Changes from 0.5, approved by the owner (D45):
 
 - **New column Fabrics > External module** (optional, the last column, so no other column moves). On a `bag_external` fabric it names the user's module, and bus ports are then named by position: `s<k>_` for the fabric's k-th master attachment and `m<k>_` for its k-th slave attachment. Fabrics of the same shape can share a module. Blank keeps `<project>_<fabric>` and `<fabric>_<port>_`.
-- **New errors:** EXT-MODULE-NAME and EXT-MODULE-SHARED. On any other fabric the column gives FAB-NA-SETTING.
+- **New errors:** EXT-MODULE-NAME (not an identifier, a keyword, a module BAG can generate, or differing from another only in case) and EXT-MODULE-SHARED. On any other fabric a value gives the FAB-NA-SETTING warning and is ignored; n/a means blank.
+- USERPORT-NAME reserves the position names on a fabric with an External module.
+- Fabrics sharing a module must also match in what `bag check` cannot see, such as ID widths: `bag generate` fails if their ports differ.
 - **IR:** new field `external_module` on each fabric.
 - No other sheet, column or dropdown-list changes. A 0.5 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.6 and add the column header.
 
