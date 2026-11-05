@@ -177,6 +177,63 @@ def reach(spec: Spec, region: Any, ports: list[Any]) -> list[Any]:
             and not route(spec, p.port, region.base, True, False, {}).bridges]  # fmt: skip
 
 
+def blocking_path(spec: Spec, f: Any) -> tuple[Any, Any, int, tuple[Any, Any, int]] | None:
+    """On AXI fabric F: (a, x, word, (b, y, word)), where master A reaches slave X and a different
+    master B reaches slave Y, both directly, with no slave-side adapter that could take a stalled
+    request off the head of the queue."""
+    if f.protocol not in ("AXI4", "AXI4-Lite"):
+        return None
+    adapted = {a.port for a in spec.adapters}
+    on_fabric = {p.port for p in f.slave_ports}
+    slaves = [s for s in spec.slaves if s.name in on_fabric and s.name not in adapted
+              and s.protocol in ("AXI4", "AXI4-Lite")]  # fmt: skip
+    ports = [p.port for p in _master_ports(spec, f)]
+    masters = [m for m in spec.masters if m.name in ports]
+
+    def word(m: Any, s: Any) -> int | None:
+        found = plain_word(spec, m, s)
+        return found[0] if found and not found[1].bridges else None
+
+    for x in slaves:
+        for y in slaves:
+            if x is y:
+                continue
+            for a in masters:
+                for b in masters:
+                    if (
+                        a is not b
+                        and (wa := word(a, x)) is not None
+                        and (wb := word(b, y)) is not None
+                    ):
+                        return a, x, wa, (b, y, wb)
+    return None
+
+
+def forced_resp_paths(spec: Spec) -> list[tuple[Any, Any, int]]:
+    """(master, AXI slave, word): each master path to an AXI slave that a forced response can
+    travel back along."""
+    out = []
+    for m in spec.masters:
+        for s in spec.slaves:
+            if s.protocol in ("AXI4", "AXI4-Lite") and (found := plain_word(spec, m, s)):
+                out.append((m, s, found[0]))
+    return out
+
+
+def exokay_paths(spec: Spec) -> list[tuple[Any, Any, int]]:
+    """Those an exclusive access reaches unchanged: AXI4 master and slave on one fabric, with no
+    width or protocol converter, and AxLOCK driven at both ports."""
+    converters = {a.port for a in spec.adapters if a.type in ("dw", "pc")}
+    tied = {o.port for o in spec.port_options if o.lock in ("tie-0", "tie-default")}
+    return [
+        (m, s, word)
+        for m, s, word in forced_resp_paths(spec)
+        if m.protocol == "AXI4" and s.protocol == "AXI4"
+        and not {m.name, s.name} & (converters | tied)
+        and not route(spec, m.name, word, True, False, {}).bridges
+    ]  # fmt: skip
+
+
 def _master_ports(spec: Spec, fabric: Any) -> list[Any]:
     names = {m.name for m in spec.masters}
     return [p for p in sorted(fabric.master_ports, key=lambda p: p.index) if p.port in names]

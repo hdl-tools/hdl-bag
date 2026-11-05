@@ -3,6 +3,7 @@
 """The generated cocotb tests: what `bag generate` writes, and which tests apply."""
 
 import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +16,7 @@ from hdl_bag.cli import main
 from hdl_bag.flows import Report, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import load
-from hdl_bag.tests_gen import TESTS, applicable_tests
+from hdl_bag.tests_gen import TESTS, applicable_tests, ready_shim_module
 
 TESTS_DIR = Path(__file__).parents[1]
 DEMO = TESTS_DIR / "golden" / "demo_ss.ir.yaml"
@@ -35,11 +36,13 @@ def test_demo_ss_drops_only_tests_it_has_nothing_for() -> None:
     assert set(TESTS_NOT_ON_DEMO_SS) == {t.name for t in TESTS} - set(applicable_tests(spec))
 
 
-# demo_ss has one master on its AHB-Lite bus, adapters on every crossbar master, and no slave
-# narrower than 32 bits.
+# demo_ss has one master on its AHB-Lite bus, adapters or bridges on the paths the crossbar,
+# head-of-line and exclusive tests need, and no slave narrower than 32 bits.
 TESTS_NOT_ON_DEMO_SS = (
     "arbitration_follows_the_fabric_policy",
     "axi4_crossbars_admit_max_mst_trans_per_id",
+    "shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not",
+    "exclusive_accesses_carry_lock_and_exokay_unchanged",
     "an_error_on_any_beat_of_a_split_access_reaches_the_master",
     "narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors",
 )
@@ -222,3 +225,32 @@ def test_flow_builds_the_model_when_there_are_no_tests(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "compile (verilator-build): 0 unwaived" in result.output
     assert "no generated tests" in result.output
+
+
+def test_the_ready_shim_gates_every_axi_ready_into_the_design(tmp_path: Path) -> None:
+    out = generate(load(DEMO), tmp_path, DEMO.parent)
+    shim = tmp_path / "tests" / f"{ready_shim_module(out.top)}.sv"
+    assert shim.relative_to(tmp_path).as_posix() in out.files
+    text = shim.read_text(encoding="utf-8")
+    spec = load(DEMO)
+    axi_masters = [m for m in spec.masters if m.protocol in ("AXI4", "AXI4-Lite")]
+    axi_slaves = [s for s in spec.slaves if s.protocol in ("AXI4", "AXI4-Lite")]
+    gated = re.findall(r"\.(\w+)\((\w+) & (\w+)\)", text)
+    assert len(gated) == 2 * len(axi_masters) + 3 * len(axi_slaves)
+    for port, valid, ready in gated:
+        assert port == ready and valid == ready.removesuffix("ready") + "valid"
+    # The same ports as the top, so the models bind to it unchanged.
+    top = (tmp_path / "rtl" / f"{out.top}.sv").read_text(encoding="utf-8")
+    assert re.findall(r"^\s+(?:input|output)\s.*$", text, re.M) == re.findall(
+        r"^\s+(?:input|output)\s.*$", top, re.M
+    )
+    assert re.search(rf"\b{out.top} i_dut \(", text)
+
+
+def test_a_design_with_no_axi_port_gets_no_ready_shim(tmp_path: Path) -> None:
+    cfg = TESTS_DIR / "configs" / "p2" / "apb4_min.ir.yaml"
+    out = generate(load(cfg), tmp_path, cfg.parent)
+    assert out.tests is not None
+    assert not (tmp_path / "tests" / f"{ready_shim_module(out.top)}.sv").exists()
+    result = CliRunner().invoke(main, ["sim", str(tmp_path), "--ready-shim"])
+    assert result.exit_code == 1 and "no READY shim" in result.output

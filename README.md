@@ -23,7 +23,7 @@ Pre-alpha. Phases 1 to 3 of 6 are done.
 | Wrapper in flat or SV-interface port style, nested sub-wrappers | |
 | C header, memory-map doc (Markdown and HTML), port map, tie-off report | |
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
-| Generated cocotb tests per config: routing, errors, arbitration, single and burst traffic, handshake orderings | |
+| Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings | |
 
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md).
 
@@ -60,6 +60,7 @@ doc/port_map.md          per-fabric port map
 doc/tieoffs.md           component ports tied, defaulted, fitted or unused, and why
 tests/<project>_tests.py cocotb tests that apply to this config
 tests/<project>.ir.yaml  the IR those tests read
+tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --ready-shim
 ```
 
 ## Requirements

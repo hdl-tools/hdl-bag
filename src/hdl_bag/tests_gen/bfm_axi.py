@@ -214,11 +214,25 @@ class AxiPortMaster:
             "b": (self.master.write_if.b_channel, axi_bus.write.b.bvalid),
             "r": (self.master.read_if.r_channel, axi_bus.read.r.rvalid),
         })  # fmt: skip
+        self.has_lock = hasattr(axi_bus.write.aw, "awlock")
         # A port with PROT tied has no AxPROT: cocotbext-axi then accepts only its default.
         self.has_prot = hasattr(axi_bus.write.aw, "awprot")
 
     def watch_orderings(self) -> None:
         cocotb.start_soon(_watch_orderings(self.clock, self.bus, self.orderings))
+
+    def pause(self, seed: int, ratio: float = 0.4) -> None:
+        """Random gaps on every channel: AWVALID, WVALID and ARVALID held off, BREADY and RREADY
+        low, each independently."""
+        rng = random.Random(seed)
+
+        def gen() -> Any:
+            while True:
+                yield rng.random() < ratio
+
+        w, r = self.master.write_if, self.master.read_if
+        for ch in (w.aw_channel, w.w_channel, w.b_channel, r.ar_channel, r.r_channel):
+            ch.set_pause_generator(gen())
 
     def _prot(self, prot: int) -> AxiProt:
         return AxiProt(prot) if self.has_prot else AxiProt.NONSECURE
@@ -264,6 +278,7 @@ class Seen:
     length: int = 0  # AxLEN
     size: int | None = None  # AxSIZE (None on AXI4-Lite: the full width)
     burst: int = 1  # AxBURST (INCR on AXI4-Lite)
+    lock: int = 0  # AxLOCK (0 where the port has none)
 
 
 class _Target:
@@ -304,7 +319,10 @@ class AxiPortSlave:
         )
         self.log: list[Seen] = []
         self.orderings = Orderings()
+        self.forced_resp: int | None = None  # the code every response carries, if set
         w, r = self.slave.write_if, self.slave.read_if
+        self._force(w.b_channel, "bresp")
+        self._force(r.r_channel, "rresp")
         self.handshaking = Handshaking(clock, {
             "aw": (w.aw_channel, axi_bus.write.aw.awvalid),
             "w": (w.w_channel, axi_bus.write.w.wvalid),
@@ -313,6 +331,17 @@ class AxiPortSlave:
         self.handshaking.aw_ready = axi_bus.write.aw.awready
         self.handshaking.w_ready = axi_bus.write.w.wready
         self.handshaking.w_last = getattr(axi_bus.write.w, "wlast", None)
+
+    def _force(self, channel: Any, field: str) -> None:
+        """cocotbext-axi only answers OKAY or SLVERR, so rewrite responses as they are sent."""
+        send = channel.send
+
+        async def forced(item: Any) -> None:
+            if self.forced_resp is not None:
+                setattr(item, field, self.forced_resp)
+            await send(item)
+
+        channel.send = forced
 
     def watch_orderings(self) -> None:
         cocotb.start_soon(_watch_orderings(self.clock, self.bus, self.orderings))
@@ -358,10 +387,12 @@ class AxiPortSlave:
                     length = getattr(ch, f"{pre}len", None)
                     size = getattr(ch, f"{pre}size", None)
                     burst = getattr(ch, f"{pre}burst", None)
+                    lock = getattr(ch, f"{pre}lock", None)
                     self.log.append(Seen(int(getattr(ch, f"{pre}addr").value), write,
                                          int(prot.value) if prot is not None else 0,
                                          int(user.value) if user is not None else 0,
                                          int(cache.value) if cache is not None else None,
                                          int(length.value) if length is not None else 0,
                                          int(size.value) if size is not None else None,
-                                         int(burst.value) if burst is not None else 1))  # fmt: skip
+                                         int(burst.value) if burst is not None else 1,
+                                         int(lock.value) if lock is not None else 0))  # fmt: skip
