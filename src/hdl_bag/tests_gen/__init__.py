@@ -10,29 +10,24 @@ Importing this module does not import cocotb.
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from hdl_bag import __version__
 from hdl_bag.gen.render import header
 from hdl_bag.ir.model import Spec
-from hdl_bag.tests_gen.route_model import plain_word, takes_partial_writes
+from hdl_bag.tests_gen.route_model import (
+    burst_shapes,
+    contention,
+    crossbar_path,
+    midpoint_path,
+    narrow_apb_path,
+    plain_word,
+    private_words,
+    pstrb_path,
+    takes_partial_writes,
+)
 
 _AXI = ("AXI4", "AXI4-Lite")
-
-
-def _axi_master(spec: Spec) -> bool:
-    return any(m.protocol in _AXI for m in spec.masters)
-
-
-def _many_masters(spec: Spec, protocols: tuple[str, ...]) -> bool:
-    return any(f.protocol in protocols and len(f.master_ports) >= 2 for f in spec.fabrics)
-
-
-def _narrow_apb(spec: Spec) -> bool:
-    return (
-        _axi_master(spec)
-        and any(s.protocol in ("APB3", "APB4") and s.data_width < 32 for s in spec.slaves)
-        and any(b.template == "bag_axi2apb" for b in spec.bridges)
-    )
 
 
 def _unaligned_path(spec: Spec) -> bool:
@@ -56,24 +51,33 @@ class GeneratedTest:
     applies: Callable[[Spec], bool]
 
 
+def _any_pair(spec: Spec, path: Callable[[Spec, Any, Any], Any]) -> bool:
+    return any(path(spec, m, s) for m in spec.masters for s in spec.slaves)
+
+
 # Timeouts are a few times the longest run seen (the route test on demo_ss, the largest config,
 # stays under 1 ms of simulated time), so a deadlocked design fails within minutes.
 TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("every_master_reaches_what_the_model_says", 3000, lambda _: True),
-    GeneratedTest("arbitration_follows_the_fabric_policy", 50, lambda s: _many_masters(s, ("AHB-Lite",))),
-    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 50, lambda _: True),
-    GeneratedTest("axi_arbitration_rounds_starvation_and_lock", 200, lambda s: _many_masters(s, _AXI)),
+    GeneratedTest("arbitration_follows_the_fabric_policy", 50, lambda s: any(
+        f.protocol == "AHB-Lite" and contention(s, f, secure_too=True) for f in s.fabrics)),
+    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 50, lambda s: any(
+        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+    GeneratedTest("axi_arbitration_rounds_starvation_and_lock", 200, lambda s: any(
+        f.protocol in _AXI and contention(s, f) for f in s.fabrics)),
     GeneratedTest("axi_shared_bus_midpoint_buffers_reads", 50, lambda s: any(
-        f.protocol in _AXI and f.topology == "shared-bus" and f.midpoint is not None for f in s.fabrics)),
-    GeneratedTest("axi4_bursts_reach_slaves_and_error_paths", 50, lambda s: any(m.protocol == "AXI4" for m in s.masters)),
+        midpoint_path(s, f) for f in s.fabrics)),
+    GeneratedTest("axi4_bursts_reach_slaves_and_error_paths", 50, lambda s: any(
+        m.protocol == "AXI4" for m in s.masters)),
     GeneratedTest("axi4_crossbars_admit_max_mst_trans_per_id", 50, lambda s: any(
-        f.template == "bag_axi_xbar" and f.max_mst_trans for f in s.fabrics)),
-    GeneratedTest("narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", 200, _narrow_apb),
+        crossbar_path(s, f, m) for f in s.fabrics for m in s.masters)),
+    GeneratedTest("narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", 200, lambda s: _any_pair(s, narrow_apb_path)),
     GeneratedTest("unaligned_axi_writes_store_only_their_bytes", 200, _unaligned_path),
     GeneratedTest("an_error_on_any_beat_of_a_split_access_reaches_the_master", 200, _split_path),
-    GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _axi_master(s) and any(
-        x.protocol == "APB4" and x.data_width == 32 for x in s.slaves)),
-    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: _axi_master(s) or any(x.protocol in _AXI for x in s.slaves)),
+    GeneratedTest("axi4_burst_shapes_match_the_model", 3000, lambda s: _any_pair(s, burst_shapes)),
+    GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _any_pair(s, pstrb_path)),
+    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
+        x.protocol in _AXI for x in (*s.masters, *s.slaves))),  # type: ignore[attr-defined]
 )  # fmt: skip
 
 

@@ -8,7 +8,13 @@ import pytest
 
 from hdl_bag.ir import load
 from hdl_bag.tests_gen.route_model import (
+    FIXED,
+    INCR,
+    WRAP,
     Outcome,
+    burst_addresses,
+    burst_bytes,
+    check_burst_write,
     check_read,
     check_split_write_error,
     check_write,
@@ -110,3 +116,35 @@ def test_probes_hit_the_first_and_last_word_of_every_hole(config: Path) -> None:
             edge = max(edge, end)
         if edge < 1 << width:
             assert edge in addrs, (fabric.name, hex(edge))
+
+
+@pytest.mark.parametrize(
+    ("addr", "size", "beats", "burst", "want"),
+    [
+        (0x40, 2, 4, INCR, [0x40, 0x44, 0x48, 0x4C]),
+        (0x41, 2, 3, INCR, [0x41, 0x44, 0x48]),  # the first beat keeps its unaligned address
+        (0x40, 2, 3, FIXED, [0x40, 0x40, 0x40]),
+        (0x48, 2, 4, WRAP, [0x48, 0x4C, 0x40, 0x44]),  # wraps at the 16-byte block
+        (0x44, 2, 2, WRAP, [0x44, 0x40]),
+        (0x7E, 1, 8, WRAP, [0x7E, 0x70, 0x72, 0x74, 0x76, 0x78, 0x7A, 0x7C]),
+    ],
+)
+def test_burst_addresses(addr: int, size: int, beats: int, burst: int, want: list[int]) -> None:
+    assert burst_addresses(addr, size, beats, burst) == want
+
+
+def test_a_wrap_burst_must_be_aligned_and_a_legal_length() -> None:
+    with pytest.raises(AssertionError):
+        burst_addresses(0x41, 2, 4, WRAP)
+    with pytest.raises(AssertionError):
+        burst_addresses(0x40, 2, 3, WRAP)
+
+
+def test_a_fixed_burst_writes_the_same_bytes_again() -> None:
+    want = burst_bytes(0x40, 0, 2, FIXED, bytes([1, 2]))
+    assert want == [(0x40, 1), (0x40, 2)]
+    check_burst_write("w", want, [(0x40, 1), (0x40, 2)])
+    with pytest.raises(AssertionError):
+        check_burst_write("w", want, [(0x40, 2)])  # a beat lost
+    with pytest.raises(AssertionError):
+        check_burst_write("w", want, [(0x40, 1), (0x41, 2)])  # it moved on
