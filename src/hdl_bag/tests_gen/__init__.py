@@ -24,6 +24,7 @@ from hdl_bag.tests_gen.route_model import (
     burst_shapes,
     contention,
     crossbar_path,
+    crossing_masters,
     exokay_paths,
     forced_resp_paths,
     midpoint_path,
@@ -82,8 +83,7 @@ TESTS: tuple[GeneratedTest, ...] = (
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
     GeneratedTest("reset_during_traffic_leaves_nothing_behind", 1000, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
-    GeneratedTest("traffic_crosses_clock_domains_at_every_ratio", 2000, lambda s: len(s.clocks) >= 2 and any(
-        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+    GeneratedTest("traffic_crosses_clock_domains_at_every_ratio", 3000, lambda s: bool(crossing_masters(s))),
     GeneratedTest("shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not", 100, lambda s: any(
         blocking_path(s, f) for f in s.fabrics)),
     GeneratedTest("slave_decerr_returns_as_the_model_says", 200, lambda s: bool(forced_resp_paths(s))),

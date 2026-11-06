@@ -177,6 +177,29 @@ def reach(spec: Spec, region: Any, ports: list[Any]) -> list[Any]:
             and not route(spec, p.port, region.base, True, False, {}).bridges]  # fmt: skip
 
 
+def path_domains(spec: Spec, m: Any, exp: Outcome) -> set[str]:
+    """The clock domains an access from M to its target passes through: M's, its fabric's, each
+    bridge's downstream fabric's and the slave's."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    out = {m.domain, fabric.domain, *(fabrics[bridges[b].downstream].domain for b in exp.bridges)}
+    if exp.slave is not None:
+        out.add(next(s.domain for s in spec.slaves if s.name == exp.slave))
+    return out
+
+
+def crossing_masters(spec: Spec) -> list[str]:
+    """Masters whose own traffic words (private_words, as _traffic uses them) cross a clock
+    domain boundary."""
+    out = []
+    for i, m in enumerate(spec.masters):
+        words = private_words(spec, m, i, 8)
+        if words and len(path_domains(spec, m, route(spec, m.name, words[0], True, False, {}))) > 1:
+            out.append(m.name)
+    return out
+
+
 def blocking_path(spec: Spec, f: Any) -> tuple[Any, Any, int, tuple[Any, Any, int]] | None:
     """On AXI fabric F: (a, x, word, (b, y, word)), where master A reaches slave X and a different
     master B reaches slave Y, both directly, with no slave-side adapter that could take a stalled

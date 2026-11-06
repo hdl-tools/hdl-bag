@@ -268,15 +268,17 @@ class AxiPortMaster:
         """One single-byte write (a size-0 transfer on AXI4; byte strobe on AXI4-Lite)."""
         extra = {} if self.lite else {"size": 0}
         resp = await self.master.write(addr, bytes([value]), **extra)
-        return int(resp.resp)
+        return FLUSHED if resp is None else int(resp.resp)
 
     async def burst_write(self, addr: int, data: bytes) -> int:
         """One INCR burst of 32-bit beats (AXI4 only)."""
         resp = await self.master.write(addr, data, size=2)
-        return int(resp.resp)
+        return FLUSHED if resp is None else int(resp.resp)
 
     async def burst_read(self, addr: int, length: int) -> Result:
         resp = await self.master.read(addr, length, size=2)
+        if resp is None:  # flushed by a reset before it completed
+            return Result(True, 0, FLUSHED)
         code = int(resp.resp)
         return Result(code != AxiResp.OKAY, int.from_bytes(resp.data, "little"), code)
 
