@@ -26,6 +26,7 @@ from typing import Any
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
+from cocotb.utils import get_sim_time
 from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
@@ -132,11 +133,24 @@ def _port(dut: Any, spec: Spec, name: str, proto: str, slave: bool, aw: int, dw:
     return Port(dut, 0, signals, {s: v for s, v in tied.items() if s in signals})
 
 
-async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    clocks = {}
+# The running clocks, by clock name (_start_clocks replaces them).
+_CLOCKS: dict[str, Clock] = {}
+DEFAULT_PERIODS = (10, 14, 26, 34)
+
+
+def _start_clocks(dut: Any, periods: tuple[int, ...] = DEFAULT_PERIODS) -> None:
+    """Clock i (by name) runs at periods[i % len(periods)] ns."""
     for i, c in enumerate(sorted(SPEC.clocks, key=lambda c: c.name)):
-        Clock(getattr(dut, c.name), (10, 14, 26, 34)[i % 4], unit="ns").start()
-        clocks[c.domain] = getattr(dut, c.name)
+        if c.name in _CLOCKS:
+            _CLOCKS[c.name].stop()
+        _CLOCKS[c.name] = Clock(getattr(dut, c.name), periods[i % len(periods)], unit="ns")
+        _CLOCKS[c.name].start()
+
+
+async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    _CLOCKS.clear()
+    _start_clocks(dut)
+    clocks = {c.domain: getattr(dut, c.name) for c in SPEC.clocks}
     for r in SPEC.resets:
         getattr(dut, r.name).value = 0 if r.polarity == "active-low" else 1
     for x in SPEC.wrapper.extra_inputs:
@@ -461,18 +475,25 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     assert checked > 0
 
 
-async def _traffic(masters: dict[str, Any]) -> tuple[int, int]:
+async def _traffic(masters: dict[str, Any], spawned: list[Any] | None = None) -> tuple[int, int]:
     """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
     rotates IDs): every write lands and every read returns that master's own data. Returns the
-    words checked and the masters that took part."""
+    words checked and the masters that took part. Every task it starts goes in SPAWNED, so a
+    caller can abandon all of them (a reset)."""
+    spawned = [] if spawned is None else spawned
+
+    def start(coro: Any) -> Any:
+        task = cocotb.start_soon(coro)
+        spawned.append(task)
+        return task
 
     async def traffic(m: Any, words: list[int]) -> int:
         data = {a: random.getrandbits(32) for a in words}
         if m.protocol in AXI:
-            writes = [cocotb.start_soon(masters[m.name].write(a, d)) for a, d in data.items()]
+            writes = [start(masters[m.name].write(a, d)) for a, d in data.items()]
             await Combine(*writes)
             assert not any(w.result() for w in writes), f"{m.name}: write error"
-            reads = [cocotb.start_soon(masters[m.name].read(a)) for a in data]
+            reads = [start(masters[m.name].read(a)) for a in data]
             await Combine(*reads)
             got = [r.result() for r in reads]
         else:
@@ -491,7 +512,7 @@ async def _traffic(masters: dict[str, Any]) -> tuple[int, int]:
         return len(data)
 
     plans = {m.name: (m, private_words(SPEC, m, i, 8)) for i, m in enumerate(SPEC.masters)}
-    tasks = [cocotb.start_soon(traffic(m, words)) for m, words in plans.values() if words]
+    tasks = [start(traffic(m, words)) for m, words in plans.values() if words]
     await Combine(*tasks)
     total = sum(t.result() for t in tasks)
     assert total > 0
@@ -545,6 +566,115 @@ async def traffic_survives_back_pressure_on_every_channel(dut: Any) -> None:
         bursts = await _bursts(masters)
         dut._log.info("back-pressure at slaves=%s masters=%s: %d words over %d masters, %d bursts",
                       at_slaves, at_masters, total, count, bursts)  # fmt: skip
+
+
+def _set_resets(dut: Any, asserted: bool) -> None:
+    for r in SPEC.resets:
+        level = asserted if r.polarity != "active-low" else not asserted
+        getattr(dut, r.name).value = int(level)
+
+
+async def _cycles(clocks: dict[str, Any], n: int) -> None:
+    """At least N cycles of every clock."""
+    for clk in clocks.values():
+        await ClockCycles(clk, n)
+
+
+def _valids_into_models(masters: dict[str, Any], slaves: dict[str, Any]) -> dict[str, int]:
+    """Every request or response VALID the design drives towards a model: AW, W, AR at AXI
+    slaves, B, R at AXI masters, HTRANS at AHB-Lite slaves, PSEL at APB slaves."""
+    out: dict[str, int] = {}
+    for name, s in slaves.items():
+        if hasattr(s, "bus"):
+            w, r = s.bus.write, s.bus.read
+            out |= {f"{name}.awvalid": int(w.aw.awvalid.value), f"{name}.wvalid": int(w.w.wvalid.value),
+                    f"{name}.arvalid": int(r.ar.arvalid.value)}  # fmt: skip
+        elif isinstance(s, AhbSlave):
+            out[f"{name}.htrans"] = s.port["htrans"]
+        else:
+            out[f"{name}.psel"] = s.port["psel"]
+    for name, m in masters.items():
+        if hasattr(m, "bus"):
+            out |= {f"{name}.bvalid": int(m.bus.write.b.bvalid.value),
+                    f"{name}.rvalid": int(m.bus.read.r.rvalid.value)}  # fmt: skip
+    return out
+
+
+async def _reset_everything(
+    dut: Any,
+    masters: dict[str, Any],
+    slaves: dict[str, Any],
+    clocks: dict[str, Any],
+    tasks: list[Any] | None = None,
+) -> None:
+    """Assert every reset, as CLK-CDC-RESET requires, and abandon TASKS (traffic in flight).
+    While reset is held, nothing may ask a model to act. Then release it and let the models
+    start again."""
+    for t in tasks or ():
+        t.cancel()
+    _set_resets(dut, True)
+    for s in slaves.values():
+        if hasattr(s, "stop"):
+            s.stop()
+    for m in masters.values():
+        if hasattr(m, "idle"):
+            m.idle()
+    await _cycles(clocks, 2)  # bag_rst_sync asserts at once; let the last flops settle
+    for _ in range(4):
+        await _cycles(clocks, 1)
+        await ReadOnly()
+        busy = {k: v for k, v in _valids_into_models(masters, slaves).items() if v}
+        assert not busy, f"VALID during reset: {busy}"
+    await RisingEdge(next(iter(clocks.values())))
+    _set_resets(dut, False)
+    await _cycles(clocks, 6)  # bag_rst_sync releases after its stages
+    for s in slaves.values():
+        if hasattr(s, "stop"):
+            s.start()
+
+
+async def reset_during_traffic_leaves_nothing_behind(dut: Any) -> None:
+    """All masters at once, then every reset asserted with transfers in flight, at several
+    points through it. While reset is held no VALID reaches a model (_valids_into_models). After it, fresh
+    traffic from every master returns its own data: nothing half-done survives the reset."""
+    masters, slaves, clocks = await _bring_up(dut)
+    # The clock with the shortest default period: the first by name.
+    fastest = getattr(dut, sorted(SPEC.clocks, key=lambda c: c.name)[0].name)
+    # Reset at a tenth, half and nine tenths of the way through traffic, timed on a clean run.
+    start = get_sim_time("ns")
+    await _traffic(masters)
+    length = int((get_sim_time("ns") - start) / DEFAULT_PERIODS[0])
+    for when in sorted({max(1, length * k // 10) for k in (1, 5, 9)}):
+        spawned: list[Any] = []
+        task = cocotb.start_soon(_traffic(masters, spawned))
+        await ClockCycles(fastest, when)
+        assert not task.done(), f"traffic finished before the reset at cycle {when}"
+        await _reset_everything(dut, masters, slaves, clocks, [task, *spawned])
+        total, count = await _traffic(masters)
+        bursts = await _bursts(masters)
+        dut._log.info("reset at cycle %d: then %d words over %d masters, %d bursts",
+                      when, total, count, bursts)  # fmt: skip
+
+
+# Clock periods in ns, for each clock by name in turn: equal, 1:3, 3:1, 10:7, 7:10. Three or
+# more clocks repeat the pattern.
+CDC_SWEEP = ((10, 10), (10, 30), (30, 10), (10, 7), (7, 10))
+
+
+async def traffic_crosses_clock_domains_at_every_ratio(dut: Any) -> None:
+    """With two or more clocks: for each ratio in CDC_SWEEP, the clocks restart at those
+    periods (reset held around the change), then all masters at once and the AXI4 bursts. A
+    crossing that loses or repeats a transfer at some ratio returns wrong data or times out."""
+    masters, slaves, clocks = await _bring_up(dut)
+    for periods in CDC_SWEEP:
+        _set_resets(dut, True)
+        _start_clocks(dut, periods)
+        await _reset_everything(dut, masters, slaves, clocks)
+        total, count = await _traffic(masters)
+        bursts = await _bursts(masters)
+        dut._log.info(
+            "clocks at %s ns: %d words over %d masters, %d bursts", periods, total, count, bursts
+        )
 
 
 async def shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not(dut: Any) -> None:

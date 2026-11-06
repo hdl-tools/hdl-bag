@@ -168,6 +168,10 @@ class ApbMaster:
 
     def __init__(self, clk: Any, port: Port) -> None:
         self.clk, self.p = clk, port
+        self.idle()
+
+    def idle(self) -> None:
+        """No transfer: what a master drives once its transfer is abandoned (a reset)."""
         for n in ("psel", "penable", "pwrite", "paddr", "pwdata", "pstrb", "pprot"):
             self.p[n] = 0
 
@@ -234,7 +238,12 @@ class ApbSlave:
         import cocotb
 
         self.port["pready"], self.port["prdata"], self.port["pslverr"] = 0, 0, 0
-        cocotb.start_soon(self._run())
+        self._task = cocotb.start_soon(self._run())
+
+    def stop(self) -> None:
+        """Forget any access in progress and answer nothing (for a reset); start() resumes."""
+        self._task.cancel()
+        self.port["pready"], self.port["pslverr"] = 0, 0
 
     async def _run(self) -> None:
         p, nbytes = self.port, self.data_width // 8
@@ -326,6 +335,10 @@ class AhbMaster:
         self._idle()
         self.p["hwdata"] = 0
 
+    def idle(self) -> None:
+        """No transfer: what a master drives once its transfer is abandoned (a reset)."""
+        self._idle()
+
     def _idle(self) -> None:
         for n in ("haddr", "hburst", "hmastlock", "hprot", "hnonsec", "hsize", "hwrite"):
             self.p[n] = 0
@@ -402,7 +415,12 @@ class AhbSlave:
         import cocotb
 
         self.port["hreadyout"], self.port["hrdata"], self.port["hresp"] = 1, 0, 0
-        cocotb.start_soon(self._run())
+        self._task = cocotb.start_soon(self._run())
+
+    def stop(self) -> None:
+        """Forget any transfer in progress and stay ready (for a reset); start() resumes."""
+        self._task.cancel()
+        self.port["hreadyout"], self.port["hresp"] = 1, 0
 
     async def _run(self) -> None:
         p, nbytes = self.port, self.data_width // 8
