@@ -1340,7 +1340,7 @@ async def _byte(drv: Any, m: Any, addr: int, write: bool, value: int = 0) -> tup
 
 async def single_bytes_reach_both_ends_of_every_region(dut: Any) -> None:
     """Every AXI4 and AHB-Lite master: a single-byte write, then a single-byte read, at the
-    first and the last byte of every region (region_edges). Each reaches exactly the slave the
+    first and the last byte of every region and the bytes just outside it (region_edges). Each reaches exactly the slave the
     model names, at the slave word it gives, with an error exactly when the model says so (a
     region's last byte is often in its slave's error word), or misses with an error and
     reaches no slave. Where the byte can be stored and no error is injected, the slave stores

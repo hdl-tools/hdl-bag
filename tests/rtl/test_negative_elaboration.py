@@ -34,6 +34,8 @@ CASES: list[tuple[str, str, str]] = [
     ("bag_rst_sync", ".Stages(1)", "bag_rst_sync: Stages must be at least 2"),
     ("bag_ahb2apb", ".HDataWidth(32), .PDataWidth(64)",
      "bag_ahb2apb: need PDataWidth <= HDataWidth <= 8 * PDataWidth"),
+    ("bag_ahb2apb", ".HDataWidth(128), .PDataWidth(8)",
+     "bag_ahb2apb: need PDataWidth <= HDataWidth <= 8 * PDataWidth"),
     ("bag_ahb2apb", ".AddrOffset(32'h2)", "bag_ahb2apb: AddrOffset must be aligned to the AHB data width"),
     ("bag_apb2ahb", ".PDataWidth(64), .HDataWidth(32)", "bag_apb2ahb: need PDataWidth <= HDataWidth"),
     ("bag_apb2ahb", ".AddrOffset(32'h2)", "bag_apb2ahb: AddrOffset must be aligned to the AHB data width"),
@@ -67,17 +69,28 @@ TOOLS = ("slang", "verilator")
 USER_RULES = ("USERERROR", "USERFATAL")
 
 
-def _messages_in_rtl() -> set[str]:
+def _checks_in_rtl() -> set[tuple[str, str]]:
+    """(module, message) of every $error / $fatal in rtl/inhouse/. Each must be a literal
+    message the pattern reads, so none can hide from the meta-test."""
     out = set()
     for path in INHOUSE.glob("*.sv"):
-        out |= set(
-            re.findall(r'\$(?:error|fatal)\((?:1, )?"([^"]+)"\)', path.read_text(encoding="utf-8"))
-        )
+        text = path.read_text(encoding="utf-8")
+        found = re.findall(r'\$(?:error|fatal)\((?:1, )?"([^"]+)"\)', text)
+        assert len(found) == len(re.findall(r"\$(?:error|fatal)\b", text)), path.name
+        out |= {(path.stem, msg) for msg in found}
     return out
 
 
+# A check inside a module the case elaborates through its parent: (case module, check module).
+INSIDE = {"bag_apb2axi": "bag_hs_axi_mst", "bag_axi2ahb": "bag_axi2ahb_core"}
+
+
 def test_every_check_in_the_rtl_has_a_case() -> None:
-    assert _messages_in_rtl() == {msg for _, _, msg in CASES}
+    covered = set()
+    for module, _, msg in CASES:
+        inner = INSIDE.get(module)
+        covered.add((inner if inner and msg.startswith(f"{inner}:") else module, msg))
+    assert _checks_in_rtl() == covered
 
 
 def test_no_builtin_waiver_hides_a_parameter_check() -> None:

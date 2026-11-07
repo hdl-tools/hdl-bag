@@ -459,23 +459,23 @@ def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, i
 
 
 def region_edges(spec: Spec, m: Any) -> list[tuple[int, Outcome, Outcome]]:
-    """(address, write outcome, read outcome) of the first and the last byte of every
-    Memory_Map region, for master M as a single-byte transfer, with no alias pin on: each that
-    reaches a slave one way or the other. Only AXI4 and AHB-Lite masters, which can send a
-    single byte at any address (AXI4-Lite and APB address whole words)."""
+    """(address, write outcome, read outcome) of the bytes at the edges of every Memory_Map
+    region, for master M as a single-byte transfer, with no alias pin on: its first and last
+    byte, and the bytes just before and just after it (a miss, or another region). Only AXI4
+    and AHB-Lite masters, which can send a single byte at any address (AXI4-Lite and APB
+    address whole words)."""
     if m.protocol not in ("AXI4", "AHB-Lite"):
         return []
     out = {}
     for r in spec.memory_map:
-        for a in (r.base, r.base + r.size - 1):
-            if a >= 1 << m.addr_width or a in out:
+        for a in (r.base - 1, r.base, r.base + r.size - 1, r.base + r.size):
+            if not 0 <= a < 1 << m.addr_width or a in out:
                 continue
             w, rd = (
                 route(spec, m.name, a, True, False, {}),
                 route(spec, m.name, a, False, False, {}),
             )
-            if w.slave is not None or rd.slave is not None:
-                out[a] = (a, w, rd)
+            out[a] = (a, w, rd)
     return [out[a] for a in sorted(out)]
 
 
