@@ -32,6 +32,7 @@ from hdl_bag.tests_gen.route_model import (
     plain_word,
     private_words,
     pstrb_path,
+    region_edges,
     takes_partial_writes,
 )
 
@@ -99,6 +100,8 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("unaligned_axi_writes_store_only_their_bytes", 200, _unaligned_path),
     GeneratedTest("an_error_on_any_beat_of_a_split_access_reaches_the_master", 200, _split_path),
     GeneratedTest("axi4_burst_shapes_match_the_model", 3000, lambda s: _any_pair(s, burst_shapes)),
+    GeneratedTest("single_bytes_reach_both_ends_of_every_region", 1000, lambda s: any(
+        region_edges(s, m) for m in s.masters)),
     GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _any_pair(s, pstrb_path)),
     GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
         x.protocol in _AXI for x in s.masters) or any(x.protocol in _AXI for x in s.slaves)),

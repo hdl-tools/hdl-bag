@@ -458,6 +458,36 @@ def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, i
     return [x for x in shapes if clean(x[1], x[3], x[4], x[2])]
 
 
+def region_edges(spec: Spec, m: Any) -> list[tuple[int, Outcome, Outcome]]:
+    """(address, write outcome, read outcome) of the bytes at the edges of every Memory_Map
+    region, for master M as a single-byte transfer, with no alias pin on: its first and last
+    byte, and the bytes just before and just after it (a miss, or another region). Only AXI4
+    and AHB-Lite masters, which can send a single byte at any address (AXI4-Lite and APB
+    address whole words)."""
+    if m.protocol not in ("AXI4", "AHB-Lite"):
+        return []
+    out = {}
+    for r in spec.memory_map:
+        for a in (r.base - 1, r.base, r.base + r.size - 1, r.base + r.size):
+            if not 0 <= a < 1 << m.addr_width or a in out:
+                continue
+            w, rd = (
+                route(spec, m.name, a, True, False, {}),
+                route(spec, m.name, a, False, False, {}),
+            )
+            out[a] = (a, w, rd)
+    return [out[a] for a in sorted(out)]
+
+
+def stores_single_bytes(spec: Spec, exp: Outcome) -> bool:
+    """Whether a single-byte write that EXP routes stores just that byte: the slave takes
+    partial writes, and no bridge on the way drives its APB fabric with PSTRB tied (a tie makes
+    every write a whole word, as configured)."""
+    slave = next(s for s in spec.slaves if s.name == exp.slave)
+    tied = any(_option(spec, b, "pstrb") in ("tie-0", "tie-default") for b in exp.bridges)
+    return takes_partial_writes(spec, slave) and not tied
+
+
 def takes_partial_writes(spec: Spec, slave: Any) -> bool:
     """False when a partial write onto SLAVE's word cannot be expressed: an APB slave wider
     than a byte with no PSTRB (APB3, or PSTRB tied)."""

@@ -108,7 +108,10 @@ class Verilator:
             m = _VERILATOR.match(line)
             if not m or m["msg"].startswith("Exiting due to"):
                 continue
-            sev: Severity = "warning" if m["sev"] == "Warning" else "error"
+            # An elaboration-time $error / $fatal in the RTL is the design's own error, though
+            # Verilator reports it as a warning: judge it as one, in every flow.
+            user = m["rule"] in ("USERERROR", "USERFATAL")
+            sev: Severity = "warning" if m["sev"] == "Warning" and not user else "error"
             file = relative(m["file"], root) if m["file"] else ""
             line_no = int(m["line"]) if m["line"] else 0
             out.append(Finding(self.name, file, line_no, m["rule"] or "error", sev, m["msg"]))

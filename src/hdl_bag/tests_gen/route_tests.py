@@ -70,7 +70,9 @@ from hdl_bag.tests_gen.route_model import (
     probes,
     prot_tied,
     pstrb_path,
+    region_edges,
     route,
+    stores_single_bytes,
     takes_partial_writes,
     widest_on_path,
 )
@@ -1320,6 +1322,71 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
     )
     assert checked + refused > 0
     dut._log.info("Burst shapes: %d passed through, %d refused", checked, refused)
+
+
+async def _byte(drv: Any, m: Any, addr: int, write: bool, value: int = 0) -> tuple[bool, int]:
+    """One single-byte transfer from master M at ADDR: (error, the byte read)."""
+    if m.protocol == "AHB-Lite":
+        shift = 8 * (addr % (m.data_width // 8))
+        if write:
+            return await drv.write(addr, value << shift, size=0), 0
+        r = await drv.read(addr, size=0)
+        return r.err, (r.data >> shift) & 0xFF
+    if write:
+        return await drv.byte_write(addr, value) != 0, 0
+    r = await drv.byte_read(addr)
+    return r.err, r.data
+
+
+async def single_bytes_reach_both_ends_of_every_region(dut: Any) -> None:
+    """Every AXI4 and AHB-Lite master: a single-byte write, then a single-byte read, at the
+    first and the last byte of every region and the bytes just outside it (region_edges). Each reaches exactly the slave the
+    model names, at the slave word it gives, with an error exactly when the model says so (a
+    region's last byte is often in its slave's error word), or misses with an error and
+    reaches no slave. Where the byte can be stored and no error is injected, the slave stores
+    exactly that byte and the read returns it. A decoder off by one at a region's end shows
+    only on its last bytes, which the word-sized probes of the other tests never address."""
+    masters, slaves, _ = await _bring_up(dut)
+    for x, on in _pin_sets()[0].items():
+        getattr(dut, x).value = int(on)
+    checked = 0
+    for m in SPEC.masters:
+        drv = masters[m.name]
+        for addr, w, rd in region_edges(SPEC, m):
+            value, stored_byte = random.getrandbits(8), False
+            for write, exp in ((True, w), (False, rd)):
+                where = f"{m.name} byte {'W' if write else 'R'} {addr:#x}"
+                before = {n: len(s.log) for n, s in slaves.items()}
+                written = {n: len(s.written) for n, s in slaves.items()}
+                err, got = await _byte(drv, m, addr, write, value)
+                grew = {n for n, s in slaves.items() if len(s.log) != before[n]}
+                checked += 1
+                if exp.slave is None:
+                    assert err == (not exp.masked) and not grew, (
+                        f"{where}: expected a miss, got err={err} at {grew}"
+                    )
+                    continue
+                new = slaves[exp.slave].log[before[exp.slave] :]
+                wb = exp.word_bytes
+                assert grew == {exp.slave} and err == exp.slave_error, (
+                    f"{where}: expected {exp.slave} error={exp.slave_error}, got err={err} "
+                    f"at {grew}"
+                )
+                assert any(e.addr // wb == exp.address // wb and e.write == write for e in new), (
+                    f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]}, expected the word "
+                    f"of {exp.address:#x}"
+                )
+                if exp.slave_error or exp.masked or exp.hits_error_word:
+                    continue
+                if write and stores_single_bytes(SPEC, exp):
+                    check_write(
+                        where, exp, bytes([value]), slaves[exp.slave].written[written[exp.slave] :]
+                    )
+                    stored_byte = True
+                elif not write and stored_byte and (rd.slave, rd.address) == (w.slave, w.address):
+                    assert got == value, f"{where}: read {got:#04x}, wrote {value:#04x}"
+    assert checked > 0
+    dut._log.info("Single bytes at region ends: %d accesses", checked)
 
 
 async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
