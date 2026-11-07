@@ -3,10 +3,15 @@
 """Which converters refuse which AXI4 bursts (D34), from the IR.
 
 PULP's width converters and the AXI4-to-Lite protocol converter cannot split a (legal, 2 to
-16 beat) WRAP burst,
-nor a multi-beat FIXED burst into a narrower bus, so they answer those with SLVERR. The
-manifests of bag_dw, bag_pc and the bridges say the same. ``bag check`` warns about WRAP on
-a reachable path (D49), and the generated tests expect SLVERR wherever this says so.
+16 beat) WRAP burst, nor a multi-beat FIXED burst into a narrower bus, so they answer those
+with SLVERR. The manifests of bag_dw, bag_pc and the bridges say the same. The generated
+tests expect SLVERR wherever ``refusing_converter`` says so.
+
+``bag check`` warns about WRAP only where a width converter refuses it (D49, narrowed by the
+owner): a dw adapter, or bag_axi2ahb between different widths, where a WRAP burst such as a
+cache-line fill plausibly targets memory. Conversion to AXI4-Lite or APB (a pc adapter,
+bag_axi2axil, bag_axi2apb) is a deliberate move to single-beat register buses, where WRAP is
+rare, so it does not warn; it still refuses.
 """
 
 from collections.abc import Sequence
@@ -63,12 +68,16 @@ def refusing_converter(
 
 
 def wrap_refusals(spec: Spec) -> dict[tuple[str, str], list[str]]:
-    """{(AXI4 master, refusing converter): the slaves and bridges on the master's fabric it
-    refuses WRAP bursts to}, over every target the master may reach: each slave or bridge with
-    a region on the fabric, less those Access_Rules deny it, and its default slave, which a
-    miss or a denied access reaches whatever Access_Rules say."""
+    """{(AXI4 master, refusing width converter): the slaves and bridges on the master's fabric
+    it refuses WRAP bursts to}, over every target the master may reach: each slave or bridge
+    with a region on the fabric, less those Access_Rules deny it, and its default slave, which
+    a miss or a denied access reaches whatever Access_Rules say. Refusals by conversion to
+    AXI4-Lite or APB are left out (module docstring)."""
     out: dict[tuple[str, str], list[str]] = {}
     bridges = {b.name for b in spec.bridges}
+    # Width converters: a dw adapter, and bag_axi2ahb (which refuses only between widths).
+    width = {a.name for a in spec.adapters if a.type == "dw"}
+    width |= {b.name for b in spec.bridges if b.template == "bag_axi2ahb"}
     for m in spec.masters:
         if m.protocol != "AXI4":
             continue
@@ -80,6 +89,6 @@ def wrap_refusals(spec: Spec) -> dict[tuple[str, str], list[str]]:
         for t in sorted(targets):
             through = (t,) if t in bridges else ()
             who = refusing_converter(spec, m.name, through, None if through else t, WRAP, 4)
-            if who is not None:
+            if who in width:
                 out.setdefault((m.name, who), []).append(t)
     return out

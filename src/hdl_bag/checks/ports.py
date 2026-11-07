@@ -301,9 +301,10 @@ def check_port_options(ctx: Context) -> None:
 
 
 def check_wrap_refusals(ctx: Context, result: "CheckResult") -> None:
-    """An AXI4 master whose WRAP bursts a converter on the way answers with SLVERR (D49): the
-    PULP width converters and AXI4-to-Lite conversion cannot split them (hdl_bag.bursts).
-    One warning per master and converter, on the master's row."""
+    """An AXI4 master whose WRAP bursts a width converter on the way answers with SLVERR (D49):
+    the PULP width converters cannot split them (hdl_bag.bursts). Conversion to AXI4-Lite or
+    APB refuses them too but does not warn (owner). One warning per master and converter, on
+    the master's row."""
     from hdl_bag.bursts import wrap_refusals
     from hdl_bag.ir.resolve import resolve
 

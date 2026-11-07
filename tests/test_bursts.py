@@ -34,3 +34,17 @@ def test_a_denied_default_slave_is_still_reached_on_a_miss() -> None:
     assert miss.slave == "rom"
     assert refusing_converter(spec, "dbg", miss.bridges, miss.slave, WRAP, 4) == "xbar_dw_2_rom"
     assert wrap_refusals(spec)[("dbg", "xbar_dw_2_rom")] == ["rom"]
+
+
+def test_conversion_to_lite_or_apb_refuses_wrap_without_a_warning() -> None:
+    """Owner: the warning covers width converters only. bridges_pulp's AXI4 cpu reaches an
+    axi2axil and an axi2apb bridge at its own width: both refuse WRAP, neither warns."""
+    spec = load(XBAR_RULES.parent / "bridges_pulp.ir.yaml")
+    for bridge in ("br_cfg", "br_per"):
+        assert refusing_converter(spec, "cpu", (bridge,), None, WRAP, 4) == bridge
+    assert wrap_refusals(spec) == {}
+
+
+def test_a_width_converter_warns() -> None:
+    spec = load(XBAR_RULES.parent / "axi_adapters.ir.yaml")
+    assert wrap_refusals(spec)[("cpu", "cpu_dw_2_xbar")] == ["ddr", "per", "pmu", "sram", "wide"]
