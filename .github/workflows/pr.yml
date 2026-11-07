@@ -2,14 +2,27 @@ name: pr
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
+  schedule:
+    # Interim nightly: the full EDA list only, restoring but never saving the ccache. Phase 5's
+    # nightly.yml replaces it.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: EDA tests to run
+        type: choice
+        options: [full, smoke]
+        default: full
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +50,7 @@ jobs:
       - run: uv run pytest
 
   golden:
+    if: github.event_name != 'schedule'
     # Regenerates the demo_ss sample, recalculates it with LibreOffice and checks it
     # against tests/golden/demo_ss.xlsx. The recalculated file is uploaded so a schema
     # change can refresh the committed golden.
@@ -65,6 +79,7 @@ jobs:
           BAG_RECALC_WORKBOOK: out/demo_ss.recalc.xlsx
 
   vendor:
+    if: github.event_name != 'schedule'
     # The vendored PULP tree must match Bender.lock exactly (scripts/vendor_pulp.py).
     runs-on: ubuntu-24.04
     container:
@@ -80,48 +95,20 @@ jobs:
       - run: uv run --no-project python scripts/vendor_pulp.py --check
 
   eda-shard:
-    # Lint flow and simulation tests against the pinned EDA tools (pytest -m eda): four
-    # parallel jobs balanced by tests/eda_durations.json (pytest-split; refresh it with
-    # scripts/eda_durations.py), each spread over the runner's cores with pytest-xdist
-    # (every test has its own out/ directory).
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2, 3, 4]
-    container:
-      image: ghcr.io/hdl-tools/hdl-bag-tools:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold
+    # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
+    # label is added). The full list runs on every push to main, nightly, and on demand.
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: >-
+        ${{ ((github.event_name == 'pull_request'
+              && !contains(github.event.pull_request.labels.*.name, 'full-eda'))
+             || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
+            && 'eda and smoke' || 'eda' }}
+      save-cache: ${{ github.event_name != 'schedule' }}
     permissions:
       contents: read
       packages: read
-    env:
-      # A cold C++ build is most of the time here, and Verilator's makefiles use ccache when
-      # it is there. BASEDIR and NOHASHDIR let builds in different out/ directories share.
-      CCACHE_DIR: /tmp/ccache
-      CCACHE_MAXSIZE: 2G
-      CCACHE_NOHASHDIR: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: /tmp/ccache
-          key: ccache-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
-          restore-keys: |
-            ccache-${{ matrix.group }}-
-            ccache-
-      - run: uv sync --locked
-      - run: ccache --zero-stats
-      - run: >-
-          CCACHE_BASEDIR="$PWD"
-          uv run pytest -m eda -n auto --splits 4 --group ${{ matrix.group }}
-          --durations-path tests/eda_durations.json --splitting-algorithm least_duration
-          --durations=0 --durations-min=0
-      - run: ccache --show-stats
-        if: always()
 
   eda:
     # The one check to require: passes only when every shard did.

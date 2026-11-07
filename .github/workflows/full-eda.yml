@@ -1,0 +1,30 @@
+name: full-eda
+
+# The full EDA list on a pull request when the full-eda label is added. pr.yml then runs the
+# full list on every later push to that pull request too. This is a separate workflow so that
+# adding any other label never posts a second, skipped `eda` check on the commit (a skipped
+# job here is named `full-eda`, which nothing requires).
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  full-eda-shards:
+    if: github.event.label.name == 'full-eda'
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: eda
+    permissions:
+      contents: read
+      packages: read
+
+  full-eda:
+    needs: full-eda-shards
+    if: always() && github.event.label.name == 'full-eda'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: test "${{ needs.full-eda-shards.result }}" = success
