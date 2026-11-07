@@ -6,9 +6,11 @@ Each target generates a config, applies one mutation (to one fabric's tables in 
 parameter package, or to one RTL file copied into the output), and runs the config's whole
 generated test suite, as `bag sim` does. Detection (``_detected``) means:
 - at least one generated test fails;
-- every failing test fails on a scoreboard assertion in its body: not a timeout (a hang is not
-  detection), not another exception, and not in _bring_up (a mutant that breaks bring-up
-  proves nothing);
+- every failing test fails on an AssertionError (cocotb names the exception class in
+  results.xml): not a timeout (a hang is not detection), not another exception such as an
+  IndexError in a helper, and not raised through _bring_up (a mutant that breaks bring-up
+  proves nothing). The assertion may come from the scoreboard or from a protocol check in a
+  bus model;
 - nothing else goes wrong (a build failure, a missing test, a simulator exit).
 
 Each gate bug runs on several fabric kinds (AXI4, AXI4-Lite, AHB-Lite, APB) and on the first
@@ -163,6 +165,43 @@ def test_literals_round_trip() -> None:
     assert "'{2'b10, 2'b10}" in MUTATIONS["wrong_miss_response"].apply(pkg, "A", True)
 
 
+def _results(*failures: tuple[str, str, str]) -> ET.Element:
+    """A results.xml as cocotb 2.1 writes it: one testcase per (name, exception type, traceback)."""
+    suite = ET.Element("testsuite")
+    for name, kind, text in failures:
+        case = ET.SubElement(suite, "testcase", name=name)
+        ET.SubElement(case, "failure", message="m", type=kind).text = text
+    return suite
+
+
+def test_only_an_assertion_outside_bring_up_counts_as_detection() -> None:
+    """cocotb writes <failure> for every exception, so the exception type has to be read: a
+    mutant that only crashes a helper (IndexError, KeyError) proves nothing about the tests."""
+    ok = ("t", "AssertionError", 'File "route_tests.py", line 9, in body\nAssertionError')
+    assert _not_detection(_results(ok)) == []
+    for bad in [
+        ("t", "KeyError", 'File "route_model.py", line 3, in expect\nKeyError: 4'),
+        ("t", "IndexError", "IndexError: list index out of range"),
+        ("t", "SimTimeoutError", "cocotb.triggers.SimTimeoutError: Timeout"),
+        ("t", "AssertionError", 'File "route_tests.py", line 5, in _bring_up\nAssertionError'),
+    ]:
+        assert _not_detection(_results(ok, bad)) == [f"t: {bad[1]}"], bad
+
+
+def _not_detection(results: ET.Element) -> list[str]:
+    """The failures in a cocotb results.xml that don't count as detection, as "test: type".
+    cocotb writes <failure> for any exception and names its class in ``type``, so only an
+    AssertionError counts, and not one raised through _bring_up or carrying a timeout."""
+    wrong = []
+    for c in results.iter("testcase"):
+        for e in [*c.iter("failure"), *c.iter("error")]:
+            text = f"{e.get('message') or ''}\n{e.text or ''}"
+            kind = e.get("type") or e.tag
+            if kind != "AssertionError" or "Timeout" in text or " in _bring_up" in text:
+                wrong.append(f"{c.get('name')}: {kind}")
+    return wrong
+
+
 def _detected(out: Outputs, what: str, catcher: str | None = None) -> list[str]:
     """Run OUT's generated suite; assert detection as the module docstring defines it. Returns
     the failing tests."""
@@ -170,13 +209,8 @@ def _detected(out: Outputs, what: str, catcher: str | None = None) -> list[str]:
     failed = [f.message.split()[0] for f in report.findings if f.rule == "TEST-FAILED"]
     assert failed, f"{what} survived:\n{report.format()}"
     assert {f.rule for f in report.findings} == {"TEST-FAILED"}, report.format()
-    cases = list(ET.parse(out.root / "sim" / "results.xml").iter("testcase"))
-    for c in cases:
-        for e in [*c.iter("failure"), *c.iter("error")]:
-            text = f"{e.get('message') or ''}\n{e.text or ''}"
-            assert e.tag == "failure" and "Timeout" not in text and " in _bring_up" not in text, (
-                f"{what}: {c.get('name')} did not fail on a scoreboard assertion:\n{text[:600]}"
-            )
+    wrong = _not_detection(ET.parse(out.root / "sim" / "results.xml").getroot())
+    assert wrong == [], f"{what}: not an assertion in a test body: {wrong}\n{report.format()}"
     assert catcher is None or catcher in failed, f"{what}: {catcher} did not fail: {failed}"
     return failed
 
