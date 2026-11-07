@@ -24,6 +24,8 @@ CONFIGS = {
     "demo_ss": GOLDEN_IR,
     "ahb2apb_pt": TESTS / "configs" / "p2" / "ahb2apb_pt.ir.yaml",
     "ahb2apb_nested": TESTS / "configs" / "p2" / "ahb2apb_nested.ir.yaml",
+    "multi": TESTS / "configs" / "p2" / "multi.ir.yaml",  # two reset groups
+    "apb4_min": TESTS / "configs" / "p2" / "apb4_min.ir.yaml",  # a domain with nothing in it
 }
 FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_map.md",
          "doc/tieoffs.md", "doc/reset.md")  # fmt: skip

@@ -70,7 +70,7 @@ def lint(
         marked, idle = waive(ours, waivers)
         findings += marked
         stale = unused(name, idle, linted)
-        if not stale or any(f.severity == "error" for f in raw):
+        if not stale or any(f.severity == "error" and f.waived_by is None for f in marked):
             continue  # a tool that did not run, or stopped early, proves no waiver stale
         backend = BACKENDS[name]
         version = tool_version(backend)

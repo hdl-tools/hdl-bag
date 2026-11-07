@@ -282,3 +282,19 @@ def test_compile_reports_errors_only() -> None:
 
     found = VerilatorBuild("obj/top").parse(VERILATOR_OUT, ROOT)
     assert [(f.rule, f.severity) for f in found] == [("error", "error")]
+
+
+def test_a_waived_error_does_not_stop_the_stale_waiver_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only an error left standing means the tool stopped early; one the user waived does not."""
+    lint_module = import_module("hdl_bag.flows.lint")
+    waivers = tmp_path / "verilator.yaml"
+    waivers.write_text(STALE + "- {rule: error, file: 'rtl/*.sv', reason: known}\n")
+    error = Finding("verilator", "rtl/top.sv", 3, "error", "error", "known error")
+    monkeypatch.setattr(lint_module, "run_backend", lambda *a, **k: [error])
+    monkeypatch.setattr(lint_module, "tool_version", lambda backend: Verilator.pinned)
+    report = lint(
+        [Path("rtl/top.sv")], "top", tmp_path, tools=["verilator"], extra_waivers=[waivers]
+    )
+    assert [f.rule for f in report.unwaived] == ["WAIVER-UNUSED"]

@@ -12,11 +12,11 @@
 
 # demo_ss reset sequence
 
-BAG's clock-domain crossings keep state on both sides: the gray-coded pointers of a CDC FIFO, or the request and acknowledge of a bridge's handshake. Both sides must be in reset together, or a transfer in flight can be lost, repeated, or appear from nowhere. This page lists the domains, the crossings, and the domains that must therefore reset together, then the order to follow. hdl-bag's documentation explains why (docs/reset-sequence.md in its repository).
+BAG's clock-domain crossings keep state on both sides: the gray-coded pointers of a CDC FIFO (cdc adapters, and the bridges from AXI), or the request and acknowledge of a handshake (the bridges from AHB-Lite and APB). Both sides must enter reset at the same moment, or a transfer can be lost, repeated, or appear that no master sent. This page lists the domains, the crossings, and the domains that must therefore reset together, then the sequence to follow. hdl-bag's documentation explains why (docs/reset-sequence.md in its repository).
 
 ## Domains
 
-Each reset is conditioned in its domain (bag_rst_sync, 2 stages): an async assertion takes effect at once, a sync one after 2 edges of the domain's clock.
+The top wrapper conditions each reset with sync deassertion in bag_rst_sync (2 stages): an async assertion takes effect at once, a sync one after 2 edges of the domain's clock. A reset with async deassertion is connected as it is.
 
 | Domain | Clock | Reset | Polarity | Assertion | Deassertion | Leaves reset |
 |---|---|---|---|---|---|---|
@@ -35,7 +35,7 @@ Each reset is conditioned in its domain (bag_rst_sync, 2 stages): an async asser
 
 ## Reset groups
 
-The domains in a group must reset together. A domain alone in its group may reset on its own, with the masters and slaves in it.
+The domains in a group must reset together. A domain alone in its group may reset on its own, with the masters and slaves in it. BAG cannot see crossings inside user RTL: a user-supplied fabric given the clock or reset of another domain (User_Ports) is a crossing of yours, and joins those domains' groups.
 
 | Group | Domains | Resets |
 |---|---|---|
@@ -43,9 +43,9 @@ The domains in a group must reset together. A domain alone in its group may rese
 
 ## Required sequence
 
-For each reset group, whether its resets come from one source or several:
+For each reset group:
 
-1. Assert every reset of the group, in any order.
+1. Assert every reset of the group at the same moment: from one source, or with less skew than the shortest clock period in the group. If they cannot assert together, stop the clocks of every domain in the group first, assert the resets in any order, and restart the clocks with all of them still asserted (the only staggered assertion PULP's CDC FIFOs allow).
 2. Keep each one asserted until all of them have taken effect: every assertion here is async, so each takes effect at once, without a clock. Release none of them before then.
 3. Release them, in any order. A domain leaves reset as the Domains table says, on its own clock.
 4. Start traffic once every domain of the group has left reset.
@@ -53,9 +53,10 @@ For each reset group, whether its resets come from one source or several:
 
 ## What goes wrong otherwise
 
-- One domain of a group reset alone, or released before another is asserted: the crossing's two sides disagree. A transfer can be lost or repeated, or one can arrive that no master sent.
+- Resets of a group asserted at different times with the clocks running: the domain whose reset is late still runs while the other side of a crossing is already in reset. It sees a FIFO pointer drop to zero, or a handshake payload cleared, and can present a spurious transfer (zero address and data) on each channel: a request to its slaves, or a response to its masters. A spurious read of a register with read side effects is not undone by the reset that follows. Nothing needs to be in flight for this: earlier traffic is enough.
+- One domain of a group reset alone (a warm reset of part of the group): the crossing's two sides disagree. A transfer can be lost or repeated, or one can arrive that no master sent. PULP's CDC FIFOs do not support warm reset; only whole reset groups may reset independently.
 - A crossing's reset with sync assertion or async deassertion: bag check refuses it (CLK-CDC-RESET).
 
 ## What is tested
 
-BAG's generated tests assert every reset at once, with transfers in flight, check that nothing moves while reset is held, release every reset at once, and start traffic after every domain has left reset. Asserting or releasing the resets of a group at different times (steps 1 and 3) follows from the RTL; the tests do not exercise it.
+BAG's generated tests assert every reset at the same moment, timed for each slave while a request to it is in its handshake, check that no request or response VALID reaches a master or slave while reset is held, release every reset at once, and start traffic after every domain has left reset. Releasing the resets of a group at different times (step 3) follows from the RTL: both sides of each crossing are idle and empty in reset. The tests do not exercise it, nor the stopped-clock assertion of step 1.

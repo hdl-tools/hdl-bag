@@ -752,6 +752,7 @@ async def reset_during_traffic_leaves_nothing_behind(dut: Any) -> None:
     every slave returns its own data."""
     masters, slaves, clocks = await _bring_up(dut)
 
+    # _bring_up gives the first clock by name DEFAULT_PERIODS[0], the shortest period.
     first = sorted(SPEC.clocks, key=lambda c: c.name)[0]
     fastest = getattr(dut, first.name)
 

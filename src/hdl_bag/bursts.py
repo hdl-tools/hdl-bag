@@ -2,7 +2,8 @@
 # Copyright 2026 The hdl-bag Authors
 """Which converters refuse which AXI4 bursts (D34), from the IR.
 
-PULP's width converters and the AXI4-to-Lite protocol converter cannot split a WRAP burst,
+PULP's width converters and the AXI4-to-Lite protocol converter cannot split a (legal, 2 to
+16 beat) WRAP burst,
 nor a multi-beat FIXED burst into a narrower bus, so they answer those with SLVERR. The
 manifests of bag_dw, bag_pc and the bridges say the same. ``bag check`` warns about WRAP on
 a reachable path (D49), and the generated tests expect SLVERR wherever this says so.
@@ -63,8 +64,9 @@ def refusing_converter(
 
 def wrap_refusals(spec: Spec) -> dict[tuple[str, str], list[str]]:
     """{(AXI4 master, refusing converter): the slaves and bridges on the master's fabric it
-    refuses WRAP bursts to}, over every target the master may reach (Access_Rules none
-    excluded; the default slave included)."""
+    refuses WRAP bursts to}, over every target the master may reach: each slave or bridge with
+    a region on the fabric, less those Access_Rules deny it, and its default slave, which a
+    miss or a denied access reaches whatever Access_Rules say."""
     out: dict[tuple[str, str], list[str]] = {}
     bridges = {b.name for b in spec.bridges}
     for m in spec.masters:
@@ -72,10 +74,10 @@ def wrap_refusals(spec: Spec) -> dict[tuple[str, str], list[str]]:
             continue
         fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
         denied = {r.slave for r in fabric.access_rules if r.master == m.name and r.access == "none"}
-        targets = {r.slave for r in fabric.addr_rules}
+        targets = {r.slave for r in fabric.addr_rules} - denied
         targets |= {d.default_slave for d in fabric.decode
                     if d.master == m.name and d.default_slave}  # fmt: skip
-        for t in sorted(targets - denied):
+        for t in sorted(targets):
             through = (t,) if t in bridges else ()
             who = refusing_converter(spec, m.name, through, None if through else t, WRAP, 4)
             if who is not None:
