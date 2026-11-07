@@ -53,6 +53,17 @@ def test_verilator_parse() -> None:
     ]  # fmt: skip
 
 
+def test_verilator_user_errors_are_errors() -> None:
+    """An elaboration-time $error / $fatal: Verilator says Warning, BAG judges an error."""
+    out = (
+        "%Warning-USERERROR: rtl/a.sv:17:5: bag_sync: Stages must be at least 2\n"
+        "%Warning-USERFATAL: rtl/b.sv:9:5: bag_axi_cut needs the same ID width on both sides\n"
+    )
+    assert [(f.rule, f.severity) for f in Verilator().parse(out, ROOT)] == [
+        ("USERERROR", "error"), ("USERFATAL", "error"),
+    ]  # fmt: skip
+
+
 def test_verible_parse() -> None:
     assert Verible().parse(VERIBLE_OUT, ROOT) == [
         Finding("verible", "rtl/top.sv", 4, "module-filename", "warning", "Module name does not match file name. [Style: file-names]"),
