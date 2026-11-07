@@ -30,6 +30,7 @@ from cocotb.triggers import ClockCycles, Combine, NextTimeStep, ReadOnly, Rising
 from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
+from hdl_bag.bursts import FIXED, INCR
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
@@ -46,8 +47,6 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
-    FIXED,
-    INCR,
     blocking_path,
     burst_addresses,
     burst_bytes,
@@ -753,6 +752,7 @@ async def reset_during_traffic_leaves_nothing_behind(dut: Any) -> None:
     every slave returns its own data."""
     masters, slaves, clocks = await _bring_up(dut)
 
+    # _bring_up gives the first clock by name DEFAULT_PERIODS[0], the shortest period.
     first = sorted(SPEC.clocks, key=lambda c: c.name)[0]
     fastest = getattr(dut, first.name)
 

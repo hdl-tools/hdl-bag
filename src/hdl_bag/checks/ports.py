@@ -2,7 +2,7 @@
 # Copyright 2026 The hdl-bag Authors
 """Fabrics, masters, slaves, bridges and Port_Options."""
 
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from hdl_bag.checks.basics import check_domain_ref
 from hdl_bag.checks.context import Context
@@ -19,6 +19,9 @@ from hdl_bag.protocols import (
     signal_applies,
 )
 from hdl_bag.reader.model import Cell, Row
+
+if TYPE_CHECKING:
+    from hdl_bag.checks import CheckResult
 
 TOPOLOGIES: Final = ("crossbar", "shared-bus", "single-layer", "decoder-mux")
 ARBITRATION: Final = ("round-robin", "fixed-priority", "single-master")
@@ -295,3 +298,25 @@ def check_port_options(ctx: Context) -> None:
         if buffered and protocol not in AXI_FAMILY:
             ctx.report("PORT-ADAPTER", row["Port"],
                        f"FIFO and register slices exist only on AXI4/AXI4-Lite ports; {port} is {protocol}")  # fmt: skip
+
+
+def check_wrap_refusals(ctx: Context, result: "CheckResult") -> None:
+    """An AXI4 master whose WRAP bursts a width converter on the way answers with SLVERR (D49):
+    the PULP width converters cannot split them (hdl_bag.bursts). Conversion to AXI4-Lite or
+    APB refuses them too but does not warn (owner). One warning per master and converter, on
+    the master's row."""
+    from hdl_bag.bursts import wrap_refusals
+    from hdl_bag.ir.resolve import resolve
+
+    spec = resolve(result)
+    kinds = {a.name: f"{a.type} adapter" for a in spec.adapters}
+    kinds |= {b.name: f"bridge ({b.template})" for b in spec.bridges}
+    for (master, converter), targets in sorted(wrap_refusals(spec).items()):
+        row = ctx.defs[master]
+        ctx.report(
+            "AXI-WRAP-REFUSED",
+            row,
+            f"WRAP bursts from {master} to {', '.join(targets)} get SLVERR: {kinds[converter]} "
+            f"{converter} cannot convert them. Send INCR bursts on this path, or keep it at "
+            "one width and protocol",
+        )

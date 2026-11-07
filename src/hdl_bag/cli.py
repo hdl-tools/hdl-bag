@@ -2,6 +2,7 @@
 # Copyright 2026 The hdl-bag Authors
 """Command-line entry point: ``bag``."""
 
+import tempfile
 from pathlib import Path
 
 import click
@@ -11,8 +12,10 @@ from hdl_bag.checks import CheckResult, run_checks
 from hdl_bag.flows import Report, SimUnavailable, compile_design, lint, run_tests
 from hdl_bag.gen import MissingRtl, Outputs, generate, include_dirs, load_outputs, sources
 from hdl_bag.gen.render import GenerateError
+from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import ReaderError, read_workbook
 from hdl_bag.template import write_template
+from hdl_bag.template.sample_demo_ss import SAMPLE_HEADER, WRAPPER
 
 
 @click.group()
@@ -30,23 +33,32 @@ def main() -> None:
     help="Workbook to write (.xlsx).",
 )  # fmt: skip
 def template(sample: bool, output: Path) -> None:
-    """Write a blank spec workbook, or the demo_ss sample."""
+    """Write a blank spec workbook, or the demo_ss sample (with the File header it names)."""
     output.parent.mkdir(parents=True, exist_ok=True)
     write_template(output, sample=sample)
     click.echo(f"wrote {output}")
+    if sample:
+        header = output.parent / WRAPPER["File header"]
+        if header.exists():
+            click.echo(f"kept the existing {header.name} (the sample's File header)")
+        else:
+            header.write_text(SAMPLE_HEADER, encoding="utf-8", newline="\n")
+            click.echo(f"wrote {header}")
 
 
-def _checked(spec: Path) -> CheckResult:
-    """Read and check SPEC, printing every finding; exit 1 on a reader or check error."""
+def _checked(spec: Path, workbook: Path | None = None, label: str = "") -> CheckResult:
+    """Read and check SPEC (or WORKBOOK, written from it), printing every finding; exit 1 on
+    a reader or check error. File header paths are relative to SPEC's directory."""
     try:
-        raw = read_workbook(spec)
+        raw = read_workbook(workbook or spec)
     except ReaderError as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     result = run_checks(raw, spec.parent)
     for f in result.findings:
         click.echo(f"{f.severity}: {f.message}")
-    click.echo(f"{spec.name}: {len(result.errors)} error(s), {len(result.warnings)} warning(s)")
+    errors, warnings = len(result.errors), len(result.warnings)
+    click.echo(f"{spec.name}{label}: {errors} error(s), {warnings} warning(s)")
     if result.errors:
         raise SystemExit(1)
     return result
@@ -74,10 +86,20 @@ def ir_command(spec: Path, output: Path) -> None:
 
 
 def _load(spec: Path) -> tuple[ir.Spec, Path]:
-    """SPEC (a workbook, checked and resolved, or a .ir.yaml) and its directory."""
-    if spec.suffix in (".yaml", ".yml"):
-        return ir.load(spec), spec.parent
-    return ir.resolve(_checked(spec)), spec.parent
+    """SPEC (a workbook or a .ir.yaml), checked, and its directory. An IR, which may have been
+    edited by hand, gets every check a workbook does: through the workbook it converts to."""
+    if spec.suffix not in (".yaml", ".yml"):
+        return ir.resolve(_checked(spec)), spec.parent
+    try:
+        loaded = ir.load(spec)
+    except ir.IrError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+    with tempfile.TemporaryDirectory() as tmp:
+        workbook = Path(tmp) / f"{loaded.project.name}.xlsx"
+        to_workbook(loaded).save(workbook)
+        _checked(spec, workbook, " (checked as the workbook it converts to)")
+    return loaded, spec.parent
 
 
 def _generate(spec_path: Path, output: Path | None, style: str | None) -> Outputs:
@@ -126,9 +148,9 @@ def generate_command(spec: Path, output: Path | None, style: str | None) -> None
 @main.command(name="lint")
 @click.argument("outdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def lint_command(outdir: Path) -> None:
-    """Lint a generated OUTDIR with every tool; exit 1 on any unwaived finding."""
+    """Lint a generated OUTDIR with Project > Lint tools; exit 1 on any unwaived finding."""
     out = load_outputs(outdir)
-    _report(lint(sources(out), out.top, outdir, incdirs=include_dirs(out)))
+    _report(lint(sources(out), out.top, outdir, tools=out.lint_tools, incdirs=include_dirs(out)))
 
 
 def _sim(out: Outputs, test_filter: str | None = None, ready_shim: bool = False) -> None:
@@ -156,7 +178,7 @@ def sim_command(outdir: Path, test_filter: str | None, ready_shim: bool) -> None
 def flow(spec: Path, output: Path | None, style: str | None) -> None:
     """check -> generate -> lint -> elaborate -> sim. Formal comes in Phase 5."""
     out = _generate(spec, output, style)
-    _report(lint(sources(out), out.top, out.root, incdirs=include_dirs(out)))
+    _report(lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out)))
     # Simulation builds the C++ model itself, so build it here only if nothing will.
     _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out),
                            build=out.tests is None))  # fmt: skip

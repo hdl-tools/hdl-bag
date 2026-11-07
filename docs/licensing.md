@@ -29,8 +29,10 @@ Each generated file starts with:
    timestamp, so regenerating an unchanged spec gives byte-identical files.
 
 Generated RTL may instantiate third-party IP (for example
-pulp-platform/axi). That IP keeps its own licence; see
-`third_party/LICENSES.md`.
+pulp-platform/axi). `bag generate` copies the files of that IP into
+`rtl/vendor/` of the output, with each package's `LICENSE` next to them. That
+IP keeps its own licence and copyright headers, and it is not yours to
+relicense; see [third-party.md](third-party.md).
 
 ## Third-party components
 

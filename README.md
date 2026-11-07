@@ -14,7 +14,7 @@ Pre-alpha. Phases 1 to 3 of 6 are done.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 89 validation checks | The full generated test list and mutation checks (Phase 4) |
+| Spec workbook template, reader and 90 validation checks | The full generated test list and mutation checks (Phase 4) |
 | Canonical YAML IR, byte-identical across runs | Formal checks and nightly random regression (Phase 5) |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | User guide and v1.0 release (Phase 6) |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
@@ -33,17 +33,19 @@ Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.
 # Until v1.0 is on PyPI, install from the repository:
 pip install git+https://github.com/hdl-tools/hdl-bag.git
 
-bag template --sample -o demo_ss.xlsx   # the demo_ss sample (omit --sample for a blank one)
+bag template --sample -o spec.xlsx      # the demo_ss sample and its header.txt (omit --sample for a blank one)
 bag check spec.xlsx                     # every check; exit 1 on any error
 bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
-bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml)
-bag lint out/                           # slang + Verilator + Verible, zero unwaived findings
+bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml, checked either way)
+bag lint out/                           # Project > Lint tools (slang, Verilator, Verible): zero unwaived findings
 bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
 bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim
 ```
 
 `--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
-port style. `hdl-bag` is an alias for the `bag` command.
+port style. `hdl-bag` is an alias for the `bag` command. The sample's two
+warnings are real: two of its AXI4 masters reach width converters that answer
+WRAP bursts with SLVERR (`AXI-WRAP-REFUSED`).
 
 Generated output (under the output directory):
 
@@ -51,13 +53,14 @@ Generated output (under the output directory):
 rtl/pkg/<package>.sv     parameter package (widths, decode tables)
 rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
 rtl/inhouse/*.sv         the in-house IP the design uses
-rtl/vendor/**            the vendored PULP files the design uses
+rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files
 rtl/ext/<module>.sv      stub of a user-supplied fabric: replace it with your RTL
 <project>.f              file list in compile order
 sw/<project>_memmap.h    C header
 doc/memmap.md, .html     memory-map document
 doc/port_map.md          per-fabric port map
 doc/tieoffs.md           component ports tied, defaulted, fitted or unused, and why
+doc/reset.md             reset sequence: domains, crossings, which resets must assert together
 tests/<project>_tests.py cocotb tests that apply to this config
 tests/<project>.ir.yaml  the IR those tests read
 tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --ready-shim

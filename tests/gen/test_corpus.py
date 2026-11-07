@@ -19,6 +19,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from dsl import SAMPLE_WRAP, Refusal, unexpected
 from hier_oracle import check
 from simrun import REPO
 
@@ -74,6 +75,16 @@ def test_only_external_configs_skip_the_route_simulation() -> None:
     assert sorted(set(ALL) - set(ROUTED)) == ["p3/external_fabric", "p3/external_shared"]
 
 
+def _declared_wrap(config: str) -> set[Refusal]:
+    """The AXI-WRAP-REFUSED warnings CONFIG declares (D49): its corpus.py Cfg, or the sample's."""
+    configs, name = _split(config)
+    if configs.name == "golden":
+        return SAMPLE_WRAP
+    built = _corpus(configs.name).BUILT
+    # A config without a corpus.py builder (hand-written IR) has no AXI4 master.
+    return built[name]().wrap if name in built else set()
+
+
 def _ir_text(text: str) -> str:
     return text.split("provenance:")[0]
 
@@ -92,7 +103,7 @@ def test_ir_matches_its_workbook_source(tmp_path: Path, config: str) -> None:
     build_workbook(data=_corpus(configs.name).BUILT[name]().data).save(path)
     shutil.copy(configs / "header.txt", tmp_path / "header.txt")
     result = run_checks(read_workbook(path), tmp_path)
-    assert [f.message for f in result.findings] == []
+    assert unexpected((f.message for f in result.findings), _declared_wrap(config)) == []
     committed = (configs / f"{name}.ir.yaml").read_text()
     assert _ir_text(dumps(resolve(result))) == _ir_text(committed), (
         f"stale: run `uv run python tests/configs/{configs.name}/corpus.py`"
@@ -108,7 +119,7 @@ def test_round_trip_and_oracle(tmp_path: Path, config: str) -> None:
     to_workbook(spec).save(wb)
     shutil.copy(configs / "header.txt", tmp_path / "header.txt")
     result = run_checks(read_workbook(wb), tmp_path)
-    assert [f.message for f in result.findings] == []
+    assert unexpected((f.message for f in result.findings), _declared_wrap(config)) == []
     assert _ir_text(dumps(resolve(result))) == _ir_text(dumps(spec))
     # The generated hierarchy matches the IR, port by port and net by net.
     generate(spec, tmp_path / "out", configs, "flat")

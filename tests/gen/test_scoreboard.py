@@ -6,11 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from hdl_bag.bursts import FIXED, INCR, WRAP
 from hdl_bag.ir import load
 from hdl_bag.tests_gen.route_model import (
-    FIXED,
-    INCR,
-    WRAP,
     Outcome,
     burst_addresses,
     burst_bytes,

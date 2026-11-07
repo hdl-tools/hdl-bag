@@ -11,7 +11,8 @@ A waiver file holds a list of entries::
       reason: HPROT is decoded only when the PROT column is driven.
 
 A waiver whose file glob matches a linted file but which waives nothing is reported as
-``WAIVER-UNUSED``, so stale waivers cannot pile up.
+``WAIVER-UNUSED``, so stale waivers cannot pile up. ``lint`` judges that only when the tool
+ran to the end, and only with the pinned tool version the waivers were written for.
 """
 
 import re
@@ -65,10 +66,8 @@ def load_waivers(path: Path) -> list[Waiver]:
     return out
 
 
-def apply_waivers(
-    tool: str, findings: list[Finding], waivers: list[Waiver], linted: list[str]
-) -> list[Finding]:
-    """Mark waived findings and add a WAIVER-UNUSED finding per stale waiver."""
+def waive(findings: list[Finding], waivers: list[Waiver]) -> tuple[list[Finding], list[Waiver]]:
+    """(FINDINGS with the waived ones marked, the waivers that waived nothing)."""
     used: set[int] = set()
     out = []
     for f in findings:
@@ -78,10 +77,21 @@ def apply_waivers(
         else:
             used.add(hit)
             out.append(f.waive(waivers[hit].reason))
-    for i, w in enumerate(waivers):
-        if i not in used and any(fnmatchcase(p, w.file) for p in linted):
-            out.append(
-                Finding(tool, "", 0, "WAIVER-UNUSED", "error",
-                        f"waiver for {w.rule} on {w.file} matched nothing")
-            )  # fmt: skip
-    return out
+    return out, [w for i, w in enumerate(waivers) if i not in used]
+
+
+def unused(tool: str, waivers: list[Waiver], linted: list[str]) -> list[Finding]:
+    """A WAIVER-UNUSED finding per waiver in WAIVERS whose file glob matches a linted file."""
+    return [
+        Finding(tool, "", 0, "WAIVER-UNUSED", "error",
+                f"waiver for {w.rule} on {w.file} matched nothing")
+        for w in waivers if any(fnmatchcase(p, w.file) for p in linted)
+    ]  # fmt: skip
+
+
+def apply_waivers(
+    tool: str, findings: list[Finding], waivers: list[Waiver], linted: list[str]
+) -> list[Finding]:
+    """Mark waived findings and add a WAIVER-UNUSED finding per stale waiver."""
+    out, idle = waive(findings, waivers)
+    return out + unused(tool, idle, linted)

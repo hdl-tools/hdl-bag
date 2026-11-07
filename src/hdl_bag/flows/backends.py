@@ -36,9 +36,30 @@ _VERIBLE: Final = re.compile(
 )
 
 
+def _version(pattern: str, output: str) -> str | None:
+    m = re.search(pattern, output, re.M)
+    return m[1] if m else None
+
+
+def _same_version(pinned: str, version: str | None) -> bool:
+    """VERSION is the PINNED one (tools.lock), ignoring a leading v and any finer detail the
+    pin leaves out (slang v12.0 is 12.0.0)."""
+    if version is None:
+        return False
+    pin, have = pinned.removeprefix("v"), version.removeprefix("v")
+    return have == pin or have.startswith(f"{pin}.")
+
+
 class Slang:
     name = "slang"
     executable = "slang"
+    pinned = "v12.0"  # tools.lock SLANG_VERSION
+
+    def parse_version(self, output: str) -> str | None:
+        return _version(r"^slang version (\d+(?:\.\d+)*)", output)
+
+    def is_pinned(self, version: str | None) -> bool:
+        return _same_version(self.pinned, version)
 
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
@@ -62,6 +83,13 @@ class Slang:
 class Verilator:
     name = "verilator"
     executable = "verilator"
+    pinned = "v5.052"  # tools.lock VERILATOR_VERSION
+
+    def parse_version(self, output: str) -> str | None:
+        return _version(r"^Verilator (\d+\.\d+)", output)
+
+    def is_pinned(self, version: str | None) -> bool:
+        return _same_version(self.pinned, version)
 
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         return [
@@ -91,6 +119,13 @@ class Verilator:
 class Verible:
     name = "verible"
     executable = "verible-verilog-lint"
+    pinned = "v0.0-4296-g0f262651"  # tools.lock VERIBLE_VERSION
+
+    def parse_version(self, output: str) -> str | None:
+        return _version(r"^Version\s+(\S+)", output)
+
+    def is_pinned(self, version: str | None) -> bool:
+        return _same_version(self.pinned, version)
 
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
         # Verible lints files one at a time and needs no include directories.

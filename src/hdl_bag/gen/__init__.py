@@ -11,10 +11,12 @@ Output layout (relative to the output directory)::
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
     rtl/inhouse/*.sv           copies of the in-house IP the design uses
     rtl/vendor/pulp/...        copies of the vendored PULP files the design uses
+    rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
+    doc/reset.md               reset sequence: domains, crossings, reset groups (D51)
     tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
     tests/<project>.ir.yaml    the IR those tests read
     tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
@@ -27,7 +29,14 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from hdl_bag.gen.collateral import c_header, memmap_html, memmap_md, port_map_md, tieoffs_md
+from hdl_bag.gen.collateral import (
+    c_header,
+    memmap_html,
+    memmap_md,
+    port_map_md,
+    reset_md,
+    tieoffs_md,
+)
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
@@ -37,7 +46,7 @@ from hdl_bag.ir import dumps
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
-from hdl_bag.templates.sources import resolve_sources
+from hdl_bag.templates.sources import VENDOR, resolve_sources
 
 # In-house cells the wrapper itself may instantiate (reset conditioning).
 _WRAPPER_CELLS = ("rtl/inhouse/bag_rst_sync.sv",)
@@ -58,6 +67,8 @@ class Outputs:
     top: str  # lint / compile top module
     filelist: str
     tests: str | None = None  # the generated cocotb module, if any
+    lint_tools: tuple[str, ...] = ("slang", "verilator", "verible")  # Project > Lint tools
+    simulator: str = "verilator"  # Project > Simulator
 
 
 def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
@@ -87,6 +98,7 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _write(outdir, "doc/memmap.md", memmap_md(spec, user_header), written)
         _write(outdir, "doc/memmap.html", memmap_html(spec, user_header), written)
         _write(outdir, "doc/port_map.md", port_map_md(spec, user_header), written)
+        _write(outdir, "doc/reset.md", reset_md(spec, user_header), written)
 
     registry = builtin_registry()
     netlist = build_netlist(spec)
@@ -94,7 +106,7 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     # An opaque template (bag_external) has no RTL of BAG's own: the user supplies it.
     missing = [t for t in used if not (m := registry.get(t)) or not (m.rtl or m.opaque)]
     if missing:
-        _manifest(outdir, written, None, None, None)
+        _manifest(outdir, written, spec, None, None, None)
         raise MissingRtl(missing)
     top = spec.hierarchy.top
 
@@ -107,6 +119,11 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     srcs = list(src.files)
     pkg_root = files("hdl_bag")
     for rel in sorted([*srcs, *src.headers]):
+        _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+    # The licence of each vendored package travels with its files (not in the file list).
+    vendored = {rel.split("/")[3] for rel in [*srcs, *src.headers] if rel.startswith(f"{VENDOR}/")}
+    for name in sorted(vendored):
+        rel = f"{VENDOR}/{name}/LICENSE"
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
     # Stubs for opaque fabrics: the user replaces them with the fabric's RTL.
@@ -171,8 +188,10 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         shim = render_ready_shim(spec, lint_top, top_text, user_header)
         if shim is not None:
             _write(outdir, f"tests/{ready_shim_module(lint_top)}.sv", shim, written)
-    _manifest(outdir, written, lint_top, filelist, tests)
-    return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests)
+    _manifest(outdir, written, spec, lint_top, filelist, tests)
+    p = spec.project
+    return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
+                   p.simulator)  # fmt: skip
 
 
 MANIFEST = "bag_outputs.json"
@@ -183,9 +202,12 @@ def load_outputs(root: Path) -> Outputs:
     data = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
+    defaults = Outputs(root, (), "", "")
     return Outputs(
-        root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests")
-    )
+        root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
+        tuple(data.get("lint_tools", defaults.lint_tools)),
+        data.get("simulator", defaults.simulator),
+    )  # fmt: skip
 
 
 def sources(out: Outputs) -> list[Path]:
@@ -200,7 +222,12 @@ def include_dirs(out: Outputs) -> list[Path]:
 
 
 def _manifest(
-    root: Path, written: list[str], top: str | None, filelist: str | None, tests: str | None
+    root: Path,
+    written: list[str],
+    spec: Spec,
+    top: str | None,
+    filelist: str | None,
+    tests: str | None,
 ) -> None:
     # Remove files a previous run wrote that this run did not (e.g. after a style change).
     old = root / MANIFEST
@@ -209,7 +236,14 @@ def _manifest(
             if rel not in written:
                 (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
-    data = {"files": entries, "top": top, "filelist": filelist, "tests": tests}
+    data = {
+        "files": entries,
+        "top": top,
+        "filelist": filelist,
+        "tests": tests,
+        "lint_tools": list(spec.project.lint_tools),
+        "simulator": spec.project.simulator,
+    }
     text = json.dumps(data, indent=2, sort_keys=True) + "\n"
     with (root / MANIFEST).open("w", encoding="utf-8", newline="\n") as f:
         f.write(text)

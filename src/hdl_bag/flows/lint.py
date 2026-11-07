@@ -12,8 +12,15 @@ from importlib.resources import as_file
 from pathlib import Path
 
 from hdl_bag.flows.backends import BACKENDS, files_root
-from hdl_bag.flows.base import Finding, Report, is_third_party, relative, run_backend
-from hdl_bag.flows.waivers import Waiver, apply_waivers, load_waivers
+from hdl_bag.flows.base import (
+    Finding,
+    Report,
+    is_third_party,
+    relative,
+    run_backend,
+    tool_version,
+)
+from hdl_bag.flows.waivers import Waiver, load_waivers, unused, waive
 
 DEFAULT_TOOLS = ("slang", "verilator", "verible")
 
@@ -38,7 +45,10 @@ def lint(
 ) -> Report:
     """Lint FILES (in compile order, relative to ROOT or absolute) with TOP as the top.
 
-    Waivers are the built-in ones plus EXTRA_WAIVERS files named ``<tool>.yaml``.
+    Waivers are the built-in ones plus EXTRA_WAIVERS files named ``<tool>.yaml``. A waiver
+    that waives nothing is a WAIVER-UNUSED error only when its tool ran to the end (no error
+    stopped it) and is the pinned version the waivers were written for; with another version
+    it is a note.
     """
     unknown = sorted(set(tools) - BACKENDS.keys())
     if unknown:
@@ -47,6 +57,7 @@ def lint(
     linted = [relative(str(f), root) for f in own]
     findings: list[Finding] = []
     third_party: list[Finding] = []
+    notes: list[str] = []
     for name in tools:
         waivers = builtin_waivers(name)
         for path in extra_waivers:
@@ -56,8 +67,24 @@ def lint(
         raw = run_backend(BACKENDS[name], tool_files, top, root, list(incdirs))
         ours, theirs = split_third_party(raw)
         third_party += theirs
-        findings += apply_waivers(name, ours, waivers, linted)
-    return Report("lint", tuple(sorted(findings)), tuple(tools), tuple(sorted(third_party)))
+        marked, idle = waive(ours, waivers)
+        findings += marked
+        stale = unused(name, idle, linted)
+        if not stale or any(f.severity == "error" and f.waived_by is None for f in marked):
+            continue  # a tool that did not run, or stopped early, proves no waiver stale
+        backend = BACKENDS[name]
+        version = tool_version(backend)
+        if backend.is_pinned(version):
+            findings += stale
+            continue
+        which = ", ".join(f.message.removeprefix("waiver for ").removesuffix(" matched nothing")
+                          for f in stale)  # fmt: skip
+        notes.append(
+            f"{name} {version or '(version unknown)'} is not the pinned {backend.pinned}: "
+            f"{len(stale)} waiver(s) written for {backend.pinned} matched nothing ({which})"
+        )
+    return Report("lint", tuple(sorted(findings)), tuple(tools), tuple(sorted(third_party)),
+                  tuple(notes))  # fmt: skip
 
 
 def split_third_party(findings: list[Finding]) -> tuple[list[Finding], list[Finding]]:

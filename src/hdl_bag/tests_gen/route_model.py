@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from hdl_bag.bursts import FIXED, INCR, WRAP, refusing_converter
 from hdl_bag.ir import Spec
 
 ERROR_WORD = 8  # region end - 8 answers with a slave error
@@ -353,8 +354,6 @@ def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
 
 # --------------------------------------------------------------------------------------- bursts
 
-FIXED, INCR, WRAP = 0, 1, 2
-
 
 def burst_path(spec: Spec, m: Any, index: int) -> tuple[list[int], int | None]:
     """What the plain burst test sends for AXI4 master M, INDEX in spec.masters: 4 words it can
@@ -402,43 +401,9 @@ def check_burst_write(
 
 
 def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> bool:
-    """Whether a converter on the way answers this AXI4 burst with SLVERR (D34; the manifests
-    of bag_dw, bag_pc and the bridges). Once a path has become single transfers (AXI4-Lite,
-    AHB-Lite, APB), what follows only ever sees those."""
-
-    def by_width(wide: int, narrow: int) -> bool:
-        return burst == WRAP or (burst == FIXED and beats > 1 and wide > narrow)
-
-    def adapters(port: str, towards_port: bool) -> bool | None:
-        """Walk PORT's adapters in the direction of travel. True: refused here. False: single
-        transfers from here. None: still bursts."""
-        chain = sorted((a for a in spec.adapters if a.port == port), key=lambda a: a.chain_index)
-        for a in reversed(chain) if towards_port else chain:
-            if a.type == "dw" and by_width(int(a.params["from"]), int(a.params["to"])):
-                return True
-            if a.type == "pc" and a.params["from"] == "AXI4":
-                return burst == WRAP
-        return None
-
-    if burst == INCR:
-        return False
-    here = adapters(m.name, towards_port=False)
-    if here is not None:
-        return here
-    fabrics = {f.name: f for f in spec.fabrics}
-    bridges = {b.name: b for b in spec.bridges}
-    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
-    if fabric.protocol != "AXI4":
-        return False
-    if exp.bridges:  # every bridge from AXI4 ends the bursts, so only the first matters
-        b = bridges[exp.bridges[0]]
-        up, down = fabric.data_width, fabrics[b.downstream].data_width
-        if b.template in ("bag_axi2axil", "bag_axi2apb"):
-            return by_width(up, down)
-        assert b.template == "bag_axi2ahb", b.template
-        return up != down and by_width(up, down)
-    assert exp.slave is not None
-    return adapters(exp.slave, towards_port=True) is True
+    """Whether a converter on the way answers this AXI4 burst with SLVERR (hdl_bag.bursts, which
+    bag check's WRAP warning uses too)."""
+    return refusing_converter(spec, m.name, exp.bridges, exp.slave, burst, beats) is not None
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:

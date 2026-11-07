@@ -186,6 +186,10 @@ def axi_adapters() -> Cfg:
     for s_ in ("sram", "wide", "per"):
         c.option(s_, **AXI4_NA)
     c.option("pmu", **AXIL_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "cpu_dw_2_xbar", "ddr", "per", "pmu", "sram", "wide")
+    c.wrap_refused("dma", "xbar_dw_2_ddr", "ddr")
+    c.wrap_refused("dma", "xbar_dw_2_pmu", "pmu")
     return c
 
 
@@ -211,6 +215,8 @@ def axil_adapters() -> Cfg:
     c.option("cpu", **AXI4_NA).option("dsp", **AXIL_NA)
     c.option("aon", slice="cut", **AXIL_NA)
     c.option("buf", fifo=2, **AXIL_NA).option("mem", **AXI4_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "cpu_dw_2_cfg", "buf", "mem")
     return c
 
 
@@ -385,6 +391,8 @@ def bridges_inhouse() -> Cfg:
     c.option("br_mid", **AXI4_NA).option("buf", **AXI4_NA)
     c.option("br_cfg", **AXIL_NA).option("pmu", **AXIL_NA)
     c.option("dbg", **APB4_NA).option("jtag", **APB3_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "br_ahb", "br_ahb")
     return c
 
 
@@ -438,6 +446,8 @@ def bridges_inhouse_cdc() -> Cfg:
     c.option("br_aon", **AXI4_NA).option("wdt", **AXI4_NA)
     c.option("br_lite", **AXIL_NA).option("pmu", **AXIL_NA)
     c.option("dbg", **APB4_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "br_ahb", "br_ahb")
     return c
 
 
@@ -480,6 +490,8 @@ def external_fabric() -> Cfg:
     c.user_port("noc", "cfg_o", "output", 4, "expose")
     c.user_port("noc", "qos_o", "output", 4, "expose")
     c.user_port("peri", "irq_o", "output", 1, "expose")
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "cpu_dw_2_noc", "ram")
     return c
 
 
@@ -543,6 +555,8 @@ def nested_adapters() -> Cfg:
     c.place("cpu_cdc_2_xbar", "ss_a").place("cpu_dw_2_xbar", "ss_b")
     c.place("xbar_dw_2_ram", "ss_d").place("xbar_fifo_2_ram", "ss_c", "u_ram_fifo")
     c.place("xbar_cut_2_ram", "ss_d").place("br_per", "ss_c")
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "cpu_dw_2_xbar", "br_per", "ram")
     return c
 
 
@@ -728,6 +742,9 @@ def mixed_adapters_bridges() -> Cfg:
     c.option("ram", **AXI4_NA).option("pmu", **AXIL_NA)
     c.option("br_ahb", **AHB_MASTER_NA).option("sram", **AHB_SLAVE_NA)
     c.option("br_per", **APB4_NA).option("uart", **APB4_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "br_ahb", "br_ahb")
+    c.wrap_refused("cpu", "xbar_dw_2_pmu", "pmu")
     return c
 
 
@@ -757,6 +774,9 @@ def mixed_wide_to_narrow() -> Cfg:
     c.option("cpu", **AXI4_NA).option("mem", **AXI4_NA)
     c.option("br_ahb", **AHB_MASTER_NA).option("rom", **AHB_SLAVE_NA)
     c.option("br_per", **APB4_NA).option("byte", **APB4_NA)
+    # bag check: these converters answer WRAP with SLVERR (D49).
+    c.wrap_refused("cpu", "br_ahb", "br_ahb")
+    c.wrap_refused("cpu", "xbar_dw_2_mem", "mem")
     return c
 
 

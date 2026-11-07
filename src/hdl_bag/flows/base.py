@@ -46,6 +46,8 @@ class Report:
     tools: tuple[str, ...]
     # Warnings located in vendored third-party RTL: reported, never judged (P3-2).
     third_party: tuple[Finding, ...] = ()
+    # What the reader should know that is not a finding (a tool that is not the pinned one).
+    notes: tuple[str, ...] = ()
 
     @property
     def unwaived(self) -> tuple[Finding, ...]:
@@ -66,12 +68,18 @@ class Report:
             lines.append(
                 f"{len(self.third_party)} third-party warning(s) in rtl/vendor/ not judged"
             )
+        lines += [f"note: {n}" for n in self.notes]
         return "\n".join(lines) + "\n"
 
 
 class Backend(Protocol):
     name: str
     executable: str
+    pinned: str  # the version the built-in waivers were written for (tools.lock)
+
+    def parse_version(self, output: str) -> str | None: ...
+
+    def is_pinned(self, version: str | None) -> bool: ...
 
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]: ...
 
@@ -110,3 +118,12 @@ def run_backend(
                     f"exit status {proc.returncode}: {tail[0]}")
         )  # fmt: skip
     return findings
+
+
+def tool_version(backend: Backend) -> str | None:
+    """The version BACKEND's tool reports, or None if it is missing or does not say."""
+    exe = shutil.which(backend.executable)
+    if exe is None:
+        return None
+    proc = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False)
+    return backend.parse_version(proc.stdout + proc.stderr)

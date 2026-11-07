@@ -155,3 +155,12 @@ def test_every_template_brings_the_headers_its_rtl_includes() -> None:
             text = (files("hdl_bag") / rel).read_text(encoding="utf-8")
             for inc in re.findall(r'`include\s+"([^"]+)"', text):
                 assert inc in have, f"{name}: {rel} includes {inc}, which no source brings"
+
+
+def test_notice_points_at_files_that_exist() -> None:
+    """NOTICE names where the third-party licences are; every path it names exists."""
+    notice = (REPO / "NOTICE").read_text(encoding="utf-8")
+    named = re.findall(r"\b(?:[\w.-]+/)+[\w.*-]+", notice)
+    assert "docs/third-party.md" in named
+    for path in named:
+        assert list(REPO.glob(path)), f"NOTICE names {path}, which does not exist"
