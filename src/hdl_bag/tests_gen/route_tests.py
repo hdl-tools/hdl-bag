@@ -18,6 +18,7 @@ cocotbext-axi through bfm_axi.py, which offers the same interface.
 """
 
 import contextlib
+import logging
 import os
 import random
 from dataclasses import dataclass, replace
@@ -357,7 +358,10 @@ def save_coverage() -> None:
     """Add this test's coverage hits to the file `bag sim` names (BAG_COVERAGE_FILE), if any."""
     path = os.environ.get("BAG_COVERAGE_FILE")
     if path:
-        coverage.save(Path(path))
+        try:
+            coverage.save(Path(path))
+        except (OSError, ValueError) as exc:  # never hide or cause a test's result
+            logging.getLogger("bag.coverage").warning("coverage not saved: %s", exc)
 
 
 # Timeouts are a few times the longest run seen (the route test on demo_ss, the largest config,
@@ -1291,7 +1295,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                     assert int(got.resp) == 2, f"{where}: read {int(got.resp)}, expected refusal"
                     assert not any(new.values()), f"{where}: refused, but stored {new}"
                     refused += 1
-                    coverage.hit(*coverage.burst_bin(m, burst, True))
+                    coverage.hit(*coverage.burst_bin(m, name, burst, True))
                     continue
                 assert int(wrote.resp) == 0, f"{where}: write response {int(wrote.resp)}"
                 assert int(got.resp) == 0, f"{where}: read response {int(got.resp)}"
@@ -1324,7 +1328,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                     f"{where}: read {bytes(got.data).hex()}, expected {read.hex()}"
                 )
                 checked += 1
-                coverage.hit(*coverage.burst_bin(m, burst, False))
+                coverage.hit(*coverage.burst_bin(m, name, burst, False))
     assert checked + refused == sum(
         len(burst_shapes(SPEC, m, x)) for m in SPEC.masters for x in SPEC.slaves
     )

@@ -26,13 +26,13 @@ def test_space_of_a_config() -> None:
     assert ("cpu", "regs", "write") not in bins["path"]  # Access_Rules cpu -> regs RO
     assert {
         ("cpu", "mem.sec", "secure", "allowed"),
-        ("cpu", "mem.sec", "non-secure", "denied"),
+        ("cpu", "mem.sec", "non-secure", "refused"),
     } <= (bins["secure"])
     # dbg reaches only the read-only rom: no word to burst-write and read back.
-    assert {(m, b) for m, b, _ in bins["burst"]} == {
+    assert {(m, b) for m, _, b, _ in bins["burst"]} == {
         (m, b) for m in ("cpu", "dma") for b in ("INCR", "FIXED", "WRAP")
     }
-    assert {k for _, k in bins["response"]} >= {"OKAY", "slave error", "miss"}
+    assert {k for _, _, k in bins["response"]} >= {"OKAY", "slave error", "miss"}
 
 
 def test_save_merges_and_report_marks_what_is_missing(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_save_merges_and_report_marks_what_is_missing(tmp_path: Path) -> None:
     coverage.hit("path", ("cpu", "rom", "read"))
     coverage.save(path)
     coverage.hit("path", ("cpu", "rom", "read"))
-    coverage.hit("burst", ("cpu", "WRAP", "passed"))
+    coverage.hit("burst", ("cpu", "wrap", "WRAP", "passed"))
     coverage.save(path)
     hits = coverage.load(path)
     assert hits[("path", ("cpu", "rom", "read"))] == 2
@@ -79,3 +79,38 @@ def test_a_full_run_covers_every_bin_and_a_filtered_run_does_not(tmp_path: Path)
     assert f"coverage: burst 0/{len(bins['burst'])}" in report.notes
     hits: Counter[tuple[str, coverage.Bin]] = coverage.load(out.root / "sim" / "coverage.json")
     assert all(hits[("path", b)] for b in bins["path"])
+
+
+def _outputs_with_tests(tmp_path: Path) -> Path:
+    out = generate(load(XBAR_RULES), tmp_path / "out", XBAR_RULES.parent)
+    assert out.tests is not None
+    return out.root / out.tests
+
+
+def test_a_broken_hits_file_is_a_note_not_a_crash(tmp_path: Path) -> None:
+    """The report never costs `bag sim` its result: a truncated file (a killed run) is a note."""
+    from hdl_bag.flows.sim import _coverage
+
+    module = _outputs_with_tests(tmp_path)
+    hits = tmp_path / "coverage.json"
+    hits.write_text('{"path": [["cpu", "rom"', encoding="utf-8")
+    (note,) = _coverage(module, hits)
+    assert note.startswith("coverage report skipped:")
+    hits.write_text("{}", encoding="utf-8")
+    assert _coverage(module, hits) == ["coverage: the tests run recorded none"]
+
+
+def test_a_shard_is_measured_against_its_own_masters(tmp_path: Path) -> None:
+    from hdl_bag.flows.sim import _coverage
+
+    module = _outputs_with_tests(tmp_path)
+    hits = tmp_path / "coverage.json"
+    coverage.hit("path", ("cpu", "rom", "read"))
+    coverage.save(hits)
+    spec = load(XBAR_RULES)
+    shard = {m.name for m in spec.masters[0::2]}
+    assert shard == {"cpu", "dma"}  # masters cpu, dbg, dma: every second from the first
+    whole = len(coverage.space(spec)["path"])
+    part = len(coverage.space(spec, shard)["path"])
+    assert part < whole
+    assert f"coverage: path 1/{part}" in _coverage(module, hits, "0/2")

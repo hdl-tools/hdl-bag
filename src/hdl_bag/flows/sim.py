@@ -143,26 +143,36 @@ def run_tests(
     hits = build / "coverage.json"
     hits.parent.mkdir(parents=True, exist_ok=True)
     hits.unlink(missing_ok=True)
+    hits.with_suffix(".md").unlink(missing_ok=True)  # never leave an older run's report
     report = simulate(
         files, top, root / out.tests, build,
         env={**(env or {}), "BAG_COVERAGE_FILE": str(hits)},
         incdirs=[root / d for d in include_dirs(out)], test_filter=test_filter, seed=seed,
     )  # fmt: skip
-    return replace(report, notes=(*report.notes, *_coverage(root / out.tests, hits)))
+    shard = (env or {}).get("BAG_ROUTE_MASTERS")
+    return replace(report, notes=(*report.notes, *_coverage(root / out.tests, hits, shard)))
 
 
-def _coverage(module: Path, hits: Path) -> list[str]:
+def _coverage(module: Path, hits: Path, shard: str | None = None) -> list[str]:
     """Write the coverage report next to HITS (D52) and return its summary lines; nothing if
-    the run recorded none (the READY shim's run)."""
+    the run recorded none. SHARD ("i/k", BAG_ROUTE_MASTERS) limits it to those masters. The
+    report never costs the run its result: a problem with it is a note."""
     from hdl_bag.ir import load
     from hdl_bag.tests_gen import coverage
 
-    counts = coverage.load(hits) if hits.is_file() else None
-    if not counts:
-        return []
-    # tests/<project>_tests.py reads tests/<project>.ir.yaml
-    spec = load(module.with_name(module.name.removesuffix("_tests.py") + ".ir.yaml"))
-    text, summary = coverage.report(spec, counts)
-    path = hits.with_suffix(".md")
-    path.write_text(text, encoding="utf-8", newline="\n")
+    try:
+        counts = coverage.load(hits) if hits.is_file() else None
+        if not counts:
+            return ["coverage: the tests run recorded none"]
+        # tests/<project>_tests.py reads tests/<project>.ir.yaml
+        spec = load(module.with_name(module.name.removesuffix("_tests.py") + ".ir.yaml"))
+        masters = None
+        if shard:
+            i, k = (int(x) for x in shard.split("/"))
+            masters = {m.name for m in spec.masters[i::k]}
+        text, summary = coverage.report(spec, counts, masters)
+        path = hits.with_suffix(".md")
+        path.write_text(text, encoding="utf-8", newline="\n")
+    except (OSError, ValueError, KeyError) as exc:
+        return [f"coverage report skipped: {exc}"]
     return [*summary, f"coverage report (report only, gates nothing): {path}"]
