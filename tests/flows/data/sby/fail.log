@@ -1,0 +1,61 @@
+SBY 16:01:19 [f_bmc] Removing directory '/work/out/fx/t1/f_bmc'.
+SBY 16:01:19 [f_bmc] Copy '/work/out/fx/t1/f.sv' to '/work/out/fx/t1/f_bmc/src/f.sv'.
+SBY 16:01:19 [f_bmc] engine_0: smtbmc yices
+SBY 16:01:19 [f_cvr] Removing directory '/work/out/fx/t1/f_cvr'.
+SBY 16:01:19 [f_cvr] Copy '/work/out/fx/t1/f.sv' to '/work/out/fx/t1/f_cvr/src/f.sv'.
+SBY 16:01:19 [f_cvr] engine_0: smtbmc yices
+SBY 16:01:19 [f_bmc] base: starting process "cd f_bmc/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:01:19 [f_cvr] base: starting process "cd f_cvr/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:01:19 [f_cvr] base: finished (returncode=0)
+SBY 16:01:19 [f_bmc] base: finished (returncode=0)
+SBY 16:01:19 [f_cvr] prep: starting process "cd f_cvr/model; yosys -ql design_prep.log design_prep.ys"
+SBY 16:01:19 [f_bmc] prep: starting process "cd f_bmc/model; yosys -ql design_prep.log design_prep.ys"
+SBY 16:01:19 [f_cvr] prep: finished (returncode=0)
+SBY 16:01:19 [f_cvr] smt2: starting process "cd f_cvr/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 16:01:19 [f_bmc] prep: finished (returncode=0)
+SBY 16:01:19 [f_bmc] smt2: starting process "cd f_bmc/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 16:01:19 [f_cvr] smt2: finished (returncode=0)
+SBY 16:01:19 [f_cvr] engine_0: starting process "cd f_cvr; yosys-smtbmc -s yices --presat --unroll -c --noprogress -t 10  --append 0 --dump-vcd engine_0/trace%.vcd --dump-yw engine_0/trace%.yw --dump-vlogtb engine_0/trace%_tb.v --dump-smtc engine_0/trace%.smtc model/design_smt2.smt2"
+SBY 16:01:19 [f_bmc] smt2: finished (returncode=0)
+SBY 16:01:19 [f_bmc] engine_0: starting process "cd f_bmc; yosys-smtbmc -s yices --presat --unroll --noprogress -t 10  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Solver: yices
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Solver: yices
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 0..
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Checking assumptions in step 0..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 1..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 2..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 3..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 4..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 5..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 6..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 7..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 8..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Checking cover reachability in step 9..
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Unreached cover statement at t: f.sv:8.15-8.35 (_witness_.check_13)
+SBY 16:01:19 [f_cvr] engine_0: ##   0:00:00  Status: failed
+SBY 16:01:19 [f_cvr] engine_0: finished (returncode=1)
+SBY 16:01:19 [f_cvr] engine_0: Status returned by engine: FAIL
+SBY 16:01:19 [f_cvr] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:19 [f_cvr] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:19 [f_cvr] summary: engine_0 (smtbmc yices) returned FAIL
+SBY 16:01:19 [f_cvr] summary: engine_0 did not produce any traces
+SBY 16:01:19 [f_cvr] summary: unreached cover statements:
+SBY 16:01:19 [f_cvr] summary:   t._witness_.check_13 at f.sv:8.15-8.35
+SBY 16:01:19 [f_cvr] DONE (FAIL, rc=2)
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Checking assertions in step 0..
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  BMC failed!
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Assert failed in t: f.sv:7.27-7.38 (_witness_.check_10)
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Writing trace to VCD file: engine_0/trace.vcd
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Writing trace to Verilog testbench: engine_0/trace_tb.v
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Writing trace to constraints file: engine_0/trace.smtc
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Writing trace to Yosys witness file: engine_0/trace.yw
+SBY 16:01:19 [f_bmc] engine_0: ##   0:00:00  Status: failed
+SBY 16:01:19 [f_bmc] engine_0: finished (returncode=1)
+SBY 16:01:19 [f_bmc] engine_0: Status returned by engine: FAIL
+SBY 16:01:19 [f_bmc] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:19 [f_bmc] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:19 [f_bmc] summary: engine_0 (smtbmc yices) returned FAIL
+SBY 16:01:19 [f_bmc] summary: counterexample trace: f_bmc/engine_0/trace.vcd
+SBY 16:01:19 [f_bmc] summary:   failed assertion t._witness_.check_10 at f.sv:7.27-7.38
+SBY 16:01:19 [f_bmc] DONE (FAIL, rc=2)
+SBY 16:01:19 The following tasks failed: ['bmc', 'cvr']

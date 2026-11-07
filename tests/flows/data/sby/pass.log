@@ -1,0 +1,98 @@
+SBY 16:08:14 [apb4_min_reset_bmc] Removing directory '/work/out/fx/apb4_min/formal/apb4_min_reset_bmc'.
+SBY 16:08:14 [apb4_min_reset_bmc] Copy '/work/out/fx/apb4_min/formal/../rtl' to '/work/out/fx/apb4_min/formal/apb4_min_reset_bmc/src/rtl'.
+SBY 16:08:14 [apb4_min_reset_bmc] Copy '/work/out/fx/apb4_min/formal/apb4_min_reset.sv' to '/work/out/fx/apb4_min/formal/apb4_min_reset_bmc/src/apb4_min_reset.sv'.
+SBY 16:08:14 [apb4_min_reset_bmc] engine_0: smtbmc yices
+SBY 16:08:14 [apb4_min_reset_cover] Removing directory '/work/out/fx/apb4_min/formal/apb4_min_reset_cover'.
+SBY 16:08:14 [apb4_min_reset_cover] Copy '/work/out/fx/apb4_min/formal/../rtl' to '/work/out/fx/apb4_min/formal/apb4_min_reset_cover/src/rtl'.
+SBY 16:08:14 [apb4_min_reset_cover] Copy '/work/out/fx/apb4_min/formal/apb4_min_reset.sv' to '/work/out/fx/apb4_min/formal/apb4_min_reset_cover/src/apb4_min_reset.sv'.
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: smtbmc yices
+SBY 16:08:15 [apb4_min_reset_bmc] base: starting process "cd apb4_min_reset_bmc/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:08:15 [apb4_min_reset_cover] base: starting process "cd apb4_min_reset_cover/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:08:15 [apb4_min_reset_bmc] base: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_cover] base: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_bmc] prep: starting process "cd apb4_min_reset_bmc/model; yosys -ql design_prep.log design_prep.ys"
+SBY 16:08:15 [apb4_min_reset_cover] prep: starting process "cd apb4_min_reset_cover/model; yosys -ql design_prep.log design_prep.ys"
+SBY 16:08:15 [apb4_min_reset_cover] prep: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_cover] smt2: starting process "cd apb4_min_reset_cover/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 16:08:15 [apb4_min_reset_bmc] prep: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_bmc] smt2: starting process "cd apb4_min_reset_bmc/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 16:08:15 [apb4_min_reset_cover] smt2: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: starting process "cd apb4_min_reset_cover; yosys-smtbmc -s yices --presat --unroll -c --noprogress -t 20  --append 0 --dump-vcd engine_0/trace%.vcd --dump-yw engine_0/trace%.yw --dump-vlogtb engine_0/trace%_tb.v --dump-smtc engine_0/trace%.smtc model/design_smt2.smt2"
+SBY 16:08:15 [apb4_min_reset_bmc] smt2: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: starting process "cd apb4_min_reset_bmc; yosys-smtbmc -s yices --presat --unroll --noprogress -t 20  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Solver: yices
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Solver: yices
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Checking cover reachability in step 0..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 0..
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Checking cover reachability in step 1..
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Checking cover reachability in step 2..
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Checking cover reachability in step 3..
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Reached cover statement in step 3 at apb4_min_top: u_bag_apb4_min_reset_props.active_s0_apb4_psel
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to VCD file: engine_0/trace0.vcd
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 0..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 1..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 1..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 2..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 2..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 3..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 3..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 4..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 4..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 5..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 5..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 6..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 6..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 7..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 7..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 8..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 8..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 9..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 9..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 10..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 10..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 11..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 11..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 12..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 12..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 13..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 13..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 14..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 14..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 15..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 15..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 16..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 16..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 17..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 17..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 18..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 18..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assumptions in step 19..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Checking assertions in step 19..
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: ##   0:00:00  Status: passed
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_bmc] engine_0: Status returned by engine: pass
+SBY 16:08:15 [apb4_min_reset_bmc] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:08:15 [apb4_min_reset_bmc] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:08:15 [apb4_min_reset_bmc] summary: engine_0 (smtbmc yices) returned pass
+SBY 16:08:15 [apb4_min_reset_bmc] summary: engine_0 did not produce any traces
+SBY 16:08:15 [apb4_min_reset_bmc] DONE (PASS, rc=0)
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to Verilog testbench: engine_0/trace0_tb.v
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to constraints file: engine_0/trace0.smtc
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to Yosys witness file: engine_0/trace0.yw
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Checking cover reachability in step 3..
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Reached cover statement in step 3 at apb4_min_top: u_bag_apb4_min_reset_props.reset_again_0
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to VCD file: engine_0/trace1.vcd
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to Verilog testbench: engine_0/trace1_tb.v
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to constraints file: engine_0/trace1.smtc
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Writing trace to Yosys witness file: engine_0/trace1.yw
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: ##   0:00:00  Status: passed
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: finished (returncode=0)
+SBY 16:08:15 [apb4_min_reset_cover] engine_0: Status returned by engine: pass
+SBY 16:08:15 [apb4_min_reset_cover] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:08:15 [apb4_min_reset_cover] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:08:15 [apb4_min_reset_cover] summary: engine_0 (smtbmc yices) returned pass
+SBY 16:08:15 [apb4_min_reset_cover] summary: cover trace: apb4_min_reset_cover/engine_0/trace0.vcd
+SBY 16:08:15 [apb4_min_reset_cover] summary:   reached cover statement apb4_min_top.\u_bag_apb4_min_reset_props.active_s0_apb4_psel at apb4_min_reset.sv:32.15-32.66 step 3
+SBY 16:08:15 [apb4_min_reset_cover] summary: cover trace: apb4_min_reset_cover/engine_0/trace1.vcd
+SBY 16:08:15 [apb4_min_reset_cover] summary:   reached cover statement apb4_min_top.\u_bag_apb4_min_reset_props.reset_again_0 at apb4_min_reset.sv:35.15-35.73 step 3
+SBY 16:08:15 [apb4_min_reset_cover] DONE (PASS, rc=0)

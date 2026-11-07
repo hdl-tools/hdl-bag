@@ -1,0 +1,25 @@
+SBY 16:17:12 [to_x_bmc] Removing directory '/work/out/fx/axil_xbar_rules/formal/to_x_bmc'.
+SBY 16:17:12 [to_x_bmc] Copy '/work/out/fx/axil_xbar_rules/formal/../rtl' to '/work/out/fx/axil_xbar_rules/formal/to_x_bmc/src/rtl'.
+SBY 16:17:13 [to_x_bmc] Copy '/work/out/fx/axil_xbar_rules/formal/axil_xbar_rules_reset.sv' to '/work/out/fx/axil_xbar_rules/formal/to_x_bmc/src/axil_xbar_rules_reset.sv'.
+SBY 16:17:13 [to_x_bmc] engine_0: smtbmc yices
+SBY 16:17:13 [to_x_cover] Removing directory '/work/out/fx/axil_xbar_rules/formal/to_x_cover'.
+SBY 16:17:13 [to_x_cover] Copy '/work/out/fx/axil_xbar_rules/formal/../rtl' to '/work/out/fx/axil_xbar_rules/formal/to_x_cover/src/rtl'.
+SBY 16:17:15 [to_x_cover] Copy '/work/out/fx/axil_xbar_rules/formal/axil_xbar_rules_reset.sv' to '/work/out/fx/axil_xbar_rules/formal/to_x_cover/src/axil_xbar_rules_reset.sv'.
+SBY 16:17:15 [to_x_cover] engine_0: smtbmc yices
+SBY 16:17:15 [to_x_bmc] base: starting process "cd to_x_bmc/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:17:15 [to_x_cover] base: starting process "cd to_x_cover/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:17:16 [to_x_bmc] Reached TIMEOUT (3 seconds). Terminating all subprocesses.
+SBY 16:17:16 [to_x_bmc] base: terminating process
+Traceback (most recent call last):
+  File "/opt/oss-cad-suite/libexec/sby", line 583, in <module>
+    taskloop.run()
+  File "/opt/oss-cad-suite/libexec/../share/yosys/python3/sby_core.py", line 655, in run
+    task.check_timeout()
+  File "/opt/oss-cad-suite/libexec/../share/yosys/python3/sby_core.py", line 986, in check_timeout
+    self.terminate(timeout=True)
+  File "/opt/oss-cad-suite/libexec/../share/yosys/python3/sby_core.py", line 1321, in terminate
+    self.update_unknown_props(dict(source="timeout"))
+  File "/opt/oss-cad-suite/libexec/../share/yosys/python3/sby_core.py", line 1333, in update_unknown_props
+    for prop in self.design.hierarchy:
+                ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'hierarchy'

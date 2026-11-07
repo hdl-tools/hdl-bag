@@ -72,15 +72,19 @@ class Report:
         return "\n".join(lines) + "\n"
 
 
-class Backend(Protocol):
+class Versioned(Protocol):
+    """A tool with a pinned version (tools.lock) that it reports with ``--version``."""
+
     name: str
     executable: str
-    pinned: str  # the version the built-in waivers were written for (tools.lock)
+    pinned: str  # the version the built-in waivers or flows were written for (tools.lock)
 
     def parse_version(self, output: str) -> str | None: ...
 
     def is_pinned(self, version: str | None) -> bool: ...
 
+
+class Backend(Versioned, Protocol):
     def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]: ...
 
     def parse(self, output: str, root: Path) -> list[Finding]: ...
@@ -120,7 +124,7 @@ def run_backend(
     return findings
 
 
-def tool_version(backend: Backend) -> str | None:
+def tool_version(backend: Versioned) -> str | None:
     """The version BACKEND's tool reports, or None if it is missing or does not say."""
     exe = shutil.which(backend.executable)
     if exe is None:

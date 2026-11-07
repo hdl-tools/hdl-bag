@@ -10,11 +10,11 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha. Phases 1 to 4 of 6 are done.
+Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 90 validation checks | Formal checks and nightly random regression (Phase 5) |
+| Spec workbook template, reader and 90 validation checks | Protocol and decode properties, and nightly random regression (Phase 5) |
 | Canonical YAML IR, byte-identical across runs | CDC constraints, user guide and v1.0 release (Phase 6) |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
@@ -25,6 +25,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done.
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
+| `bag formal`: SymbiYosys jobs per design; so far quiet-in-reset properties | |
 
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
 
@@ -40,7 +41,8 @@ bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
 bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml, checked either way)
 bag lint out/                           # Project > Lint tools (slang, Verilator, Verible): zero unwaived findings
 bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
-bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim
+bag formal out/                         # generated SymbiYosys jobs: every assertion holds, every cover is reached
+bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim -> formal
 ```
 
 `--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
@@ -65,13 +67,15 @@ doc/reset.md             reset sequence: domains, crossings, which resets must a
 tests/<project>_tests.py cocotb tests that apply to this config
 tests/<project>.ir.yaml  the IR those tests read
 tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --ready-shim
+formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job (bmc and cover)
 sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 
 ## Requirements
 
 - Python 3.11 or newer (tested on Linux and Windows).
-- For `bag lint` and `bag flow`: Verilator, slang and Verible. The pinned
+- For `bag lint` and `bag flow`: Verilator, slang and Verible; for `bag formal`,
+  SymbiYosys and Yosys with the yosys-slang plugin (OSS CAD Suite). The pinned
   versions are in [tools.lock](tools.lock), and the container image
   `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile))
   has all of them. Reading, checking and generating need no EDA tools.
@@ -82,7 +86,7 @@ sim/coverage.md          written by bag sim: what the tests exercised (paths, re
 uv sync
 uv run ruff check && uv run ruff format --check && uv run mypy src tests scripts
 uv run pytest                 # everything except EDA tests
-uv run pytest -m eda          # lint, compile and cocotb tests (in the tools image)
+uv run pytest -m eda          # lint, compile, cocotb and formal tests (in the tools image)
 uv run pytest -m "eda and smoke"  # the per-PR subset of those (tests/smoke.py)
 ```
 
