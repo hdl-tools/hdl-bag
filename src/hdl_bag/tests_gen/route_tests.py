@@ -17,6 +17,7 @@ AHB-Lite and APB ports use the in-house BFMs (bfm.py); AXI4 and AXI4-Lite ports 
 cocotbext-axi through bfm_axi.py, which offers the same interface.
 """
 
+import contextlib
 import os
 import random
 from dataclasses import dataclass, replace
@@ -25,7 +26,7 @@ from typing import Any
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, Combine, ReadOnly, RisingEdge
+from cocotb.triggers import ClockCycles, Combine, NextTimeStep, ReadOnly, RisingEdge, Timer
 from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
@@ -59,6 +60,7 @@ from hdl_bag.tests_gen.route_model import (
     check_write,
     contention,
     crossbar_path,
+    crossing_masters,
     error_words,
     exokay_paths,
     forced_resp_paths,
@@ -132,11 +134,37 @@ def _port(dut: Any, spec: Spec, name: str, proto: str, slave: bool, aw: int, dw:
     return Port(dut, 0, signals, {s: v for s, v in tied.items() if s in signals})
 
 
-async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    clocks = {}
+# The running clocks, by clock name (_start_clocks replaces them).
+_CLOCKS: dict[str, Clock] = {}
+DEFAULT_PERIODS = (10, 14, 26, 34)
+
+
+def _start_clocks(
+    dut: Any, periods: tuple[int, ...] = DEFAULT_PERIODS, phases: tuple[int, ...] = ()
+) -> None:
+    """Clock i (by name) runs at periods[i % len(periods)] ns, starting phases[i] ns from now."""
+
+    async def later(clock: Clock, delay: int) -> None:
+        await Timer(delay, unit="ns")
+        clock.start()
+
     for i, c in enumerate(sorted(SPEC.clocks, key=lambda c: c.name)):
-        Clock(getattr(dut, c.name), (10, 14, 26, 34)[i % 4], unit="ns").start()
-        clocks[c.domain] = getattr(dut, c.name)
+        old = _CLOCKS.get(c.name)
+        if old is not None:
+            with contextlib.suppress(RuntimeError):  # not started yet (a delayed start)
+                old.stop()
+        _CLOCKS[c.name] = Clock(getattr(dut, c.name), periods[i % len(periods)], unit="ns")
+        delay = phases[i] if i < len(phases) else 0
+        if delay:
+            cocotb.start_soon(later(_CLOCKS[c.name], delay))
+        else:
+            _CLOCKS[c.name].start()
+
+
+async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    _CLOCKS.clear()
+    _start_clocks(dut)
+    clocks = {c.domain: getattr(dut, c.name) for c in SPEC.clocks}
     for r in SPEC.resets:
         getattr(dut, r.name).value = 0 if r.polarity == "active-low" else 1
     for x in SPEC.wrapper.extra_inputs:
@@ -461,18 +489,25 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
     assert checked > 0
 
 
-async def _traffic(masters: dict[str, Any]) -> tuple[int, int]:
+async def _traffic(masters: dict[str, Any], spawned: list[Any] | None = None) -> tuple[int, int]:
     """All masters at once, AXI masters with several transactions in flight (cocotbext-axi
     rotates IDs): every write lands and every read returns that master's own data. Returns the
-    words checked and the masters that took part."""
+    words checked and the masters that took part. Every task it starts goes in SPAWNED, so a
+    caller can abandon all of them (a reset)."""
+    spawned = [] if spawned is None else spawned
+
+    def start(coro: Any) -> Any:
+        task = cocotb.start_soon(coro)
+        spawned.append(task)
+        return task
 
     async def traffic(m: Any, words: list[int]) -> int:
         data = {a: random.getrandbits(32) for a in words}
         if m.protocol in AXI:
-            writes = [cocotb.start_soon(masters[m.name].write(a, d)) for a, d in data.items()]
+            writes = [start(masters[m.name].write(a, d)) for a, d in data.items()]
             await Combine(*writes)
             assert not any(w.result() for w in writes), f"{m.name}: write error"
-            reads = [cocotb.start_soon(masters[m.name].read(a)) for a in data]
+            reads = [start(masters[m.name].read(a)) for a in data]
             await Combine(*reads)
             got = [r.result() for r in reads]
         else:
@@ -491,7 +526,7 @@ async def _traffic(masters: dict[str, Any]) -> tuple[int, int]:
         return len(data)
 
     plans = {m.name: (m, private_words(SPEC, m, i, 8)) for i, m in enumerate(SPEC.masters)}
-    tasks = [cocotb.start_soon(traffic(m, words)) for m, words in plans.values() if words]
+    tasks = [start(traffic(m, words)) for m, words in plans.values() if words]
     await Combine(*tasks)
     total = sum(t.result() for t in tasks)
     assert total > 0
@@ -505,9 +540,12 @@ async def concurrent_traffic_keeps_every_masters_data(dut: Any) -> None:
     dut._log.info("concurrent traffic: %d words over %d masters", total, count)
 
 
-async def _bursts(masters: dict[str, Any]) -> int:
+async def _bursts(
+    masters: dict[str, Any], spawned: list[Any] | None = None, offset: int = 0
+) -> int:
     """Every AXI4 master at once: an 8-beat INCR burst of its own words, written and read back.
-    Returns the bursts checked."""
+    OFFSET moves the words (private_words' index) clear of _traffic's, so both can run at once.
+    Every task it starts goes in SPAWNED. Returns the bursts checked."""
 
     async def one(m: Any, word: int) -> None:
         data = bytes(random.getrandbits(8) for _ in range(32))
@@ -515,12 +553,12 @@ async def _bursts(masters: dict[str, Any]) -> int:
         r = await masters[m.name].burst_read(word, 32)
         assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst read"
 
-    plans = [
-        (m, private_words(SPEC, m, i, 8))
-        for i, m in enumerate(SPEC.masters)
-        if m.protocol == "AXI4"
-    ]
+    count = len(SPEC.masters)
+    plans = [(m, private_words(SPEC, m, i + offset * count, 8)) for i, m in enumerate(SPEC.masters)
+             if m.protocol == "AXI4"]  # fmt: skip
     tasks = [cocotb.start_soon(one(m, words[0])) for m, words in plans if words]
+    if spawned is not None:
+        spawned += tasks
     if tasks:
         await Combine(*tasks)
     return len(tasks)
@@ -545,6 +583,235 @@ async def traffic_survives_back_pressure_on_every_channel(dut: Any) -> None:
         bursts = await _bursts(masters)
         dut._log.info("back-pressure at slaves=%s masters=%s: %d words over %d masters, %d bursts",
                       at_slaves, at_masters, total, count, bursts)  # fmt: skip
+
+
+def _set_resets(dut: Any, asserted: bool) -> None:
+    for r in SPEC.resets:
+        level = asserted if r.polarity != "active-low" else not asserted
+        getattr(dut, r.name).value = int(level)
+
+
+async def _cycles(clocks: dict[str, Any], n: int) -> None:
+    """At least N cycles of every clock."""
+    for clk in clocks.values():
+        await ClockCycles(clk, n)
+
+
+def _busy(name: str, model: Any) -> dict[str, int]:
+    """What model NAME is being asked to do by the design: any request or response VALID (AW,
+    W, AR towards an AXI slave; B, R towards an AXI master; HTRANS towards an AHB-Lite slave;
+    PSEL towards an APB slave), or HREADY low towards an AHB-Lite master (it is high in reset)."""
+    if hasattr(model, "bus") and hasattr(model, "target"):  # AXI slave
+        w, r = model.bus.write, model.bus.read
+        return {f"{name}.awvalid": int(w.aw.awvalid.value), f"{name}.wvalid": int(w.w.wvalid.value),
+                f"{name}.arvalid": int(r.ar.arvalid.value)}  # fmt: skip
+    if hasattr(model, "bus"):  # AXI master
+        return {f"{name}.bvalid": int(model.bus.write.b.bvalid.value),
+                f"{name}.rvalid": int(model.bus.read.r.rvalid.value)}  # fmt: skip
+    if isinstance(model, AhbSlave):
+        return {f"{name}.htrans": model.port["htrans"]}
+    if isinstance(model, ApbSlave):
+        return {f"{name}.psel": model.port["psel"]}
+    if isinstance(model, AhbMaster):
+        return {f"{name}.hready_low": 1 - model.p["hready"]}
+    return {}
+
+
+async def _watch_reset(dut: Any, masters: dict[str, Any], slaves: dict[str, Any],
+                       held: list[bool], seen: list[str]) -> None:  # fmt: skip
+    """While HELD[0], on every edge of every domain's own clock, record in SEEN anything that
+    asks a model to act. Each domain gets the latency of its own reset: bag_rst_sync clears its
+    flops at once (async), so nothing from the first edge on; or after its 2 stages (sync), so
+    from the third."""
+    ports = {**{m.name: (m.domain, masters[m.name]) for m in SPEC.masters},
+             **{s.name: (s.domain, slaves[s.name]) for s in SPEC.slaves}}  # fmt: skip
+
+    async def domain(name: str, clk: Any, allow: int) -> None:
+        mine = [(p, model) for p, (d, model) in ports.items() if d == name]
+        edges = 0
+        while held[0]:
+            await RisingEdge(clk)
+            await ReadOnly()
+            edges += 1
+            if held[0] and edges > allow:
+                for p, model in mine:
+                    seen.extend(
+                        f"{k} at edge {edges} of {name}" for k, v in _busy(p, model).items() if v
+                    )
+
+    resets = {r.domain: r for r in SPEC.resets}
+    clocks = {c.domain: getattr(dut, c.name) for c in SPEC.clocks}
+    tasks = [cocotb.start_soon(domain(d, clk, 0 if resets[d].assertion == "async" else 2))
+             for d, clk in clocks.items()]  # fmt: skip
+    await Combine(*tasks)
+
+
+def _activity(masters: dict[str, Any], slaves: dict[str, Any]) -> dict[str, int]:
+    """How much every slave has seen and stored, and every response VALID at a master."""
+    out = {f"{n}.log": len(s.log) for n, s in slaves.items()}
+    out |= {f"{n}.written": len(s.written) for n, s in slaves.items()}
+    for n, m in masters.items():
+        if hasattr(m, "bus"):
+            out |= _busy(n, m)
+    return out
+
+
+async def _reset_everything(
+    dut: Any,
+    masters: dict[str, Any],
+    slaves: dict[str, Any],
+    clocks: dict[str, Any],
+    tasks: list[Any] | None = None,
+) -> None:
+    """Assert every reset, as CLK-CDC-RESET requires, and abandon TASKS (traffic in flight).
+    While reset is held, nothing may ask a model to act (_watch_reset, every edge). After it,
+    with no master asking, nothing may reach a slave and no response may come back: nothing
+    left over from before the reset surfaces. Then the models start again."""
+    for t in tasks or ():
+        t.cancel()
+    _set_resets(dut, True)
+    for s in slaves.values():
+        if hasattr(s, "stop"):
+            s.stop()
+    for m in masters.values():
+        if hasattr(m, "idle"):
+            m.idle()
+    held: list[bool] = [True]
+    seen: list[str] = []
+    watch = cocotb.start_soon(_watch_reset(dut, masters, slaves, held, seen))
+    await _cycles(clocks, 8)
+    await RisingEdge(next(iter(clocks.values())))
+    held[0] = False
+    _set_resets(dut, False)
+    await watch
+    assert not seen, f"asked to act during reset: {seen[:6]}"
+    await _cycles(clocks, 6)  # bag_rst_sync releases after its stages
+    for s in slaves.values():
+        if hasattr(s, "stop"):
+            s.start()  # listening again, so a leftover transfer is seen
+    before = _activity(masters, slaves)
+    await _cycles(clocks, 20)  # a quiet spell: no master asks for anything
+    after = _activity(masters, slaves)
+    changed = {
+        k: (before[k], after[k])
+        for k in before
+        if before[k] != after[k] or (k.endswith(("valid", "hready_low")) and after[k])
+    }
+    assert not changed, f"after reset, with no master asking: {changed}"
+
+
+async def _everywhere(masters: dict[str, Any], spawned: list[Any] | None = None) -> int:
+    """Every master at once, each to word 0x40 of every slave it reaches cleanly (plain_word),
+    through every fabric and bridge on the way: each word written, then all read back. Every
+    task it starts goes in SPAWNED. Returns the words checked."""
+
+    async def one(m: Any, words: list[int]) -> int:
+        prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+        data = {a: random.getrandbits(32) for a in words}
+        for a, d in data.items():
+            err, _, _ = await _access(
+                masters[m.name], m.protocol, m.data_width, a, True, d, False, prot
+            )
+            assert not err, f"{m.name}: write error at {a:#x}"
+        for a, d in data.items():
+            err, got, _ = await _access(
+                masters[m.name], m.protocol, m.data_width, a, False, 0, False, prot
+            )
+            assert not err and got == d, f"{m.name} {a:#x}: read {got:#x}, wrote {d:#x}"
+        return len(data)
+
+    def own_word(i: int, m: Any, s: Any) -> int | None:
+        """A word of S only master I uses: word 0x40 + 16 * I, if M reaches it cleanly too."""
+        found = plain_word(SPEC, m, s)
+        if found is None:
+            return None
+        word = found[0] + 16 * i
+        outs = [route(SPEC, m.name, word, w, False, {}) for w in (True, False)]
+        ok = word < 1 << m.addr_width and all(
+            o.slave == s.name and not (o.slave_error or o.masked) for o in outs
+        )
+        return word if ok else None
+
+    plans = {
+        m.name: (m, [w for s in SPEC.slaves if (w := own_word(i, m, s)) is not None])
+        for i, m in enumerate(SPEC.masters)
+    }
+    tasks = [cocotb.start_soon(one(m, words)) for m, words in plans.values() if words]
+    if spawned is not None:
+        spawned += tasks
+    if tasks:
+        await Combine(*tasks)
+    return sum(t.result() for t in tasks)
+
+
+async def reset_during_traffic_leaves_nothing_behind(dut: Any) -> None:
+    """All masters at once, each to every slave it reaches (_everywhere) and with AXI4 bursts.
+    For each slave reached, every reset is asserted on an edge where a request to that slave is
+    in the middle of its handshake, so every path, through every bridge on it, is cut
+    mid-transfer. While reset is held nothing asks a model to act, on any edge of any domain;
+    once it is released nothing left over surfaces; then fresh traffic from every master to
+    every slave returns its own data."""
+    masters, slaves, clocks = await _bring_up(dut)
+
+    first = sorted(SPEC.clocks, key=lambda c: c.name)[0]
+    fastest = getattr(dut, first.name)
+
+    def mid_handshake(slave: str) -> list[str]:
+        return [k for k, v in _busy(slave, slaves[slave]).items() if v]
+
+    # Each slave in turn: wait until a request to it is in the middle of its handshake, and
+    # reset on that edge, so every path (through every bridge on it) is cut mid-transfer.
+    reached = sorted({s.name for m in SPEC.masters for s in SPEC.slaves if plain_word(SPEC, m, s)})
+    for target in reached:
+        spawned: list[Any] = []
+        work: list[Any] = [
+            cocotb.start_soon(_everywhere(masters, spawned)),
+            cocotb.start_soon(_bursts(masters, spawned, 1)),
+        ]
+        mid: list[str] = []
+        while not mid:
+            assert not all(t.done() for t in work), f"no request to {target} was caught in flight"
+            await RisingEdge(fastest)
+            await ReadOnly()
+            mid = mid_handshake(target)
+        await NextTimeStep()  # out of the read-only phase, still in that cycle
+        await _reset_everything(dut, masters, slaves, clocks, [*work, *spawned])
+        words = await _everywhere(masters)
+        bursts = await _bursts(masters)
+        dut._log.info("reset with %s mid-handshake: then %d words to every slave reached, %d bursts",
+                      mid, words, bursts)  # fmt: skip
+    assert reached
+
+
+def _sweep(n: int) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
+    """(periods, start phases) per run for N clocks. First equal periods with the clocks out of
+    phase; then each ratio both ways, assigned by the bits of each clock's index, so every pair
+    of clocks sees each ratio in some run (two indices differ in at least one bit)."""
+    runs = [((10,) * n, tuple(3 * i for i in range(n)))]
+    for a, b in ((10, 30), (10, 7)):
+        for bit in range(max(1, (n - 1).bit_length())):
+            for lo, hi in ((a, b), (b, a)):
+                runs.append((tuple(hi if i >> bit & 1 else lo for i in range(n)), ()))
+    return runs
+
+
+async def traffic_crosses_clock_domains_at_every_ratio(dut: Any) -> None:
+    """With traffic that crosses clock domains: for each run of _sweep (equal periods out of
+    phase, then 1:3, 3:1, 10:7 and 7:10 between every pair of clocks), the clocks restart at
+    those periods with reset held around the change, then all masters at once and the AXI4
+    bursts. A crossing that loses or repeats a transfer at some ratio returns wrong data or
+    times out."""
+    masters, slaves, clocks = await _bring_up(dut)
+    crossing = crossing_masters(SPEC)
+    assert crossing, "no master's traffic crosses a clock domain"
+    for periods, phases in _sweep(len(SPEC.clocks)):
+        _set_resets(dut, True)
+        _start_clocks(dut, periods, phases)
+        await _reset_everything(dut, masters, slaves, clocks)
+        total, count = await _traffic(masters)
+        bursts = await _bursts(masters)
+        dut._log.info("clocks at %s ns, phases %s: %d words over %d masters (%s cross), %d bursts",
+                      periods, phases, total, count, crossing, bursts)  # fmt: skip
 
 
 async def shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not(dut: Any) -> None:

@@ -201,6 +201,10 @@ class Result:
     resp: int = 0
 
 
+# The response code of a transfer a reset flushed before it completed (not an AXI code).
+FLUSHED = -1
+
+
 class AxiPortMaster:
     def __init__(self, clock: Any, axi_bus: Any, lite: bool, reset: Any = None,
                  reset_active_level: bool = False) -> None:  # fmt: skip
@@ -251,10 +255,12 @@ class AxiPortMaster:
         extra = {} if self.lite else {"user": user, "wuser": user, "size": 2}
         resp = await self.master.write(addr, data.to_bytes(4, "little"), prot=self._prot(prot),
                                        **extra)  # fmt: skip
-        return int(resp.resp)
+        return FLUSHED if resp is None else int(resp.resp)
 
     async def read(self, addr: int, prot: int = 0, user: int = 0) -> Result:
         resp = await self.master.read(addr, 4, prot=self._prot(prot), **self._user(user))
+        if resp is None:  # flushed by a reset before it completed
+            return Result(True, 0, FLUSHED)
         code = int(resp.resp)
         return Result(code != AxiResp.OKAY, int.from_bytes(resp.data, "little"), code)
 
@@ -262,15 +268,17 @@ class AxiPortMaster:
         """One single-byte write (a size-0 transfer on AXI4; byte strobe on AXI4-Lite)."""
         extra = {} if self.lite else {"size": 0}
         resp = await self.master.write(addr, bytes([value]), **extra)
-        return int(resp.resp)
+        return FLUSHED if resp is None else int(resp.resp)
 
     async def burst_write(self, addr: int, data: bytes) -> int:
         """One INCR burst of 32-bit beats (AXI4 only)."""
         resp = await self.master.write(addr, data, size=2)
-        return int(resp.resp)
+        return FLUSHED if resp is None else int(resp.resp)
 
     async def burst_read(self, addr: int, length: int) -> Result:
         resp = await self.master.read(addr, length, size=2)
+        if resp is None:  # flushed by a reset before it completed
+            return Result(True, 0, FLUSHED)
         code = int(resp.resp)
         return Result(code != AxiResp.OKAY, int.from_bytes(resp.data, "little"), code)
 
