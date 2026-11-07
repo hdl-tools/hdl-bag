@@ -82,6 +82,7 @@ uv sync
 uv run ruff check && uv run ruff format --check && uv run mypy src tests scripts
 uv run pytest                 # everything except EDA tests
 uv run pytest -m eda          # lint, compile and cocotb tests (in the tools image)
+uv run pytest -m "eda and smoke"  # the per-PR subset of those (tests/smoke.py)
 ```
 
 ## Licence
