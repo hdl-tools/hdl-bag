@@ -1,0 +1,69 @@
+name: eda-shards
+
+# Lint flow and simulation tests against the pinned EDA tools: four parallel jobs balanced by
+# tests/eda_durations.json (pytest-split; refresh it with scripts/eda_durations.py), each spread
+# over the runner's cores with pytest-xdist (every test has its own out/ directory). Called by
+# pr.yml (the smoke subset on pull requests, the full list on main and nightly) and by
+# full-eda.yml (the full list on a pull request labelled full-eda).
+
+on:
+  workflow_call:
+    inputs:
+      marks:
+        description: pytest -m expression
+        type: string
+        required: true
+      save-cache:
+        description: Save the ccache entries (the nightly only restores, to spare the cache limit)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  shard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # A cold C++ build is most of the time here, and Verilator's makefiles use ccache when
+      # it is there. BASEDIR and NOHASHDIR let builds in different out/ directories share.
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
+      EDA_MARKS: ${{ inputs.marks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-v2-${{ matrix.group }}-
+            ccache-v2-
+      - run: uv sync --locked
+      - run: ccache --zero-stats
+      - run: >-
+          CCACHE_BASEDIR="$PWD"
+          uv run pytest -m "$EDA_MARKS" -n auto --splits 4 --group ${{ matrix.group }}
+          --durations-path tests/eda_durations.json --splitting-algorithm least_duration
+          --durations=0 --durations-min=0
+      - run: ccache --show-stats
+        if: always()
+      - uses: actions/cache/save@v4
+        if: success() && inputs.save-cache
+        with:
+          path: /tmp/ccache
+          key: ccache-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
