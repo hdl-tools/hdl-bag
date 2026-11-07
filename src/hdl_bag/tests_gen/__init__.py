@@ -181,6 +181,9 @@ def render_tests(spec: Spec, user_header: str | None) -> str:
                 "",
                 f'@cocotb.test(timeout_time={t.timeout_us}, timeout_unit="us")',
                 f"async def {t.name}(dut: Any) -> None:",
-                f"    await route_tests.{t.name}(dut)",
+                "    try:",
+                f"        await route_tests.{t.name}(dut)",
+                "    finally:",
+                "        route_tests.save_coverage()",
             ]
     return "\n".join(lines) + "\n"

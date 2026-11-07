@@ -18,6 +18,7 @@ cocotbext-axi through bfm_axi.py, which offers the same interface.
 """
 
 import contextlib
+import logging
 import os
 import random
 from dataclasses import dataclass, replace
@@ -34,6 +35,7 @@ from hdl_bag.bursts import FIXED, INCR
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
+from hdl_bag.tests_gen import coverage
 from hdl_bag.tests_gen.bfm import (
     AHB_M,
     AHB_S,
@@ -65,6 +67,7 @@ from hdl_bag.tests_gen.route_model import (
     forced_resp_paths,
     midpoint_path,
     narrow_apb_path,
+    pin_sets,
     plain_word,
     private_words,
     probes,
@@ -348,12 +351,17 @@ def _read_beats(log: list[Any], word: int) -> list[int]:
 
 
 def _pin_sets() -> list[dict[str, bool]]:
-    pins = list(SPEC.wrapper.extra_inputs)
-    sets = [dict.fromkeys(pins, False)]
-    sets += [{p: p == on for p in pins} for on in pins]  # one at a time
-    if len(pins) > 1:
-        sets.append(dict.fromkeys(pins, True))
-    return sets
+    return pin_sets(SPEC)
+
+
+def save_coverage() -> None:
+    """Add this test's coverage hits to the file `bag sim` names (BAG_COVERAGE_FILE), if any."""
+    path = os.environ.get("BAG_COVERAGE_FILE")
+    if path:
+        try:
+            coverage.save(Path(path))
+        except (OSError, ValueError) as exc:  # never hide or cause a test's result
+            logging.getLogger("bag.coverage").warning("coverage not saved: %s", exc)
 
 
 # Timeouts are a few times the longest run seen (the route test on demo_ss, the largest config,
@@ -458,6 +466,8 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 assert got == data, f"{where}: read {got:#x}, wrote {data:#x}"
                         checked += 1
                         reached.add(m.name)
+                        for kind, key in coverage.access_bins(SPEC, m, addr, write, nonsec, exp):
+                            coverage.hit(kind, key)
     assert checked > 0 and errors > 0, (checked, errors)
     assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
@@ -1285,6 +1295,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                     assert int(got.resp) == 2, f"{where}: read {int(got.resp)}, expected refusal"
                     assert not any(new.values()), f"{where}: refused, but stored {new}"
                     refused += 1
+                    coverage.hit(*coverage.burst_bin(m, name, burst, True))
                     continue
                 assert int(wrote.resp) == 0, f"{where}: write response {int(wrote.resp)}"
                 assert int(got.resp) == 0, f"{where}: read response {int(got.resp)}"
@@ -1317,6 +1328,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                     f"{where}: read {bytes(got.data).hex()}, expected {read.hex()}"
                 )
                 checked += 1
+                coverage.hit(*coverage.burst_bin(m, name, burst, False))
     assert checked + refused == sum(
         len(burst_shapes(SPEC, m, x)) for m in SPEC.masters for x in SPEC.slaves
     )

@@ -49,6 +49,17 @@ def _option(spec: Spec, port: str, column: str) -> str | None:
     return None if opt is None else str(getattr(opt, column))
 
 
+def pin_sets(spec: Spec) -> list[dict[str, bool]]:
+    """The alias-enable pin settings the routing test runs with: all off, each on alone, and
+    all on when there are several."""
+    pins = list(spec.wrapper.extra_inputs)
+    sets = [dict.fromkeys(pins, False)]
+    sets += [{p: p == on for p in pins} for on in pins]  # one at a time
+    if len(pins) > 1:
+        sets.append(dict.fromkeys(pins, True))
+    return sets
+
+
 def prot_tied(spec: Spec, port: str) -> bool:
     return _option(spec, port, "prot") in ("tie-0", "tie-default")
 
