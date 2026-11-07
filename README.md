@@ -64,6 +64,7 @@ doc/reset.md             reset sequence: domains, crossings, which resets must a
 tests/<project>_tests.py cocotb tests that apply to this config
 tests/<project>.ir.yaml  the IR those tests read
 tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --ready-shim
+sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 
 ## Requirements

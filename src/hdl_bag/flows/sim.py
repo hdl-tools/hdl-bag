@@ -7,6 +7,7 @@ import re
 import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from hdl_bag.flows.base import Finding, Report
@@ -139,8 +140,29 @@ def run_tests(
         if not shim.is_file():
             raise ValueError(f"{out.root}: no READY shim (no AXI port, or no traffic to run)")
         files, build, test_filter = [*files, shim], root / "sim_ready_shim", SHIM_TEST
-    return simulate(
+    hits = build / "coverage.json"
+    hits.parent.mkdir(parents=True, exist_ok=True)
+    hits.unlink(missing_ok=True)
+    report = simulate(
         files, top, root / out.tests, build,
-        env=env, incdirs=[root / d for d in include_dirs(out)],
-        test_filter=test_filter, seed=seed,
+        env={**(env or {}), "BAG_COVERAGE_FILE": str(hits)},
+        incdirs=[root / d for d in include_dirs(out)], test_filter=test_filter, seed=seed,
     )  # fmt: skip
+    return replace(report, notes=(*report.notes, *_coverage(root / out.tests, hits)))
+
+
+def _coverage(module: Path, hits: Path) -> list[str]:
+    """Write the coverage report next to HITS (D52) and return its summary lines; nothing if
+    the run recorded none (the READY shim's run)."""
+    from hdl_bag.ir import load
+    from hdl_bag.tests_gen import coverage
+
+    counts = coverage.load(hits) if hits.is_file() else None
+    if not counts:
+        return []
+    # tests/<project>_tests.py reads tests/<project>.ir.yaml
+    spec = load(module.with_name(module.name.removesuffix("_tests.py") + ".ir.yaml"))
+    text, summary = coverage.report(spec, counts)
+    path = hits.with_suffix(".md")
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return [*summary, f"coverage report (report only, gates nothing): {path}"]
