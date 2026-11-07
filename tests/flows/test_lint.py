@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
 import shutil
+from importlib import import_module
 from pathlib import Path
 
 import pytest
 
-from hdl_bag.flows import Finding, WaiverError, lint, load_waivers
+from hdl_bag.flows import Finding, Report, WaiverError, lint, load_waivers
 from hdl_bag.flows.backends import BACKENDS, Slang, Verible, Verilator, parse_flags, slang_flags
 from hdl_bag.flows.waivers import Waiver, apply_waivers
 
@@ -125,6 +126,99 @@ def test_unknown_tool() -> None:
         lint([], "a", ROOT, tools=["spyglass"])
 
 
+STALE = "- {rule: WIDTH, file: 'rtl/*.sv', reason: written for the pinned tool}\n"
+
+
+def _lint_with_a_stale_waiver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                              found: list[Finding], version: str | None) -> Report:  # fmt: skip
+    """Lint rtl/top.sv with Verilator, a waiver nothing will use, and a fake Verilator that
+    reports FOUND and says it is VERSION."""
+    lint_module = import_module("hdl_bag.flows.lint")
+    waivers = tmp_path / "verilator.yaml"
+    waivers.write_text(STALE)
+    monkeypatch.setattr(lint_module, "run_backend", lambda *a, **k: list(found))
+    monkeypatch.setattr(lint_module, "tool_version", lambda backend: version)
+    return lint([Path("rtl/top.sv")], "top", tmp_path, tools=["verilator"], extra_waivers=[waivers])
+
+
+def test_no_unused_waivers_for_a_tool_that_did_not_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = Finding("verilator", "", 0, "TOOL-MISSING", "error", "'verilator' not found on PATH")
+    report = _lint_with_a_stale_waiver(tmp_path, monkeypatch, [missing], None)
+    assert [f.rule for f in report.findings] == ["TOOL-MISSING"]
+
+
+def test_no_unused_waivers_when_the_tool_stopped_on_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verilator stops at an error, before most warnings: an unused waiver proves nothing."""
+    error = Finding("verilator", "rtl/top.sv", 3, "error", "error", "syntax error")
+    report = _lint_with_a_stale_waiver(tmp_path, monkeypatch, [error], Verilator.pinned)
+    assert [f.rule for f in report.findings] == ["error"]
+
+
+def test_unused_waiver_on_the_pinned_version_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = _lint_with_a_stale_waiver(tmp_path, monkeypatch, [], Verilator.pinned)
+    assert [f.rule for f in report.findings] == ["WAIVER-UNUSED"]
+    assert not report.ok and report.notes == ()
+
+
+def test_unused_waiver_on_another_version_is_a_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The waivers were written against the pinned tools; on another version a waiver that
+    matches nothing says so, rather than failing as stale."""
+    report = _lint_with_a_stale_waiver(tmp_path, monkeypatch, [], "4.228")
+    assert report.ok and report.findings == ()
+    assert report.notes == (
+        f"verilator 4.228 is not the pinned {Verilator.pinned}: 1 waiver(s) written for "
+        f"{Verilator.pinned} matched nothing (WIDTH on rtl/*.sv)",
+    )
+    assert report.notes[0] in report.format()
+
+
+@pytest.mark.parametrize(
+    ("backend", "output", "version"),
+    [
+        (Verilator(), "Verilator 5.052 2026-09-05 rev v5.052\n", "5.052"),
+        (Slang(), "slang version 12.0.0+545f88b2e\n", "12.0.0"),
+        (Verible(), "Version\tv0.0-4296-g0f262651\nCommit-Timestamp\t2026-09-23T08:15:19Z\n",
+         "v0.0-4296-g0f262651"),
+        (Verilator(), "something else\n", None),
+    ],
+)  # fmt: skip
+def test_version_parsing(
+    backend: Slang | Verilator | Verible, output: str, version: str | None
+) -> None:
+    assert backend.parse_version(output) == version
+
+
+def test_pinned_versions_match_tools_lock() -> None:
+    lock = dict(
+        line.split("=", 1)
+        for line in (Path(__file__).parents[2] / "tools.lock").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    assert {b.name: b.pinned for b in BACKENDS.values()} == {
+        "slang": lock["SLANG_VERSION"], "verilator": lock["VERILATOR_VERSION"],
+        "verible": lock["VERIBLE_VERSION"],
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("backend", "version", "same"),
+    [
+        (Verilator(), "5.052", True), (Verilator(), "5.040", False), (Slang(), "12.0.0", True),
+        (Slang(), "12.1.0", False), (Verible(), "v0.0-4296-g0f262651", True), (Verible(), None, False),
+    ],
+)  # fmt: skip
+def test_is_pinned(backend: Slang | Verilator | Verible, version: str | None, same: bool) -> None:
+    assert backend.is_pinned(version) is same
+
+
 # ----------------------------------------------------------------- real tools (eda)
 
 CLEAN = """\
@@ -151,6 +245,18 @@ module dirty (
   always_ff @(posedge clk_i) q_o <= d_i;
 endmodule
 """
+
+
+@pytest.mark.eda
+@pytest.mark.parametrize("tool", sorted(BACKENDS))
+def test_tools_image_has_the_pinned_versions(tool: str) -> None:
+    """Where the waivers are judged (CI, the tools image), every tool reports the pinned
+    version, so an unused waiver is a WAIVER-UNUSED error there and never only a note."""
+    from hdl_bag.flows.base import tool_version
+
+    backend = BACKENDS[tool]
+    version = tool_version(backend)
+    assert backend.is_pinned(version), f"{tool} reports {version}, pinned {backend.pinned}"
 
 
 @pytest.mark.eda

@@ -26,7 +26,7 @@ CONFIGS = {
     "ahb2apb_nested": TESTS / "configs" / "p2" / "ahb2apb_nested.ir.yaml",
 }
 FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_map.md",
-         "doc/tieoffs.md")  # fmt: skip
+         "doc/tieoffs.md", "doc/reset.md")  # fmt: skip
 
 
 def _generate(spec: Spec, src: Path, root: Path) -> Path:
@@ -201,6 +201,69 @@ def test_output_flags(tmp_path: Path) -> None:
     spec = spec.model_copy(update={"project": spec.project.model_copy(update={"outputs": outputs})})
     generate(spec, tmp_path, src.parent)
     assert not (tmp_path / "sw").exists() and not (tmp_path / "doc").exists()
+
+
+# ---------------------------------------------------------------- reset sequence (D51)
+
+
+def _crossings(spec: Spec) -> set[tuple[str, str, str]]:
+    """(name, domain, domain) of every clock-domain crossing, from the IR: cdc adapters, and
+    bridges whose fabrics are in different domains."""
+    fabrics = {f.name: f.domain for f in spec.fabrics}
+    out = {(a.name, str(a.params["from"]), str(a.params["to"])) for a in spec.adapters
+           if a.type == "cdc"}  # fmt: skip
+    out |= {(b.name, fabrics[b.upstream], fabrics[b.downstream]) for b in spec.bridges
+            if fabrics[b.upstream] != fabrics[b.downstream]}  # fmt: skip
+    return out
+
+
+def _groups(spec: Spec) -> set[frozenset[str]]:
+    """Domains joined by crossings, by repeated merging."""
+    groups = [{c.domain} for c in spec.clocks]
+    for _, a, b in _crossings(spec):
+        ga = next(g for g in groups if a in g)
+        gb = next(g for g in groups if b in g)
+        if ga is not gb:
+            groups.remove(gb)
+            ga |= gb
+    return {frozenset(g) for g in groups}
+
+
+def test_reset_doc_matches_ir(generated: tuple[Spec, Path]) -> None:
+    spec, root = generated
+    tables = _md_tables((root / "doc" / "reset.md").read_text(encoding="utf-8"))
+    clocks = {c.domain: c for c in spec.clocks}
+    resets = {r.domain: r for r in spec.resets}
+    want = set()
+    for d, c in clocks.items():
+        r = resets[d]
+        leaves = f"2 {c.name} edges after release" if r.deassertion == "sync" else "at release"
+        want.add((d, c.name, r.name, r.polarity, r.assertion, r.deassertion, leaves))
+    assert {tuple(row) for row in tables["Domains"]} == want
+    got = {(row[0], row[2], row[3]) for row in tables.get("Crossings", [])}
+    assert got == _crossings(spec)
+    for row in tables.get("Crossings", []):
+        assert row[4] == f"{resets[row[2]].name}, {resets[row[3]].name}"
+    assert {frozenset(row[1].split(", ")) for row in tables["Reset groups"]} == _groups(spec)
+    for row in tables["Reset groups"]:
+        assert row[2] == ", ".join(resets[d].name for d in row[1].split(", "))
+
+
+def test_golden_reset_groups() -> None:
+    """demo_ss: every domain crosses to D_SYS, so all four reset together."""
+    assert _groups(load(GOLDEN_IR)) == {frozenset({"D_AON", "D_CPU", "D_PER", "D_SYS"})}
+
+
+def test_reset_doc_names_the_clocks_a_sync_assertion_needs() -> None:
+    from hdl_bag.gen.collateral import reset_md
+
+    spec = load(GOLDEN_IR)
+    resets = tuple(r.model_copy(update={"assertion": "sync"}) if r.name == "rst_per_n" else r
+                   for r in spec.resets)  # fmt: skip
+    text = reset_md(spec.model_copy(update={"resets": resets}), None)
+    assert "rst_per_n after 2 clk_per edges (those clocks must be running)" in text
+    assert "without a clock" not in text
+    assert "without a clock" in reset_md(spec, None)
 
 
 # ---------------------------------------------------------------- golden snapshots

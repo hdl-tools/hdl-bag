@@ -9,6 +9,7 @@ from pathlib import Path
 
 import openpyxl
 import pytest
+from dsl import SAMPLE_WRAP, unexpected
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -121,7 +122,7 @@ def test_ir_workbook_ir_round_trip(golden: Spec, tmp_path: Path) -> None:
     to_workbook(golden).save(path)
     shutil.copy(GOLDEN_DIR / "header.txt", tmp_path)
     result = run_checks(read_workbook(path), tmp_path)
-    assert result.findings == ()
+    assert unexpected((f"{x.severity}: {x.message}" for x in result.findings), SAMPLE_WRAP) == []
     assert _no_provenance(resolve(result)) == _no_provenance(golden)
 
 

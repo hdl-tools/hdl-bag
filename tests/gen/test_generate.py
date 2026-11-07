@@ -93,6 +93,24 @@ def test_golden_generates_fully(tmp_path: Path) -> None:
     assert load_outputs(tmp_path).files == out.files
 
 
+def test_vendored_files_come_with_their_licence(tmp_path: Path) -> None:
+    """Every vendored package the output holds files of brings its LICENSE (SHL-0.51 requires
+    the notice to travel with the files); the licence is not a source to compile."""
+    from importlib.resources import files
+
+    out = generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)
+    vendored = [f for f in out.files if f.startswith("rtl/vendor/pulp/")]
+    packages = {f.split("/")[3] for f in vendored}
+    assert packages >= {"axi", "common_cells"}
+    for pkg in packages:
+        rel = f"rtl/vendor/pulp/{pkg}/LICENSE"
+        assert rel in out.files
+        assert (tmp_path / rel).read_text(encoding="utf-8") == (files("hdl_bag") / rel).read_text(
+            encoding="utf-8"
+        )
+    assert not any(p.name == "LICENSE" for p in sources(out))
+
+
 @pytest.fixture
 def no_apb_rtl(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every built-in template has RTL since Phase 3 PR 7; mark bag_apb_mux as having none

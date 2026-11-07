@@ -4,10 +4,12 @@
 
 A ``Cfg`` collects the same inputs a user types into the spec workbook. Each phase's
 corpus builds its configs with it, then turns them into IR through the real path:
-workbook -> ``bag check`` (zero findings) -> resolve.
+workbook -> ``bag check`` -> resolve. The only findings allowed are the AXI-WRAP-REFUSED
+warnings the config declares with ``wrap_refused`` (D49), exactly.
 """
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +31,38 @@ TOPOLOGY = {"AHB-Lite": "single-layer", "APB4": "decoder-mux", "APB3": "decoder-
 ERROR = {"AHB-Lite": "HRESP_ERROR", "APB4": "PSLVERR", "APB3": "PSLVERR", "AXI4": "SLVERR",
          "AXI4-Lite": "SLVERR"}  # fmt: skip
 AXI = ("AXI4", "AXI4-Lite")
+
+# (master, converter, targets) of one AXI-WRAP-REFUSED warning.
+Refusal = tuple[str, str, tuple[str, ...]]
+_WRAP = re.compile(r"WRAP bursts from (\w+) to ([\w, ]+) get SLVERR: .* (\w+) cannot convert them")
+# The demo_ss sample's: cpu0's 128-to-64 width converter, and the 64-to-128 one in front of ddr0.
+SAMPLE_WRAP: set[Refusal] = {
+    ("cpu0", "cpu0_dw_2_main_xbar", ("br_main2cfg", "br_main2per", "ddr0", "sram0")),
+    ("dma0", "main_xbar_dw_2_ddr0", ("ddr0",)),
+}
+
+
+def wrap_refusals(messages: Iterable[str]) -> list[Refusal]:
+    """The refusals the AXI-WRAP-REFUSED warnings among MESSAGES report."""
+    out = []
+    for text in messages:
+        if "(AXI-WRAP-REFUSED)" in text:
+            m = _WRAP.search(text)
+            assert m, text
+            out.append((m[1], m[3], tuple(m[2].split(", "))))
+    return out
+
+
+def unexpected(messages: Iterable[str], declared: set[Refusal]) -> list[str]:
+    """MESSAGES that are not the DECLARED WRAP refusals, and a line if those differ."""
+    messages = list(messages)
+    others = [m for m in messages if "(AXI-WRAP-REFUSED)" not in m]
+    got = wrap_refusals(messages)
+    if sorted(got) != sorted(declared):
+        others.append(f"WRAP refusals {sorted(got)} are not the declared {sorted(declared)}")
+    return others
+
+
 OPTION_COLUMNS = ("fifo", "slice", "prot", "qos", "region", "cache", "lock", "pstrb", "pslverr")
 
 
@@ -41,6 +75,7 @@ class Cfg:
     subwrapper_naming: str = "{instance}_{proto}_{signal}"
     phase: int = 2
     data: SpecData = field(init=False)
+    wrap: set[Refusal] = field(init=False, default_factory=set)
 
     def __post_init__(self) -> None:
         self.data = SpecData(title=f"BAG Phase {self.phase} gate config: {self.name}",
@@ -55,6 +90,12 @@ class Cfg:
                              "Port style": self.style, "Signal naming pattern": self.signal_pattern,
                              "Sub-wrapper port naming": self.subwrapper_naming,
                              "Extra top-level inputs": ", ".join(self.extra_inputs) or None}  # fmt: skip
+
+    def wrap_refused(self, master: str, converter: str, *targets: str) -> "Cfg":
+        """Declare the AXI-WRAP-REFUSED warning bag check gives for MASTER: CONVERTER answers
+        its WRAP bursts to TARGETS with SLVERR."""
+        self.wrap.add((master, converter, targets))
+        return self
 
     # ---- clocks and resets
     def domain(self, domain: str, clock: str, reset: str, polarity: str = "active-low",
@@ -182,7 +223,8 @@ HEADER = Path(__file__).parent / "p2" / "header.txt"
 
 
 def resolve_cfg(cfg: Cfg, tmp: Path) -> tuple[Spec | None, list[str]]:
-    """CFG through workbook -> bag check -> resolve in TMP: (IR, []) or (None, findings)."""
+    """CFG through workbook -> bag check -> resolve in TMP: (IR, []), or (None, findings) on
+    any finding but the WRAP refusals CFG declares."""
     import shutil
 
     from hdl_bag.checks import run_checks
@@ -194,8 +236,9 @@ def resolve_cfg(cfg: Cfg, tmp: Path) -> tuple[Spec | None, list[str]]:
     build_workbook(data=cfg.data).save(path)
     shutil.copy(HEADER, tmp / "header.txt")
     result = run_checks(read_workbook(path), tmp)
-    if result.findings:
-        return None, [f"{f.severity}: {f.message}" for f in result.findings]
+    wrong = unexpected((f"{f.severity}: {f.message}" for f in result.findings), cfg.wrap)
+    if wrong:
+        return None, wrong
     return resolve(result), []
 
 

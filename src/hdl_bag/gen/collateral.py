@@ -9,6 +9,8 @@
   same rows as the Markdown.
 * ``doc/port_map.md``: per fabric, the resolved port indices, priorities, widths,
   adapters and placement.
+* ``doc/reset.md``: the reset sequence the design needs (D51): its domains and reset ports,
+  every clock-domain crossing, the domains that must reset together, and the order.
 
 Every file carries the D4 header (user text verbatim, then the tool banner); Markdown and
 HTML put it in an HTML comment.
@@ -273,3 +275,114 @@ def _user_connection(u: UserPort) -> str:
     if u.connection in ("clock", "reset"):
         return f"{u.connection} of domain {u.target}"
     return "open"
+
+
+# bag_rst_sync's Stages in the wrapper: a sync edge of a domain's reset takes this many edges
+# of its clock (rtl/inhouse/bag_rst_sync.sv).
+RST_SYNC_STAGES = 2
+DOMAIN_COLUMNS = ("Domain", "Clock", "Reset", "Polarity", "Assertion", "Deassertion",
+                  "Leaves reset")  # fmt: skip
+CROSSING_COLUMNS = ("Crossing", "Kind", "From", "To", "Resets")
+GROUP_COLUMNS = ("Group", "Domains", "Resets")
+
+
+def crossings(spec: Spec) -> list[tuple[str, str, str, str]]:
+    """(name, kind, domain, domain) of every clock-domain crossing: a cdc adapter, or a bridge
+    whose fabrics are in different domains (its CDC is inside it, D10)."""
+    domain = {f.name: f.domain for f in spec.fabrics}
+    out = [(a.name, "cdc adapter", str(a.params["from"]), str(a.params["to"]))
+           for a in spec.adapters if a.type == "cdc"]  # fmt: skip
+    out += [(b.name, f"bridge ({b.template})", domain[b.upstream], domain[b.downstream])
+            for b in spec.bridges if domain[b.upstream] != domain[b.downstream]]  # fmt: skip
+    return sorted(out)
+
+
+def reset_groups(spec: Spec) -> list[list[str]]:
+    """The domains that must reset together: those a chain of crossings joins. Each group is
+    sorted; groups are in order of their first domain."""
+    parent = {c.domain: c.domain for c in spec.clocks}
+
+    def root(d: str) -> str:
+        while parent[d] != d:
+            d = parent[d]
+        return d
+
+    for _, _, a, b in crossings(spec):
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    groups: dict[str, list[str]] = {}
+    for d in sorted(parent):
+        groups.setdefault(root(d), []).append(d)
+    return sorted(groups.values())
+
+
+def reset_md(spec: Spec, user_header: str | None) -> str:
+    """The reset sequence of SPEC: what to assert, how long to hold it, and in which order."""
+    clocks = {c.domain: c for c in spec.clocks}
+    resets = {r.domain: r for r in spec.resets}
+    n = RST_SYNC_STAGES
+    lines = [f"<!--\n{_banner(spec, user_header)}-->", "",
+             f"# {spec.project.name} reset sequence", "",
+             "BAG's clock-domain crossings keep state on both sides: the gray-coded pointers of "
+             "a CDC FIFO, or the request and acknowledge of a bridge's handshake. Both sides must "
+             "be in reset together, or a transfer in flight can be lost, repeated, or appear "
+             "from nowhere. This page lists the domains, the crossings, and the domains that "
+             "must therefore reset together, then the order to follow. hdl-bag's documentation "
+             "explains why (docs/reset-sequence.md in its repository).", "",
+             "## Domains", "",
+             f"Each reset is conditioned in its domain (bag_rst_sync, {n} stages): an async "
+             f"assertion takes effect at once, a sync one after {n} edges of the domain's "
+             "clock.", ""]  # fmt: skip
+    rows = []
+    for d in sorted(clocks):
+        c, r = clocks[d], resets[d]
+        leaves = f"{n} {c.name} edges after release" if r.deassertion == "sync" else "at release"
+        rows.append({"Domain": d, "Clock": c.name, "Reset": r.name, "Polarity": r.polarity,
+                     "Assertion": r.assertion, "Deassertion": r.deassertion,
+                     "Leaves reset": leaves})  # fmt: skip
+    lines += [*_md_table(DOMAIN_COLUMNS, rows), ""]
+    lines += ["## Crossings", ""]
+    rows = [{"Crossing": name, "Kind": kind, "From": a, "To": b,
+             "Resets": f"{resets[a].name}, {resets[b].name}"}
+            for name, kind, a, b in crossings(spec)]  # fmt: skip
+    lines += [*_md_table(CROSSING_COLUMNS, rows), ""] if rows else ["None: one clock domain.", ""]
+    groups = reset_groups(spec)
+    lines += ["## Reset groups", "",
+              "The domains in a group must reset together. A domain alone in its group may "
+              "reset on its own, with the masters and slaves in it.", ""]  # fmt: skip
+    rows = [{"Group": str(i), "Domains": ", ".join(g),
+             "Resets": ", ".join(resets[d].name for d in g)}
+            for i, g in enumerate(groups, 1)]  # fmt: skip
+    lines += [*_md_table(GROUP_COLUMNS, rows), ""]
+    sync_assert = [f"{resets[d].name} after {n} {clocks[d].name} edges" for d in sorted(clocks)
+                   if resets[d].assertion == "sync"]  # fmt: skip
+    if sync_assert:
+        effect = (f"an async assertion at once, {', '.join(sync_assert)} (those clocks must be "
+                  "running)")  # fmt: skip
+    else:
+        effect = "every assertion here is async, so each takes effect at once, without a clock"
+    lines += ["## Required sequence", "",
+              "For each reset group, whether its resets come from one source or several:", "",
+              "1. Assert every reset of the group, in any order.",
+              "2. Keep each one asserted until all of them have taken effect: "
+              f"{effect}. Release none of them before then.",
+              "3. Release them, in any order. A domain leaves reset as the Domains table says, on "
+              "its own clock.",
+              "4. Start traffic once every domain of the group has left reset.",
+              "5. Reset the masters and slaves of the group with it. BAG abandons every transfer "
+              "in flight: a master that is not reset waits for a response that never comes, and "
+              "a slave that is not reset may complete a transfer nobody is waiting for.", "",
+              "## What goes wrong otherwise", "",
+              "- One domain of a group reset alone, or released before another is asserted: the "
+              "crossing's two sides disagree. A transfer can be lost or repeated, or one can "
+              "arrive that no master sent.",
+              "- A crossing's reset with sync assertion or async deassertion: bag check refuses "
+              "it (CLK-CDC-RESET).", "",
+              "## What is tested", "",
+              "BAG's generated tests assert every reset at once, with transfers in flight, check "
+              "that nothing moves while reset is held, release every reset at once, and start "
+              "traffic after every domain has left reset. Asserting or releasing the resets of a "
+              "group at different times (steps 1 and 3) follows from the RTL; the tests do not "
+              "exercise it.", ""]  # fmt: skip
+    return "\n".join(lines).rstrip("\n") + "\n"

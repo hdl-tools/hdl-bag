@@ -47,7 +47,7 @@ def axi_cfg() -> Cfg:
     for p in ("cpu", "dma", "mem", "ram", "br"):
         c.option(p, **AXI4_NA)
     c.option("dbg", **AXIL_NA).option("mcu", **AHB_MASTER_NA)
-    return c
+    return c.wrap_refused("cpu", "cpu_dw_2_xbar", "mem", "ram")
 
 
 @cache

@@ -207,6 +207,14 @@ PLACEMENT: Final[list[list[Cell]]] = [
      "Override: keep CPU CDC at top level, next to the CPU boundary"],
 ]  # fmt: skip
 
+# The file WRAPPER's File header names: `bag template --sample` writes it next to the workbook.
+SAMPLE_HEADER: Final = """\
+// Copyright 2026 Example Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Sample file header for the demo_ss golden spec (Wrapper > File header).
+"""
+
 WRAPPER: Final[dict[str, str]] = {
     "Top module name": "demo_ss_bus_top",
     "Parameter package": "demo_ss_bus_pkg",

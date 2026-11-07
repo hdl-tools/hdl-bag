@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""Checks: the golden spec is clean; one broken workbook per rule ID.
+"""Checks: the golden spec has only its WRAP warnings; one broken workbook per rule ID.
 
 Each case is the demo_ss sample plus one mutation, and asserts the exact messages.
 """
@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from dsl import SAMPLE_WRAP, unexpected, wrap_refusals
 from openpyxl import Workbook
 
 from hdl_bag.checks import RULES, run_checks
@@ -54,7 +55,17 @@ def _messages(tmp_path: Path, edits: list[Edit]) -> list[str]:
     path = tmp_path / "spec.xlsx"
     wb.save(path)
     shutil.copy(GOLDEN_DIR / "header.txt", tmp_path / "header.txt")
-    return [f.message for f in run_checks(read_workbook(path), tmp_path).findings]
+    return _without_sample_wrap(
+        [f.message for f in run_checks(read_workbook(path), tmp_path).findings]
+    )
+
+
+def _without_sample_wrap(messages: list[str]) -> list[str]:
+    """MESSAGES without the sample's own WRAP warnings (SAMPLE_WRAP), when they are exactly
+    those; any other WRAP warning, or one of them missing, keeps every message."""
+    if sorted(wrap_refusals(messages)) != sorted(SAMPLE_WRAP):
+        return messages
+    return [m for m in messages if "(AXI-WRAP-REFUSED)" not in m]
 
 
 def _user(row: int, inst: str, port: str, direction: str, width: int, conn: str) -> list[Edit]:
@@ -164,6 +175,14 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Fabrics row 9: External module 'bag_axi_guard' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
     ("EXT-MODULE-NAME-top", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_top")],
      ["Fabrics row 9: External module 'demo_ss_bus_top' clashes with a module BAG generates (EXT-MODULE-NAME)"]),
+    # ddr0 at the fabric width: no upsizer in front of it, so dma0's WRAP warning goes and
+    # cpu0's, from its own downsizer, stays.
+    ("AXI-WRAP-REFUSED", [("Slaves", 5, "Data width (bits)", 64),
+                          ("Hierarchy", 25, "Instance", None), ("Hierarchy", 25, "Sub-wrapper", None),
+                          ("Hierarchy", 25, "RTL instance name", None), ("Hierarchy", 25, "Notes", None)],
+     ["Masters row 5: WRAP bursts from cpu0 to br_main2cfg, br_main2per, ddr0, sram0 get SLVERR: "
+      "dw adapter cpu0_dw_2_main_xbar cannot convert them. Send INCR bursts on this path, or keep "
+      "it at one width and protocol (AXI-WRAP-REFUSED)"]),
     ("EXT-MODULE-NAME-keyword", [*EXT, ("Fabrics", 9, "External module", "module")],
      ["Fabrics row 9: External module 'module' is a SystemVerilog keyword (EXT-MODULE-NAME)"]),
     ("EXT-MODULE-NAME-package", [*EXT, ("Fabrics", 9, "External module", "demo_ss_bus_pkg")],
@@ -242,7 +261,10 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
         ("Access_Rules", 6, "Access", "-"),
         *_row("Access_Rules", 9, Master="cpu0", Access="-"), ("Access_Rules", 9, "Slave / bridge", "ddr0"),
         *_row("Access_Rules", 10, Master="dma0", Access="-"), ("Access_Rules", 10, "Slave / bridge", "ddr0")],
-     ["Topology row 9: no master on main_xbar can reach ddr0 (ACC-UNREACHABLE-SLAVE)"]),
+     ["Masters row 5: WRAP bursts from cpu0 to br_main2cfg, br_main2per, sram0 get SLVERR: dw "
+      "adapter cpu0_dw_2_main_xbar cannot convert them. Send INCR bursts on this path, or keep it "
+      "at one width and protocol (AXI-WRAP-REFUSED)",
+      "Topology row 9: no master on main_xbar can reach ddr0 (ACC-UNREACHABLE-SLAVE)"]),
     ("MM-UNKNOWN-SLAVE", _mm_row(21, "ghost", "regs", "0x6000_0000", "0x0000_1000"),
      ["Memory_Map row 21: ghost is not defined on Slaves or Bridges (MM-UNKNOWN-SLAVE)"]),
     ("MM-NOT-CONNECTED", [*SPARE_SLAVE, *_mm_row(21, "spare0", "regs", "0x4000_4000", "0x0000_1000")],
@@ -355,9 +377,15 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
 ]  # fmt: skip
 
 
-def test_golden_has_no_findings() -> None:
+def test_golden_has_only_its_wrap_warnings() -> None:
     path = GOLDEN_DIR / "demo_ss.xlsx"
-    assert [f.message for f in run_checks(read_workbook(path), GOLDEN_DIR).findings] == []
+    messages = [f.message for f in run_checks(read_workbook(path), GOLDEN_DIR).findings]
+    assert unexpected(messages, SAMPLE_WRAP) == []
+    assert messages[1] == (
+        "Masters row 6: WRAP bursts from dma0 to ddr0 get SLVERR: dw adapter main_xbar_dw_2_ddr0 "
+        "cannot convert them. Send INCR bursts on this path, or keep it at one width and "
+        "protocol (AXI-WRAP-REFUSED)"
+    )
 
 
 def test_blank_template_reports_missing_settings(tmp_path: Path) -> None:

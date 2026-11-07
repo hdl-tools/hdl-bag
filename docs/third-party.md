@@ -2,8 +2,8 @@
 
 hdl-bag ships a subset of [PULP](https://pulp-platform.org/) RTL in
 `src/hdl_bag/rtl/vendor/pulp/`. `bag generate` copies the files a design uses
-into `rtl/vendor/pulp/` of the output, and adds their include directories to
-the file list.
+into `rtl/vendor/pulp/` of the output, with the `LICENSE` of each package
+they come from, and adds their include directories to the file list.
 
 | Package | Version | Commit | Licence | Source |
 |---|---|---|---|---|
