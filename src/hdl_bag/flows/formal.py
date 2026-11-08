@@ -12,9 +12,12 @@ Findings, each an error:
     FORMAL-INDUCTION  an assertion holds to the depth but is not inductive (mode prove)
     FORMAL-COVER      a cover is not reached within the depth (the property may be vacuous)
     FORMAL-TIMEOUT    the job ran out of time
-    FORMAL-ERROR      the tool stopped on an error (a parse or elaboration error, ...)
+    FORMAL-ERROR      the tool stopped on an error (a parse or elaboration error, assumptions
+                      that allow no trace, ...)
     FORMAL-UNKNOWN    the job ended without a verdict
-    TOOL-MISSING / TOOL-FAILED  as for the other flows
+    TOOL-MISSING / TOOL-FAILED  as for the other flows; TOOL-FAILED also when a task of the
+                      job gives no verdict at all, so output SBY no longer prints in the
+                      expected form never passes
 """
 
 import contextlib
@@ -37,12 +40,17 @@ Mode = Literal["bmc", "prove", "cover"]
 MODES: Final = ("bmc", "prove", "cover")
 
 # SBY v0.69 is the SymbiYosys of the pinned OSS CAD Suite (tools.lock OSS_CAD_SUITE_DATE).
-_LINE: Final = re.compile(r"^SBY \d\d:\d\d:\d\d \[(?P<job>[^\]]+)\] (?P<msg>.*)$")
+# The hour is padded with a space, not a zero ("SBY  0:07:46 [job] ...").
+_LINE: Final = re.compile(r"^SBY +\d{1,2}:\d\d:\d\d \[(?P<job>[^\]]+)\] (?P<msg>.*)$")
 _DONE: Final = re.compile(r"^DONE \((?P<status>[A-Z]+), rc=\d+\)$")
 _TRACE: Final = re.compile(r"^summary: counterexample trace(?: \[(?P<step>\w+)\])?: (?P<path>\S+)")
 _FAILED: Final = re.compile(r"^summary:\s+failed assertion (?P<name>\S+) at (?P<loc>\S+)")
 _UNREACHED: Final = re.compile(r"^summary:\s+(?P<name>\S+) at (?P<loc>\S+)$")
 _LOC: Final = re.compile(r"^(?P<file>.+?):(?P<line>\d+)\.\d+(?:-\d+\.\d+)?$")
+# SBY shortens a long summary in its log and names the file that holds all of it.
+_FULL: Final = re.compile(r"^summary: see (?P<path>\S+) for a complete summary$")
+_STEP: Final = re.compile(r"\bstep (?P<step>\d+)\b")
+UNSAT = "assumptions are unsatisfiable: the environment allows no trace, so nothing was checked"
 
 
 class SymbiYosys:
@@ -56,21 +64,30 @@ class SymbiYosys:
     def is_pinned(self, version: str | None) -> bool:
         return _same_version(self.pinned, version)
 
-    def parse(self, output: str, sources: dict[str, str], job_dir: str = "") -> list[Finding]:
+    def parse(self, output: str, sources: dict[str, str], job_dir: str = "", *,
+              summaries: dict[str, str] | None = None,
+              expected: Sequence[str] = ()) -> list[Finding]:  # fmt: skip
         """Findings from SBY's OUTPUT. SOURCES maps a file name as the job sees it (a [files]
         destination, or a prefix of one) to its path relative to the run directory; JOB_DIR
-        is the job file's directory relative to it, where SBY writes its traces."""
+        is the job file's directory relative to it, where SBY writes its traces. SUMMARIES
+        holds, per task, the complete summary SBY's log shortened (its status file), read in
+        place of the log's summary lines. EXPECTED names the tasks the job has: each must give
+        a verdict."""
+        full = summaries or {}
+        lines = []
+        for raw in output.splitlines():
+            m = _LINE.match(raw)
+            if m and not (m["job"] in full and m["msg"].startswith("summary:")):
+                lines.append((m["job"], m["msg"]))
+        lines += [(job, f"summary: {line}") for job in sorted(full)
+                  for line in full[job].splitlines() if line.strip()]  # fmt: skip
         out: list[Finding] = []
         done: dict[str, str] = {}
         errors: dict[str, str] = {}
         trace: dict[str, tuple[str | None, str]] = {}
         unreached: set[str] = set()
         jobs: list[str] = []
-        for raw in output.splitlines():
-            m = _LINE.match(raw)
-            if not m:
-                continue
-            job, msg = m["job"], m["msg"]
+        for job, msg in lines:
             if job not in jobs:
                 jobs.append(job)
             if d := _DONE.match(msg):
@@ -95,8 +112,12 @@ class SymbiYosys:
             elif job in unreached and (u := _UNREACHED.match(msg)):
                 file, line = _where(u["loc"], sources)
                 out.append(Finding(self.name, file, line, "FORMAL-COVER", "error",
-                                   f"{job}: cover {_short(u['name'])} not reached"))  # fmt: skip
+                                   f"{job}: cover {_short(u['name'])} not reached within the "
+                                   "search depth, so the assertion it guards may hold only "
+                                   "vacuously"))  # fmt: skip
                 continue
+            elif "Assumptions are unsatisfiable" in msg:
+                errors[job] = UNSAT
             elif "ERROR:" in msg and job not in errors:
                 errors[job] = msg
             unreached.discard(job)
@@ -113,6 +134,10 @@ class SymbiYosys:
                 "TIMEOUT": ("FORMAL-TIMEOUT", "ran out of time"),
             }.get(status, ("FORMAL-UNKNOWN", f"ended {status} (not proved)"))
             out.append(Finding(self.name, "", 0, rule, "error", f"{job}: {text}"))
+        out += [Finding(self.name, "", 0, "TOOL-FAILED", "error", f"{job}: no output for this task")
+                for job in expected if job not in jobs]  # fmt: skip
+        if not jobs and not expected:
+            out.append(Finding(self.name, "", 0, "TOOL-FAILED", "error", "sby gave no verdict"))
         # A property that fails outright is not also reported as not inductive.
         failed = {(f.file, f.line) for f in out if f.rule == "FORMAL-ASSERT"}
         return [f for f in out if f.rule != "FORMAL-INDUCTION" or (f.file, f.line) not in failed]
@@ -155,6 +180,19 @@ def job_sources(job: Path, root: Path) -> dict[str, str]:
     return out
 
 
+def job_tasks(job: Path) -> list[str]:
+    """The task names SBY gives a job file's tasks: <stem>_<task>, or <stem> with none."""
+    tasks: list[str] = []
+    section = None
+    for raw in job.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line
+        elif section == "[tasks]" and line and not line.startswith("#"):
+            tasks.append(f"{job.stem}_{line.split()[0]}")
+    return tasks or [job.stem]
+
+
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """Stop PROC and everything it started (POSIX); only PROC itself elsewhere."""
     killpg = getattr(os, "killpg", None)
@@ -167,35 +205,53 @@ def _kill_group(proc: subprocess.Popen[str]) -> None:
 
 def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
     """Run the SymbiYosys JOB (a .sby file) in its own directory; ROOT is what finding paths
-    are relative to. Each task's work directory is replaced (``sby -f``)."""
+    are relative to. Each task's work directory is replaced (``sby -f``). Raises ValueError
+    if JOB does not exist."""
+    if not job.is_file():
+        raise ValueError(f"{job}: no such SymbiYosys job (run bag generate again)")
     backend = SymbiYosys()
     exe = shutil.which(backend.executable)
     if exe is None:
         missing = Finding(backend.name, "", 0, "TOOL-MISSING", "error",
                           f"'{backend.executable}' not found on PATH")  # fmt: skip
         return Report("formal", (missing,), (backend.name,))
+    version = tool_version(backend)
+    notes = () if backend.is_pinned(version) else (
+        f"sby {version or '(version unknown)'} is not the pinned {backend.pinned}",)  # fmt: skip
     # SBY's own timeout option crashes in v0.69, so the time limit is enforced here. SBY
-    # starts Yosys and the solvers as children: the whole process group goes on a timeout.
+    # starts Yosys and the solvers as children, so the whole process group is stopped: on a
+    # timeout, and on anything else that ends the wait (Ctrl-C included).
     with subprocess.Popen([exe, "-f", job.name], cwd=job.parent, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True,
-                          start_new_session=True) as proc:  # fmt: skip
+                          stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                          errors="replace", start_new_session=True) as proc:  # fmt: skip
         try:
             output, _ = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except BaseException as exc:
             _kill_group(proc)
-            proc.communicate()
+            try:  # a process that escaped the group may hold the pipe: don't wait forever
+                partial, _ = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                partial = ""
+            if not isinstance(exc, subprocess.TimeoutExpired):
+                raise
+            steps = _STEP.findall(partial or "")
+            reached = f", reached step {steps[-1]}" if steps else ""
             late = Finding(backend.name, "", 0, "FORMAL-TIMEOUT", "error",
-                           f"{job.stem}: no verdict within {timeout:g} s")  # fmt: skip
-            return Report("formal", (late,), (backend.name,))
+                           f"{job.stem}: no verdict within {timeout:g} s{reached} "
+                           "(allow more with --timeout)")  # fmt: skip
+            return Report("formal", (late,), (backend.name,), notes=notes)
     job_dir = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
-    findings = backend.parse(output, job_sources(job, root), "" if job_dir == "." else job_dir)
+    summaries = {}
+    for raw in output.splitlines():
+        m, full = _LINE.match(raw), None
+        if m and (full := _FULL.match(m["msg"])) and (job.parent / full["path"]).is_file():
+            summaries[m["job"]] = (job.parent / full["path"]).read_text(encoding="utf-8")
+    findings = backend.parse(output, job_sources(job, root), "" if job_dir == "." else job_dir,
+                             summaries=summaries, expected=job_tasks(job))  # fmt: skip
     if proc.returncode != 0 and not findings:
         tail = output.strip().splitlines()[-1:] or ["no output"]
         message = f"{job.stem}: exit status {proc.returncode}: {tail[0]}"
         findings.append(Finding(backend.name, "", 0, "TOOL-FAILED", "error", message))
-    version = tool_version(backend)
-    notes = () if backend.is_pinned(version) else (
-        f"sby {version or '(version unknown)'} is not the pinned {backend.pinned}",)  # fmt: skip
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 
@@ -261,6 +317,9 @@ def run_formal(out: "Outputs", *, timeout: float | None = None) -> Report:
             "user-supplied fabric, or generated by an older hdl-bag)"
         )
     root = out.root.resolve()
+    missing = [rel for rel in out.formal if not (root / rel).is_file()]
+    if missing:
+        raise ValueError(f"{out.root}: missing {', '.join(missing)} (run bag generate again)")
     findings: list[Finding] = []
     notes: list[str] = []
     for rel in out.formal:

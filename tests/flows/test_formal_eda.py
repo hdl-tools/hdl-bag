@@ -4,8 +4,6 @@
 quiet-in-reset jobs on real designs, a reset bug they must catch, and the time limit."""
 
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -99,17 +97,14 @@ def test_a_bridge_with_no_reset_is_caught(tmp_path: Path) -> None:
     report = run_formal(out, timeout=600)
     failed = [(f.rule, f.message.split(": ", 1)[1]) for f in report.findings]
     assert ("FORMAL-ASSERT", "assertion quiet_wdt0_apb_psel fails (counterexample "
-            "formal/demo_ss_reset_bmc/engine_0/trace.vcd)") in failed  # fmt: skip
+            "formal/demo_ss_reset_prove/engine_0/trace.vcd)") in failed  # fmt: skip
 
 
-def test_a_job_over_its_time_limit_stops_with_everything_it_started(tmp_path: Path) -> None:
-    """demo_ss's job takes minutes; with a 5 s limit it stops, and no Yosys or solver process
-    it started is left running."""
+def test_a_job_over_its_time_limit_stops(tmp_path: Path) -> None:
+    """demo_ss's cover task takes minutes; with a 5 s limit the job stops with a finding.
+    (That every process it started stops too is tested with a stand-in sby in
+    test_formal.py.)"""
     out = generate(load(GOLDEN), tmp_path, GOLDEN.parent)
     report = run_sby(tmp_path / out.formal[0], tmp_path, timeout=5)
-    assert [(f.rule, f.message) for f in report.findings] == [
-        ("FORMAL-TIMEOUT", "demo_ss_reset: no verdict within 5 s")
-    ]
-    if shutil.which("pgrep"):
-        left = subprocess.run(["pgrep", "-f", str(tmp_path)], capture_output=True, text=True)
-        assert left.stdout == "", left.stdout
+    assert [f.rule for f in report.findings] == ["FORMAL-TIMEOUT"]
+    assert report.findings[0].message.startswith("demo_ss_reset: no verdict within 5 s")

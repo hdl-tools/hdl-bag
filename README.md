@@ -42,7 +42,7 @@ bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or 
 bag lint out/                           # Project > Lint tools (slang, Verilator, Verible): zero unwaived findings
 bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
 bag formal out/                         # generated SymbiYosys jobs: every assertion holds, every cover is reached
-bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim -> formal
+bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim (add --formal for formal)
 ```
 
 `--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
