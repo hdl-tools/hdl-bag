@@ -12,6 +12,7 @@ from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
     PROVE_DEPTH,
+    ahb_ports,
     axi4_ports,
     checkers,
     props_module,
@@ -116,16 +117,30 @@ def test_a_reset_group_asserts_together_and_releases_in_any_order(tmp_path: Path
     assert "&& !bag_was_" not in two  # a group of one: nothing to assert together
 
 
-def test_a_sync_assertion_gets_the_synchronizer_stages_first(tmp_path: Path) -> None:
-    """ahb_fixed's reset asserts synchronously: bag_rst_sync passes it on after 2 edges, so
-    the domain is checked from then on (the generated reset test allows the same), and the
-    reset may only be released once it has taken effect (D51)."""
-    text = _props(tmp_path, P2 / "ahb_fixed.ir.yaml")
-    assert "  wire bag_quiet_D_H = bag_held_D_H && bag_edges_D_H == 2'd2;\n" in text
-    release = "always_comb if (bag_was_rst_h_n && !bag_held_D_H) assume (bag_quiet_was_D_H);"
+def test_a_synchronized_sync_assertion_gets_the_synchronizer_stages_first(
+    tmp_path: Path,
+) -> None:
+    """apb4_rules's reset asserts and deasserts synchronously, so the wrapper puts it through
+    bag_rst_sync, which passes the assertion on after 2 edges: the domain is checked from then
+    on (the generated reset test allows the same), and the reset may only be released once it
+    has taken effect (D51)."""
+    text = _props(tmp_path, P2 / "apb4_rules.ir.yaml")
+    assert "  wire bag_quiet_D_R = bag_held_D_R && bag_edges_D_R == 2'd2;\n" in text
+    release = "always_comb if (bag_was_rst_r_n && !bag_held_D_R) assume (bag_quiet_was_D_R);"
     assert f"  {release}\n" in text
-    assert re.search(r"if \(bag_quiet_D_H\) quiet_\w+: assert", text)
-    assert not re.search(r"if \(bag_held_D_H\) quiet_\w+: assert", text)
+    assert re.search(r"if \(bag_quiet_D_R\) quiet_\w+: assert", text)
+    assert not re.search(r"if \(bag_held_D_R\) quiet_\w+: assert", text)
+
+
+def test_a_sync_assertion_without_a_synchronizer_takes_effect_at_once(tmp_path: Path) -> None:
+    """ahb_fixed's reset asserts synchronously but deasserts asynchronously: the wrapper wires
+    it as is (only bag_rst_sync, for sync deassertion, delays an assertion), so the design
+    is in reset as soon as it is asserted. Modelling 2 synchronizer edges there kept the
+    protocol checkers live for 2 edges into the reset (a false failure on ahb_fixed in PR 2b)
+    and started the quiet checks 2 edges late."""
+    text = _props(tmp_path, P2 / "ahb_fixed.ir.yaml")
+    assert "  wire bag_quiet_D_H = bag_held_D_H;\n" in text
+    assert "bag_edges_D_H" not in text
 
 
 @pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
@@ -144,7 +159,8 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     if protocol.is_file():
         ports = set(re.findall(r"proto_\w+?_(\w+): cover", protocol.read_text(encoding="utf-8")))
         netlist = build_netlist(spec)
-        found = {c.port for c in checkers(spec, netlist)} | {b.name for b in axi4_ports(netlist)}
+        own = [*axi4_ports(netlist), *ahb_ports(netlist)]
+        found = {c.port for c in checkers(spec, netlist)} | {b.name for b in own}
         assert found and all(any(p.endswith(port) for p in ports) for port in found), found
     # Step registers come from formal/bag_step.v: under yosys-slang a register on a net
     # marked (* gclk *) is clocked by a free net, not the solver's step (PR 1's bug).

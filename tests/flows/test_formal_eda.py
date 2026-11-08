@@ -77,7 +77,7 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("config", "jobs"),
-    [("ahb_fixed", ("reset",)), ("ahb2apb_pt", ("protocol", "reset")),
+    [("ahb_fixed", ("protocol", "reset")), ("ahb2apb_pt", ("protocol", "reset")),
      ("apb4_min", ("protocol", "reset")), ("apb4_rules", ("protocol", "reset")),
      ("axil_shared_one", ("protocol", "reset"))],
 )  # fmt: skip
@@ -249,6 +249,38 @@ def test_an_axi4_slave_design_answering_an_unasked_id_is_caught(tmp_path: Path) 
     report = _axi4_tiny(tmp_path, True, {"bvalid": "rst_n", "bid": "2'd3"})
     failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
     assert any("assertion b_only_for_a_complete_write fails" in m for m in failed), report.format()
+
+
+def _ahb_mutant(tmp_path: Path, old: str, new: str) -> list[tuple[str, str]]:
+    """ahb_single's protocol job with OLD replaced by NEW in its top; the failed assertions
+    as (rule, message up to the counterexample)."""
+    out = generate(load(P2 / "ahb_single.ir.yaml"), tmp_path, P2)
+    top = tmp_path / "rtl" / f"{out.top}.sv"
+    text = top.read_text(encoding="utf-8")
+    assert text.count(old) == 1
+    top.write_text(text.replace(old, new), encoding="utf-8", newline="\n")
+    report = run_sby(tmp_path / "formal" / "ahb_single_protocol.sby", tmp_path, timeout=600)
+    return [(f.rule, f.message.split(": ", 1)[1].split(" (")[0]) for f in report.findings]
+
+
+def test_a_one_cycle_ahb_error_is_caught(tmp_path: Path) -> None:
+    """With master mcu seeing HRESP only once HREADY is high, an ERROR (a decode miss) shows
+    for one cycle instead of two: bag_fahb on that port must fail it (IHI0033A 5.1.3)."""
+    failed = _ahb_mutant(
+        tmp_path,
+        "assign mcu_ahb_hresp = u_ahb_s_hresp[0];",
+        "assign mcu_ahb_hresp = u_ahb_s_hresp[0] & u_ahb_s_hready[0];",
+    )
+    assert any("error_takes_two_cycles fails" in m for _, m in failed), failed
+
+
+def test_an_ahb_slave_whose_hreadyout_is_not_routed_back_is_caught(tmp_path: Path) -> None:
+    """With slave s12's HREADY tied high, its own wait states never reach the bus: bag_fahb
+    on that port must fail the routing rule."""
+    failed = _ahb_mutant(
+        tmp_path, "assign s12_ahb_hready = u_ahb_m_hready[0];", "assign s12_ahb_hready = 1'b1;"
+    )
+    assert any("hreadyout_reaches_hready fails" in m for _, m in failed), failed
 
 
 def test_a_job_over_its_time_limit_stops(tmp_path: Path) -> None:

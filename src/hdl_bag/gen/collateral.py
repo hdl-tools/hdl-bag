@@ -280,6 +280,15 @@ def _user_connection(u: UserPort) -> str:
 # bag_rst_sync's Stages in the wrapper: a sync edge of a domain's reset takes this many edges
 # of its clock (rtl/inhouse/bag_rst_sync.sv).
 RST_SYNC_STAGES = 2
+
+
+def assertion_delayed(assertion: str, deassertion: str) -> bool:
+    """True if a reset's assertion reaches its domain only after bag_rst_sync's stages. The
+    wrapper puts a reset through bag_rst_sync for sync deassertion only; there it also delays a
+    sync assertion. Every other reset is wired as is and takes effect at once."""
+    return (assertion, deassertion) == ("sync", "sync")
+
+
 DOMAIN_COLUMNS = ("Domain", "Clock", "Reset", "Polarity", "Assertion", "Deassertion",
                   "Leaves reset")  # fmt: skip
 CROSSING_COLUMNS = ("Crossing", "Kind", "From", "To", "Resets")
@@ -360,9 +369,8 @@ def reset_md(spec: Spec, user_header: str | None) -> str:
              "Resets": ", ".join(resets[d].name for d in g)}
             for i, g in enumerate(groups, 1)]  # fmt: skip
     lines += [*_md_table(GROUP_COLUMNS, rows), ""]
-    # Only bag_rst_sync (sync deassertion) delays a sync assertion; otherwise it is wired as is.
     sync_assert = [f"{resets[d].name} after {n} {clocks[d].name} edges" for d in sorted(clocks)
-                   if (resets[d].assertion, resets[d].deassertion) == ("sync", "sync")]  # fmt: skip
+                   if assertion_delayed(resets[d].assertion, resets[d].deassertion)]  # fmt: skip
     if sync_assert:
         effect = (f"an async assertion at once, {', '.join(sync_assert)} (those clocks must be "
                   "running)")  # fmt: skip

@@ -65,7 +65,7 @@ fabric behaves (D8).
 from dataclasses import dataclass
 
 from hdl_bag.flows.formal import sby_job
-from hdl_bag.gen.collateral import RST_SYNC_STAGES, reset_groups
+from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Netlist
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
@@ -98,10 +98,11 @@ ENGINE = "smtbmc yices"
 # on yices: there bitwuzla was slower (over 15 minutes against yices's 4:40).
 PROTOCOL_ENGINE = "bmc: smtbmc bitwuzla\ncover: smtbmc yices"
 
-# The solver-step registers and the any-constant (formal/bag_step.v), copied next to the
-# jobs; BAG's own AXI4 checker (formal/bag_faxi4.sv).
+# The solver-step registers (formal/bag_step.v), copied next to the jobs; BAG's own AXI4 and
+# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv).
 STEP = "bag_step.v"
 FAXI4 = "bag_faxi4.sv"
+FAHB = "bag_fahb.sv"
 
 # Vendored ZipCPU checkers (D60), by protocol family and by which side the design is on.
 ZIPCPU = "formal/vendor/zipcpu"
@@ -260,9 +261,9 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
             held, quiet = f"bag_held_{d}", f"bag_quiet_{d}"
             body += ["", f"  // {d}: clock {clk}, reset {rst.name} ({rst.assertion} assertion)",
                      f"  wire {held} = {_asserted(spec, rst.name)};"]  # fmt: skip
-            if rst.assertion == "sync":
-                # The synchronizer takes its stages to pass a sync assertion into the domain,
-                # and the reset is held until it has (D51).
+            if assertion_delayed(rst.assertion, rst.deassertion):
+                # bag_rst_sync takes its stages to pass a sync assertion into the domain, and
+                # the reset is held until it has (D51). Without it, any reset acts at once.
                 edges = f"bag_edges_{d}"
                 body += [
                     f"  logic [{bits - 1}:0] {edges} = {bits}'d0;",
@@ -635,11 +636,61 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
     return lines
 
 
+def ahb_ports(netlist: Netlist) -> list[Bus]:
+    """The top's AHB-Lite ports, which BAG's own checker watches (D54)."""
+    return [b for b in netlist.ports if b.external and b.protocol is Protocol.AHB_LITE]
+
+
+def own_checkers(netlist: Netlist) -> list[str]:
+    """BAG's own checker files (in formal/) the protocol job reads."""
+    return [f for f, ports in ((FAXI4, axi4_ports(netlist)), (FAHB, ahb_ports(netlist))) if ports]
+
+
+# bag_fahb's ports between hsel and hreadyout, in its order; then hresp and hrdata.
+_FAHB = ("haddr", "htrans", "hwrite", "hsize", "hburst", "hprot", "hmastlock", "hnonsec",
+         "hwdata", "hready")  # fmt: skip
+
+
+def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
+         active: dict[str, set[str]]) -> list[str]:  # fmt: skip
+    """BAG's AHB-Lite checker on BUS, and its covers. On a master port there is no HSEL (the
+    port is always selected) and the design's HREADY is also the data phase's HREADYOUT."""
+
+    def v(sig: str) -> str:
+        return _value(spec, bus, sig, port)
+
+    params = (f".DesignIsSlave({int(not bus.is_slave)}), .AddrWidth({bus.addr_width}), "
+              f".DataWidth({bus.data_width})")  # fmt: skip
+    events = ("write_done", "read_done", "wait", "error", "seq")
+    lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
+    lines.append(f"  bag_fahb #({params}) u_{bus.name} (")
+    conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}"),
+             (".hsel", v("hsel") if bus.is_slave else "1'b1")]  # fmt: skip
+    conns += [(f".{s}", v(s)) for s in _FAHB]
+    conns += [(".hreadyout", v("hreadyout") if bus.is_slave else v("hready")),
+              (".hresp", v("hresp")), (".hrdata", v("hrdata"))]  # fmt: skip
+    conns += [(f".{e}_o", f"bag_{bus.name}_{e}") for e in events]
+    lines += [f"      {c}({x})," for c, x in conns]
+    lines[-1] = lines[-1].rstrip(",")
+    lines.append("  );")
+    # Covers: a transfer completed each way the route model allows, a waited data phase, and
+    # towards a slave an ERROR, towards a master a burst beat.
+    can = active.get(bus.name, set()) if bus.is_slave else {"read", "write"}
+    covers: list[tuple[str, str]] = [(k, f"{k}_done") for k in ("write", "read") if k in can]
+    if can:
+        covers.append(("wait", "wait"))
+        covers.append(("error", "error") if bus.is_slave else ("burst", "seq"))
+    lines += [f"  always_comb proto_{label}_{bus.name}: cover (bag_{bus.name}_{event});"
+              for label, event in covers]  # fmt: skip
+    return lines
+
+
 def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | None:
     """The port-protocol property module for SPEC, bound into TOP; None with no port to check."""
     found = checkers(spec, netlist)
     axi4 = axi4_ports(netlist)
-    if not found and not axi4:
+    ahb = ahb_ports(netlist)
+    if not found and not axi4 and not ahb:
         return None
     ports = _Ports()
     body, domains = _environment(spec, netlist, ports)
@@ -658,6 +709,13 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             body.append(f"  // {bus.name}: AXI4 {side} port; the design is its {design} "
                         "(bag_faxi4)")  # fmt: skip
             body += [*_axi4(spec, bus, domains[bus.domain], ports, active), ""]
+    if ahb:
+        active = _active(spec)
+        for bus in ahb:
+            side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
+            body.append(f"  // {bus.name}: AHB-Lite {side} port; the design is its {design} "
+                        "(bag_fahb)")  # fmt: skip
+            body += [*_ahb(spec, bus, domains[bus.domain], ports, active), ""]
     name = f"bag_{spec.project.name}_protocol_props"
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
@@ -682,8 +740,8 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
                         incdirs: list[str], props: str,
                         user_header: str | None) -> str:  # fmt: skip
     """The SymbiYosys job for the protocol checkers: the vendored files read by Yosys's own
-    frontend, one parameterised copy per checker instance, then the design, BAG's own AXI4
-    checker (where there are AXI4 ports) and PROPS."""
+    frontend, one parameterised copy per checker instance, then the design, BAG's own AXI4 and
+    AHB-Lite checkers (where there are such ports) and PROPS."""
     found = checkers(spec, netlist)
     vendored = sorted({c.vendor for c in found})
     prelude = [
@@ -693,7 +751,7 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
     for c in found:
         sets = " ".join(f"-set {k} {v}" for k, v in c.params)
         prelude += [f"copy {c.vendor} {c.module}", f"chparam {sets} {c.module}"]
-    own = [FAXI4] if axi4_ports(netlist) else []
+    own = own_checkers(netlist)
     copy = [("rtl", "../rtl"), (STEP, STEP), *((f, f) for f in own)]
     if found:
         copy.append(("zipcpu", "vendor/zipcpu"))
@@ -730,5 +788,5 @@ def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:
     # The licence and the provenance (source and commit) travel with the files.
     extra = [f"{ZIPCPU}/LICENSE", f"{ZIPCPU}/SOURCE.md"] if found else []
     vendored = [f"{ZIPCPU}/{v}.v" for v in found] + extra
-    own = [f"formal/{FAXI4}"] if axi4_ports(netlist) else []
+    own = [f"formal/{f}" for f in own_checkers(netlist)]
     return [f"formal/{STEP}", *own, *vendored]
