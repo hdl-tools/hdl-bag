@@ -7,7 +7,7 @@ from typing import Any
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 
 from hdl_bag.tests_gen.bfm import APB, APB_RESP, ApbMaster, ApbResult, ApbSlave, fabric_port
 
@@ -105,3 +105,36 @@ async def slave_error_and_strobes_pass_through(dut: Any) -> None:
     assert not await m.write(0x1000_0200, 0xAABB_CCDD)
     assert not await m.write(0x1000_0200, 0x0000_1100, strb=0b0010)
     assert (await m.read(0x1000_0200)).data == 0xAABB_11DD
+
+
+@cocotb.test(timeout_time=200, timeout_unit="us")
+async def pready_and_pslverr_follow_the_amba_recommendations(dut: Any) -> None:
+    """D61 (owner): towards the master, PREADY is steady high while PSEL is low (in reset
+    too), so it never follows the address decode or a slave while idle; and PSLVERR is low
+    outside an access phase with PREADY high, as AMBA recommends. Neither a miss address nor
+    a slave's stray PSLVERR may reach the master; in the setup phase PSLVERR stays low; an
+    error in a completing access still reaches it."""
+    _m, s = await _setup(dut)
+    for slave in s:
+        slave.stop()  # the test drives the slave-side responses itself
+    dut.s_psel_i.value, dut.s_penable_i.value = 0, 0
+    dut.s_paddr_i.value = 0x3000_0000  # a miss: the mux's own error path
+    dut.m_pslverr_i.value = 0b111  # every slave drives PSLVERR outside a transfer
+    dut.m_pready_i.value = 0b000  # no slave ready: an idle PREADY must still be high
+    seen = []
+    for addr in (0x3000_0000, 0x1000_0000):  # a miss, then a hit on s0
+        dut.s_paddr_i.value = addr
+        for psel, penable in ((0, 0), (1, 0)):  # idle, then the setup phase
+            dut.s_psel_i.value, dut.s_penable_i.value = psel, penable
+            await ClockCycles(dut.clk_i, 1)
+            await ReadOnly()
+            seen.append((hex(addr), psel, penable, int(dut.s_pready_o.value),
+                         int(dut.s_pslverr_o.value)))  # fmt: skip
+            await RisingEdge(dut.clk_i)
+    assert [x for x in seen if x[4]] == [], f"PSLVERR outside an access phase: {seen}"
+    assert [x for x in seen if x[1] == 0 and not x[3]] == [], f"PREADY low while idle: {seen}"
+    # In the access phase with PREADY high, the error does reach the master.
+    dut.m_pready_i.value = 0b111
+    dut.s_psel_i.value, dut.s_penable_i.value = 1, 1
+    await ReadOnly()
+    assert (int(dut.s_pready_o.value), int(dut.s_pslverr_o.value)) == (1, 1)

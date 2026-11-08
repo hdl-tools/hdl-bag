@@ -109,17 +109,25 @@ module bag_apb_mux #(
     assign m_pstrb_o[s]   = s_pstrb_i;
   end
 
+  // The selected slave's response, or the mux's own error for a miss or a refused access.
+  logic rsp_ready, rsp_err;
   always_comb begin
-    s_pready_o  = err;
-    s_prdata_o  = '0;
-    s_pslverr_o = err;
+    rsp_ready  = err;
+    s_prdata_o = '0;
+    rsp_err    = err;
     for (int unsigned s = 0; s < NoSlaves; s++) begin
       if (sel[s]) begin
-        s_pready_o  = m_pready_i[s];
-        s_prdata_o  = m_prdata_i[s];
-        s_pslverr_o = m_pslverr_i[s];
+        rsp_ready  = m_pready_i[s];
+        s_prdata_o = m_prdata_i[s];
+        rsp_err    = m_pslverr_i[s];
       end
     end
   end
+
+  // Towards the master (D61): PREADY is steady high while PSEL is low (in reset too), so it
+  // never follows the address decode or a slave while idle; PSLVERR only in the access phase
+  // of a completing transfer, as AMBA recommends, so a master never sees a stray error.
+  assign s_pready_o  = ~s_psel_i | rsp_ready;
+  assign s_pslverr_o = s_psel_i & s_penable_i & rsp_ready & rsp_err;
 
 endmodule

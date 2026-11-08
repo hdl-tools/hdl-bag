@@ -40,6 +40,25 @@ never fail `bag lint`; **errors** anywhere still fail. Verible, which checks
 style only, skips them. Generated and in-house code must still have zero
 unwaived findings.
 
+## Formal properties
+
+hdl-bag ships four of [ZipCPU](https://github.com/ZipCPU/wb2axip)'s formal
+property files in `src/hdl_bag/formal/vendor/zipcpu/`, unmodified: the AXI4-Lite
+(`faxil_master.v`, `faxil_slave.v`) and APB (`fapb_master.v`, `fapb_slave.v`)
+protocol properties. `bag generate` copies the ones a design needs into
+`formal/vendor/zipcpu/` of the output, with the `LICENSE`.
+
+| Package | Commit | Licence | Source |
+|---|---|---|---|
+| wb2axip (bench/formal) | `2e8d3bc2d26ddc33d1881022a2a2b9d3f0c16b9b` | Apache-2.0 | <https://github.com/ZipCPU/wb2axip> |
+
+Each file carries ZipCPU's Apache-2.0 header, and the repository's README
+licenses it under Apache 2. The repository has no licence text file, so the
+vendored `LICENSE` is the standard Apache-2.0 text. The public full-AXI4
+property files are deliberately non-functional subsets, so hdl-bag's AXI4
+properties are its own. `scripts/vendor_zipcpu.py` fetches the files; the
+`vendor` CI job re-runs it with `--check`. Never edit them by hand.
+
 ## Python packages for simulation
 
 The `sim` extra (`pip install hdl-bag[sim]`) installs these for `bag sim`. They are not copied into generated output.
