@@ -5,8 +5,10 @@
 //
 // PSEL goes to the slave port that bag_addr_decode selects; PRDATA, PREADY and PSLVERR
 // come back from it. A miss or blocked access with no default slave is answered by an
-// internal default slave: PREADY high, PSLVERR high, PRDATA zero. APB is not pipelined,
-// so the mux is purely combinational. APB3 instances tie pprot and pstrb.
+// internal default slave: PREADY high, PSLVERR high, PRDATA zero. Towards the master
+// (D61), PREADY is held high while PSEL is low, and PSLVERR is driven only in the access
+// phase of a completing transfer. APB is not pipelined, so the mux is purely
+// combinational. APB3 instances tie pprot and pstrb.
 // alias_en_i must be quasi-static (or synchronous and stable during a transfer).
 
 module bag_apb_mux #(
@@ -109,17 +111,26 @@ module bag_apb_mux #(
     assign m_pstrb_o[s]   = s_pstrb_i;
   end
 
+  // The selected slave's response, or the mux's own error for a miss or a refused access.
+  logic rsp_ready, rsp_err;
   always_comb begin
-    s_pready_o  = err;
-    s_prdata_o  = '0;
-    s_pslverr_o = err;
+    rsp_ready  = err;
+    s_prdata_o = '0;
+    rsp_err    = err;
     for (int unsigned s = 0; s < NoSlaves; s++) begin
       if (sel[s]) begin
-        s_pready_o  = m_pready_i[s];
-        s_prdata_o  = m_prdata_i[s];
-        s_pslverr_o = m_pslverr_i[s];
+        rsp_ready  = m_pready_i[s];
+        s_prdata_o = m_prdata_i[s];
+        rsp_err    = m_pslverr_i[s];
       end
     end
   end
+
+  // Towards the master (D61): PREADY is steady high while PSEL is low (including in reset,
+  // where masters hold PSEL low), so it never follows the address decode or a slave while
+  // idle; PSLVERR only in the access phase of a completing transfer, as AMBA recommends, so a
+  // master never sees a stray error.
+  assign s_pready_o  = ~s_psel_i | rsp_ready;
+  assign s_pslverr_o = s_psel_i & s_penable_i & rsp_ready & rsp_err;
 
 endmodule

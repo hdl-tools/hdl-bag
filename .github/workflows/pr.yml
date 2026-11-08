@@ -80,7 +80,8 @@ jobs:
 
   vendor:
     if: github.event_name != 'schedule'
-    # The vendored PULP tree must match Bender.lock exactly (scripts/vendor_pulp.py).
+    # The vendored PULP tree must match Bender.lock exactly (scripts/vendor_pulp.py), and the
+    # vendored ZipCPU formal properties their pinned commit (scripts/vendor_zipcpu.py).
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/hdl-tools/hdl-bag-tools:main
@@ -93,6 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: uv run --no-project python scripts/vendor_pulp.py --check
+      - run: uv run --no-project python scripts/vendor_zipcpu.py --check
 
   eda-shard:
     # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold

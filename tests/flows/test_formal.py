@@ -17,6 +17,7 @@ from hdl_bag.flows.base import Finding, Report
 from hdl_bag.flows.formal import (
     UNSAT,
     SymbiYosys,
+    bounded_notes,
     job_sources,
     job_tasks,
     prove,
@@ -356,3 +357,15 @@ def test_a_formal_timeout_needs_formal(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["flow", str(spec), "--formal-timeout", "30"])
     assert result.exit_code == 2
     assert "--formal-timeout needs --formal" in result.output
+
+
+def test_a_bmc_task_is_reported_as_bounded_not_proved(tmp_path: Path) -> None:
+    """A bmc pass says only that no assertion fails within its depth; the report says so,
+    per task. prove and cover tasks get no such note."""
+    job = tmp_path / "x.sby"
+    job.write_text("[tasks]\nprove\nbmc\ncover\n\n[options]\nprove: mode prove\nprove: depth 6\n"
+                   "bmc: mode bmc\nbmc: depth 16\ncover: mode cover\ncover: depth 16\n"
+                   "multiclock on\n\n[files]\n", encoding="utf-8")  # fmt: skip
+    assert bounded_notes(job) == ["x_bmc: bounded check to depth 16 (bmc), not a proof"]
+    job.write_text("[options]\nmode bmc\ndepth 9\n\n[files]\n", encoding="utf-8")
+    assert bounded_notes(job) == ["x: bounded check to depth 9 (bmc), not a proof"]

@@ -7,7 +7,7 @@ from typing import Any
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import ClockCycles, Timer
 
 from hdl_bag.tests_gen.bfm import APB, APB_RESP, ApbMaster, ApbResult, ApbSlave, fabric_port
 
@@ -105,3 +105,32 @@ async def slave_error_and_strobes_pass_through(dut: Any) -> None:
     assert not await m.write(0x1000_0200, 0xAABB_CCDD)
     assert not await m.write(0x1000_0200, 0x0000_1100, strb=0b0010)
     assert (await m.read(0x1000_0200)).data == 0xAABB_11DD
+
+
+@cocotb.test(timeout_time=200, timeout_unit="us")
+async def pready_and_pslverr_follow_the_amba_recommendations(dut: Any) -> None:
+    """D61 (owner), towards the master: PREADY is steady high while PSEL is low (including in
+    reset, where masters hold PSEL low), so it never follows the decode or a slave while
+    idle; with PSEL high it is the response's. PSLVERR is driven only in the access phase of
+    a completing transfer, as AMBA recommends. Checked for every phase (also PENABLE without
+    PSEL, which pins the PSEL term), every slave PREADY and PSLVERR, on a hit and on a miss
+    (the mux's own error, or the default slave)."""
+    _m, s = await _setup(dut)
+    for slave in s:
+        slave.stop()  # the test drives the slave-side responses itself
+    wrong = []
+    for miss in (True, False):
+        dut.s_paddr_i.value = 0x3000_0000 if miss else 0x1000_0000  # a hit is on s0
+        own = miss and not MISS_TO_DEFAULT  # the mux answers: PREADY and PSLVERR high
+        for psel, penable in ((0, 0), (1, 0), (1, 1), (0, 1)):
+            for ready, err in ((0, 0), (0, 1), (1, 0), (1, 1)):
+                dut.s_psel_i.value, dut.s_penable_i.value = psel, penable
+                dut.m_pready_i.value, dut.m_pslverr_i.value = ready * 0b111, err * 0b111
+                await Timer(1, unit="ns")
+                rsp_ready, rsp_err = (1, 1) if own else (ready, err)
+                want = (int(not psel or rsp_ready), int(psel and penable and rsp_ready and rsp_err))
+                have = (int(dut.s_pready_o.value), int(dut.s_pslverr_o.value))
+                if have != want:
+                    wrong.append(dict(miss=miss, psel=psel, penable=penable, ready=ready,
+                                      err=err, want=want, have=have))  # fmt: skip
+    assert wrong == [], wrong

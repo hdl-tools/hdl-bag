@@ -14,7 +14,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 90 validation checks | Protocol and decode properties, and nightly random regression (Phase 5) |
+| Spec workbook template, reader and 90 validation checks | AXI4 and AHB-Lite protocol properties, decode properties, and nightly random regression (Phase 5) |
 | Canonical YAML IR, byte-identical across runs | CDC constraints, user guide and v1.0 release (Phase 6) |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
@@ -25,7 +25,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
-| `bag formal`: SymbiYosys jobs per design; so far quiet-in-reset properties | |
+| `bag formal`: SymbiYosys jobs per design: quiet-in-reset, and AXI4-Lite and APB port protocol (ZipCPU checkers) | |
 
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
 
@@ -50,6 +50,13 @@ port style. `hdl-bag` is an alias for the `bag` command. The sample's two
 warnings are real: two of its AXI4 masters reach width converters that answer
 WRAP bursts with SLVERR (`AXI-WRAP-REFUSED`).
 
+`bag formal` runs each job in turn (`--timeout` applies per job). The
+quiet-in-reset job is a proof (k-induction). The protocol job is a bounded
+check: it says no assertion fails within its depth, and its covers show the
+check reached real transfers; the report notes which tasks are bounded. Both
+hold under the environment the job states: AMBA reset and handshake rules, the
+reset sequence of `doc/reset.md`, and alias pins that change only in reset.
+
 Generated output (under the output directory):
 
 ```
@@ -67,7 +74,9 @@ doc/reset.md             reset sequence: domains, crossings, which resets must a
 tests/<project>_tests.py cocotb tests that apply to this config
 tests/<project>.ir.yaml  the IR those tests read
 tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --ready-shim
-formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job (bmc and cover)
+formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job (prove and cover)
+formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (ZipCPU) and their job
+formal/bag_step.v, vendor/  the formal environment's step registers; the ZipCPU checkers, with LICENSE
 sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 

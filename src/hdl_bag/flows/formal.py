@@ -193,6 +193,29 @@ def job_tasks(job: Path) -> list[str]:
     return tasks or [job.stem]
 
 
+def bounded_notes(job: Path) -> list[str]:
+    """For each bmc task of a job file, a note that it is a bounded check, not a proof: a pass
+    says no assertion fails within that many solver steps, nothing beyond."""
+    options: dict[str, dict[str, str]] = {}
+    section = None
+    for raw in job.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line
+        elif section == "[options]" and line and not line.startswith("#"):
+            task, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
+            key, _, value = rest.strip().partition(" ")
+            options.setdefault(task.strip(), {})[key] = value.strip()
+    out = []
+    for task, opts in sorted(options.items()):
+        mode = opts.get("mode", options.get("", {}).get("mode"))
+        depth = opts.get("depth", options.get("", {}).get("depth", "?"))
+        if mode == "bmc":
+            name = f"{job.stem}_{task}" if task else job.stem
+            out.append(f"{name}: bounded check to depth {depth} (bmc), not a proof")
+    return out
+
+
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """Stop PROC and everything it started (POSIX); only PROC itself elsewhere."""
     killpg = getattr(os, "killpg", None)
@@ -252,22 +275,27 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
         tail = output.strip().splitlines()[-1:] or ["no output"]
         message = f"{job.stem}: exit status {proc.returncode}: {tail[0]}"
         findings.append(Finding(backend.name, "", 0, "TOOL-FAILED", "error", message))
+    notes = (*notes, *bounded_notes(job))
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 
 def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str], depths: dict[Mode, int],
             copy: Sequence[tuple[str, str]], engine: str = "smtbmc yices",
-            multiclock: bool = True) -> str:  # fmt: skip
+            multiclock: bool = True, prelude: Sequence[str] = ()) -> str:  # fmt: skip
     """The text of a SymbiYosys job: one task per mode of DEPTHS, each at its depth. FILES are
     read with yosys-slang in compile order, as named in the work directory; COPY lists the
-    (destination, source) pairs of its [files] section, sources relative to the job file."""
+    (destination, source) pairs of its [files] section, sources relative to the job file.
+    PRELUDE is Yosys script run before slang reads FILES (modules from Yosys's own frontend,
+    which the slang-read files may then instantiate)."""
     bad = sorted(set(depths) - set(MODES))
     if bad or not depths:
         raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {bad or 'none'}")
     for mode, depth in depths.items():
         if depth < 1:
             raise ValueError(f"formal depth must be at least 1, not {depth} ({mode})")
-    read = " ".join([*(f"-I {d}" for d in incdirs), "--top", top, *files])
+    extern = ["--extern-modules"] if prelude else []
+    read = " ".join([*extern, *(f"-I {d}" for d in incdirs), "--top", top, *files])
+    before = "".join(f"{line}\n" for line in prelude)
     tasks = "".join(f"{m}\n" for m in depths)
     options = "".join(f"{m}: mode {m}\n{m}: depth {d}\n" for m, d in depths.items())
     copied = "".join(f"{dest} {src}\n" if src != dest else f"{dest}\n" for dest, src in copy)
@@ -275,7 +303,7 @@ def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str], depths: d
         f"[tasks]\n{tasks}\n"
         f"[options]\n{options}{'multiclock on' if multiclock else 'multiclock off'}\n\n"
         f"[engines]\n{engine}\n\n"
-        f"[script]\nplugin -i slang\nread_slang {read}\nprep -top {top}\n\n"
+        f"[script]\nplugin -i slang\n{before}read_slang {read}\nprep -top {top}\n\n"
         f"[files]\n{copied}"
     )
 

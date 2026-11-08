@@ -22,6 +22,8 @@ Output layout (relative to the output directory)::
     tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
     formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job
                                (Generate formal; see hdl_bag.formal_gen)
+    formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (D60)
+    formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE
     bag_outputs.json           every file written (with sha256), the top and the file list
 """
 
@@ -194,12 +196,14 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     # Formal proves the fabrics' behaviour, so a user-supplied fabric has none either (D8).
     sby: tuple[str, ...] = ()
     if spec.project.outputs.formal and not opaque:
-        from hdl_bag.formal_gen import render_formal
+        from hdl_bag.formal_gen import render_formal, vendored_files
 
         for rel, text in render_formal(spec, netlist, lint_top, order, list(src.incdirs),
                                        user_header):  # fmt: skip
             _write(outdir, rel, text, written)
-        sby = tuple(r for r in written if r.startswith("formal/") and r.endswith(".sby"))
+        for rel in vendored_files(spec, netlist):  # the ZipCPU checkers, with their LICENSE
+            _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+        sby = tuple(sorted(r for r in written if r.startswith("formal/") and r.endswith(".sby")))
     _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
     p = spec.project
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
