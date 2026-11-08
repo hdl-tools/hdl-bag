@@ -108,7 +108,7 @@ Reviewed against `src/hdl_bag/rtl/vendor/pulp/` at axi v0.39.11 (commit 42ca270)
 | `AtopSupport` | 45 | `1'b0` | 0: v1 ties AWATOP to 0. |
 | `NoMstPorts` | 48 | `2` | 2: pass, or the error slave. |
 | `MaxTrans` | 49 | `MaxTrans + 1` | **+1 on purpose.** The per-ID counter stalls a further request at its maximum, so +1 lets the configured number be in flight. Found in the PR 3 review. |
-| `AxiLookBits` | 50 | `LookBits` | The guard's ID bits: ordering is tracked per ID. |
+| `AxiLookBits` | 50 | `LookBits` | Phase 3 shipped at most 3 bits, so IDs sharing their low 3 bits shared one in-flight limit (not per ID, as this row first said). Since Phase 5 (D65) it is all `IdWidth` bits: ordering and the limit are per full ID. |
 | `UniqueIds` | 51 | `1'b0` | 0: BAG does not promise unique IDs. |
 
 **`axi_dw_converter`** (`axi/src/axi_dw_converter.sv`), used by `bag_axi2ahb`, `bag_axi2apb`, `bag_axi2axil`, `bag_axi_dw`.

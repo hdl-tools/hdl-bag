@@ -176,6 +176,81 @@ def test_an_ungated_pslverr_in_the_apb_mux_is_caught(tmp_path: Path) -> None:
     assert ("FORMAL-ASSERT", "formal/vendor/zipcpu/fapb_slave.v") in failed, report.format()
 
 
+# bag_faxi4 on its own, around a tiny design: every AXI4 signal, its width, and whether the
+# master drives it. IDs are 2 bits.
+_AXI4 = [("awvalid", 1, True), ("awready", 1, False), ("awid", 2, True), ("awaddr", 32, True),
+         ("awlen", 8, True), ("awsize", 3, True), ("awburst", 2, True), ("awlock", 1, True),
+         ("awcache", 4, True), ("awprot", 3, True), ("awqos", 4, True), ("awregion", 4, True),
+         ("wvalid", 1, True), ("wready", 1, False), ("wdata", 32, True), ("wstrb", 4, True),
+         ("wlast", 1, True), ("bvalid", 1, False), ("bready", 1, True), ("bid", 2, False),
+         ("bresp", 2, False), ("arvalid", 1, True), ("arready", 1, False), ("arid", 2, True),
+         ("araddr", 32, True), ("arlen", 8, True), ("arsize", 3, True), ("arburst", 2, True),
+         ("arlock", 1, True), ("arcache", 4, True), ("arprot", 3, True), ("arqos", 4, True),
+         ("arregion", 4, True), ("rvalid", 1, False), ("rready", 1, True), ("rid", 2, False),
+         ("rdata", 32, False), ("rresp", 2, False), ("rlast", 1, False)]  # fmt: skip
+FAXI4 = Path(__file__).parents[2] / "src" / "hdl_bag" / "formal" / "bag_faxi4.sv"
+
+
+def _axi4_props(design_is_slave: bool, check: str) -> str:
+    """bag_faxi4 bound into t, the first cycle in reset, and CHECK (statements sampled at each
+    edge after the first out of reset)."""
+    ins = ", ".join(f"input logic [{w - 1}:0] {n}" for n, w, _ in _AXI4)
+    conns = ", ".join(f".{n}({n})" for n, _, _ in _AXI4)
+    return (
+        f"module t_props (input logic clk, input logic rst_n, {ins});\n"
+        "  logic first = 1'b1, was_out = 1'b0;\n"
+        "  always_ff @(posedge clk) begin first <= 1'b0; was_out <= rst_n; end\n"
+        "  always_comb if (first) assume (!rst_n);\n"
+        f"  bag_faxi4 #(.DesignIsSlave({int(design_is_slave)}), .AddrWidth(32), .DataWidth(32),"
+        " .IdWidth(2)) u_chk (\n"
+        f"      .clk_i(clk), .rst_ni(rst_n), {conns});\n"
+        f"  always_ff @(posedge clk) if (rst_n && was_out) begin\n{check}\n  end\n"
+        "endmodule\n"
+        "bind t t_props u_props (.*);\n"
+    )
+
+
+def _axi4_tiny(root: Path, design_is_slave: bool, drive: dict[str, str], check: str = "",
+               props: str | None = None) -> Report:  # fmt: skip
+    """A design t on one AXI4 port: it drives the slave's signals (DESIGN_IS_SLAVE) or the
+    master's, each from DRIVE or 0, and takes the others from the environment, which
+    bag_faxi4 constrains. Returns the bmc report."""
+    ports = ", ".join(
+        f"{'output' if master != design_is_slave else 'input'} logic [{w - 1}:0] {n}"
+        for n, w, master in _AXI4
+    )
+    zero = "'0"
+    body = "".join(f"  assign {n} = {drive.get(n, zero)};\n"
+                   for n, _, master in _AXI4 if master != design_is_slave)  # fmt: skip
+    (root / "rtl").mkdir(parents=True)
+    (root / "rtl" / "t.sv").write_text(
+        f"module t (input logic clk, input logic rst_n, {ports});\n{body}endmodule\n",
+        encoding="utf-8",
+    )
+    (root / "bag_faxi4.sv").write_text(FAXI4.read_text(encoding="utf-8"), encoding="utf-8")
+    text = props if props is not None else _axi4_props(design_is_slave, check)
+    (root / "t_props.sv").write_text(text, encoding="utf-8")
+    return prove([Path("rtl/t.sv")], "t", root, properties=[Path("bag_faxi4.sv"),
+                 Path("t_props.sv")], depth=12, mode="bmc")  # fmt: skip
+
+
+def test_an_axi4_slave_environment_answers_no_id_it_was_not_asked(tmp_path: Path) -> None:
+    """The design is a master that never asks anything. The environment slave, constrained
+    by bag_faxi4, must then never raise RVALID or BVALID, whatever the ID (D64: the
+    axi_xbar_rules counterexample came from a slave answering an untracked ID)."""
+    report = _axi4_tiny(tmp_path, False, {"bready": "1'b1", "rready": "1'b1"},
+                        "    never_answered: assert (!rvalid && !bvalid);")  # fmt: skip
+    assert report.ok, report.format()
+
+
+def test_an_axi4_slave_design_answering_an_unasked_id_is_caught(tmp_path: Path) -> None:
+    """The design is a slave that raises BVALID on ID 3 with no write ever made: the checker
+    must fail it, whichever ID that is (D64)."""
+    report = _axi4_tiny(tmp_path, True, {"bvalid": "rst_n", "bid": "2'd3"})
+    failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
+    assert any("assertion b_only_for_a_complete_write fails" in m for m in failed), report.format()
+
+
 def test_a_job_over_its_time_limit_stops(tmp_path: Path) -> None:
     """demo_ss's cover task takes minutes; with a 5 s limit the job stops with a finding.
     (That every process it started stops too is tested with a stand-in sby in

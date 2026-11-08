@@ -5,6 +5,8 @@
  "tests/flows/test_formal_eda.py::test_a_response_that_waits_for_ready_fails_its_cover": 10.8,
  "tests/flows/test_formal_eda.py::test_an_apb_protocol_break_is_caught": 6.15,
  "tests/flows/test_formal_eda.py::test_an_axi4_lite_response_with_no_request_is_caught": 7.77,
+ "tests/flows/test_formal_eda.py::test_an_axi4_slave_design_answering_an_unasked_id_is_caught": 1.82,
+ "tests/flows/test_formal_eda.py::test_an_axi4_slave_environment_answers_no_id_it_was_not_asked": 1.22,
  "tests/flows/test_formal_eda.py::test_an_ungated_pslverr_in_the_apb_mux_is_caught": 5.49,
  "tests/flows/test_formal_eda.py::test_environment_registers_advance_every_solver_step": 0.74,
  "tests/flows/test_formal_eda.py::test_prove_passes_a_property_that_holds": 0.93,
