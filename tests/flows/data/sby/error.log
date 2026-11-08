@@ -1,0 +1,13 @@
+SBY 16:01:32 [e] Removing directory '/work/out/fx/t1/e'.
+SBY 16:01:32 [e] Copy '/work/out/fx/t1/e.sv' to '/work/out/fx/t1/e/src/e.sv'.
+SBY 16:01:32 [e] engine_0: smtbmc yices
+SBY 16:01:32 [e] base: starting process "cd e/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:01:32 [e] base: e.sv:1: ERROR: expected expression
+SBY 16:01:32 [e] base: ERROR: Design elaboration failed; see full log for details
+SBY 16:01:32 [e] base: finished (returncode=1)
+SBY 16:01:32 [e] base: task failed. ERROR.
+SBY 16:01:32 [e] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:32 [e] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:32 [e] summary: engine_0 (smtbmc yices) did not return a status
+SBY 16:01:32 [e] summary: engine_0 did not produce any traces
+SBY 16:01:32 [e] DONE (ERROR, rc=16)

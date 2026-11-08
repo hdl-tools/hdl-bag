@@ -38,11 +38,14 @@ def test_cli_flow(tmp_path: Path) -> None:
 
     from hdl_bag.cli import main
 
-    result = CliRunner().invoke(main, ["flow", str(CONFIG), "-o", str(tmp_path / "flow")])
+    result = CliRunner().invoke(
+        main, ["flow", str(CONFIG), "-o", str(tmp_path / "flow"), "--formal"]
+    )
     assert result.exit_code == 0, result.output
     assert "lint (slang, verilator, verible): 0 unwaived" in result.output
     assert "compile (verilator-elaborate): 0 unwaived" in result.output
     assert "sim (verilator, cocotb): 0 unwaived" in result.output
+    assert "formal (sby): 0 unwaived" in result.output
     lint_again = CliRunner().invoke(main, ["lint", str(tmp_path / "flow")])
     assert lint_again.exit_code == 0, lint_again.output
 

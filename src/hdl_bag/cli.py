@@ -9,7 +9,7 @@ import click
 
 from hdl_bag import __version__, ir
 from hdl_bag.checks import CheckResult, run_checks
-from hdl_bag.flows import Report, SimUnavailable, compile_design, lint, run_tests
+from hdl_bag.flows import Report, SimUnavailable, compile_design, lint, run_formal, run_tests
 from hdl_bag.gen import MissingRtl, Outputs, generate, include_dirs, load_outputs, sources
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.to_workbook import to_workbook
@@ -171,12 +171,42 @@ def sim_command(outdir: Path, test_filter: str | None, ready_shim: bool) -> None
     _sim(load_outputs(outdir), test_filter, ready_shim)
 
 
+def _formal(out: Outputs, timeout: float | None = None) -> None:
+    try:
+        _report(run_formal(out, timeout=timeout))
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+
+@main.command(name="formal")
+@click.argument("outdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--timeout", type=click.FloatRange(min=1), help="Seconds allowed per job.")
+def formal_command(outdir: Path, timeout: float | None) -> None:
+    """Run a generated OUTDIR's SymbiYosys jobs; exit 1 on any finding (a failed assertion, an
+    unreached cover, an error or a timeout)."""
+    _formal(load_outputs(outdir), timeout)
+
+
 @main.command()
 @click.argument("spec", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @_OUTPUT
 @_STYLE
-def flow(spec: Path, output: Path | None, style: str | None) -> None:
-    """check -> generate -> lint -> elaborate -> sim. Formal comes in Phase 5."""
+@click.option(
+    "--formal",
+    "with_formal",
+    is_flag=True,
+    help="Also run the generated SymbiYosys jobs after sim (as bag formal).",
+)
+@click.option("--formal-timeout", type=click.FloatRange(min=1),
+              help="Seconds allowed per formal job (with --formal).")  # fmt: skip
+def flow(spec: Path, output: Path | None, style: str | None, with_formal: bool,
+         formal_timeout: float | None) -> None:  # fmt: skip
+    """check -> generate -> lint -> elaborate -> sim, then formal with --formal. Formal is
+    opt-in here because a large design's proofs can take many minutes; bag formal runs it on
+    its own."""
+    if formal_timeout is not None and not with_formal:
+        raise click.UsageError("--formal-timeout needs --formal")
     out = _generate(spec, output, style)
     _report(lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out)))
     # Simulation builds the C++ model itself, so build it here only if nothing will.
@@ -188,6 +218,12 @@ def flow(spec: Path, output: Path | None, style: str | None) -> None:
         )
     else:
         _sim(out)
+    if not with_formal:
+        return
+    if out.formal:
+        _formal(out, formal_timeout)
+    else:
+        click.echo("no generated formal (Generate formal is N, or a user-supplied fabric)")
 
 
 if __name__ == "__main__":

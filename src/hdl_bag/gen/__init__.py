@@ -20,6 +20,8 @@ Output layout (relative to the output directory)::
     tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
     tests/<project>.ir.yaml    the IR those tests read
     tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
+    formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job
+                               (Generate formal; see hdl_bag.formal_gen)
     bag_outputs.json           every file written (with sha256), the top and the file list
 """
 
@@ -69,6 +71,7 @@ class Outputs:
     tests: str | None = None  # the generated cocotb module, if any
     lint_tools: tuple[str, ...] = ("slang", "verilator", "verible")  # Project > Lint tools
     simulator: str = "verilator"  # Project > Simulator
+    formal: tuple[str, ...] = ()  # the generated SymbiYosys jobs (formal/*.sby), if any
 
 
 def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
@@ -188,10 +191,19 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         shim = render_ready_shim(spec, lint_top, top_text, user_header)
         if shim is not None:
             _write(outdir, f"tests/{ready_shim_module(lint_top)}.sv", shim, written)
-    _manifest(outdir, written, spec, lint_top, filelist, tests)
+    # Formal proves the fabrics' behaviour, so a user-supplied fabric has none either (D8).
+    sby: tuple[str, ...] = ()
+    if spec.project.outputs.formal and not opaque:
+        from hdl_bag.formal_gen import render_formal
+
+        for rel, text in render_formal(spec, netlist, lint_top, order, list(src.incdirs),
+                                       user_header):  # fmt: skip
+            _write(outdir, rel, text, written)
+        sby = tuple(r for r in written if r.startswith("formal/") and r.endswith(".sby"))
+    _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
     p = spec.project
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
-                   p.simulator)  # fmt: skip
+                   p.simulator, tuple(sorted(sby)))  # fmt: skip
 
 
 MANIFEST = "bag_outputs.json"
@@ -206,7 +218,7 @@ def load_outputs(root: Path) -> Outputs:
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
         tuple(data.get("lint_tools", defaults.lint_tools)),
-        data.get("simulator", defaults.simulator),
+        data.get("simulator", defaults.simulator), tuple(data.get("formal", ())),
     )  # fmt: skip
 
 
@@ -228,6 +240,7 @@ def _manifest(
     top: str | None,
     filelist: str | None,
     tests: str | None,
+    formal: tuple[str, ...] = (),
 ) -> None:
     # Remove files a previous run wrote that this run did not (e.g. after a style change).
     old = root / MANIFEST
@@ -241,6 +254,7 @@ def _manifest(
         "top": top,
         "filelist": filelist,
         "tests": tests,
+        "formal": list(formal),
         "lint_tools": list(spec.project.lint_tools),
         "simulator": spec.project.simulator,
     }

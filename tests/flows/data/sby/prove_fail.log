@@ -1,0 +1,43 @@
+SBY 16:01:32 [g] Removing directory '/work/out/fx/t1/g'.
+SBY 16:01:32 [g] Copy '/work/out/fx/t1/g.sv' to '/work/out/fx/t1/g/src/g.sv'.
+SBY 16:01:32 [g] engine_0: smtbmc yices
+SBY 16:01:32 [g] base: starting process "cd g/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 16:01:32 [g] base: finished (returncode=0)
+SBY 16:01:32 [g] prep: starting process "cd g/model; yosys -ql design_prep.log design_prep.ys"
+SBY 16:01:32 [g] prep: finished (returncode=0)
+SBY 16:01:32 [g] smt2: starting process "cd g/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 16:01:32 [g] smt2: finished (returncode=0)
+SBY 16:01:32 [g] engine_0.basecase: starting process "cd g; yosys-smtbmc -s yices --presat --unroll --noprogress -t 4  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY 16:01:32 [g] engine_0.induction: starting process "cd g; yosys-smtbmc -s yices --presat --unroll -i --noprogress -t 4  --append 0 --dump-vcd engine_0/trace_induct.vcd --dump-yw engine_0/trace_induct.yw --dump-vlogtb engine_0/trace_induct_tb.v --dump-smtc engine_0/trace_induct.smtc model/design_smt2.smt2"
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Solver: yices
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Checking assumptions in step 0..
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Solver: yices
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Trying induction in step 4..
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Checking assertions in step 0..
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  BMC failed!
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Assert failed in t: quiet_q
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Writing trace to VCD file: engine_0/trace.vcd
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Writing trace to Verilog testbench: engine_0/trace_tb.v
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Trying induction in step 3..
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Trying induction in step 2..
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Trying induction in step 1..
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Writing trace to constraints file: engine_0/trace.smtc
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Trying induction in step 0..
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Temporal induction failed!
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Assert failed in t: quiet_q
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Writing trace to VCD file: engine_0/trace_induct.vcd
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Writing trace to Yosys witness file: engine_0/trace.yw
+SBY 16:01:32 [g] engine_0.basecase: ##   0:00:00  Status: failed
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Writing trace to Verilog testbench: engine_0/trace_induct_tb.v
+SBY 16:01:32 [g] engine_0.induction: ##   0:00:00  Writing trace to constraints file: engine_0/trace_induct.smtc
+SBY 16:01:32 [g] engine_0.basecase: finished (returncode=1)
+SBY 16:01:32 [g] engine_0.basecase: Status returned by engine for basecase: FAIL
+SBY 16:01:32 [g] engine_0.induction: terminating process
+SBY 16:01:32 [g] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:32 [g] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 16:01:32 [g] summary: engine_0 (smtbmc yices) returned FAIL for basecase
+SBY 16:01:32 [g] summary: counterexample trace [basecase]: g/engine_0/trace.vcd
+SBY 16:01:32 [g] summary:   failed assertion t.quiet_q at g.sv:7.27-7.47
+SBY 16:01:32 [g] summary: counterexample trace [induction]: g/engine_0/trace_induct.vcd
+SBY 16:01:32 [g] summary:   failed assertion t.quiet_q at g.sv:7.27-7.47
+SBY 16:01:32 [g] DONE (FAIL, rc=2)

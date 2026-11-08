@@ -1,0 +1,49 @@
+SBY 23:22:45 [v_prove] Removing directory '/work/out/fx/t1/v_prove'.
+SBY 23:22:45 [v_prove] Copy '/work/out/fx/t1/v.sv' to '/work/out/fx/t1/v_prove/src/v.sv'.
+SBY 23:22:45 [v_prove] engine_0: smtbmc yices
+SBY 23:22:45 [v_bmc] Removing directory '/work/out/fx/t1/v_bmc'.
+SBY 23:22:45 [v_bmc] Copy '/work/out/fx/t1/v.sv' to '/work/out/fx/t1/v_bmc/src/v.sv'.
+SBY 23:22:45 [v_bmc] engine_0: smtbmc yices
+SBY 23:22:45 [v_prove] base: starting process "cd v_prove/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 23:22:45 [v_bmc] base: starting process "cd v_bmc/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY 23:22:45 [v_prove] base: finished (returncode=0)
+SBY 23:22:45 [v_bmc] base: finished (returncode=0)
+SBY 23:22:45 [v_prove] prep: starting process "cd v_prove/model; yosys -ql design_prep.log design_prep.ys"
+SBY 23:22:45 [v_bmc] prep: starting process "cd v_bmc/model; yosys -ql design_prep.log design_prep.ys"
+SBY 23:22:46 [v_prove] prep: finished (returncode=0)
+SBY 23:22:46 [v_prove] smt2: starting process "cd v_prove/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 23:22:46 [v_bmc] prep: finished (returncode=0)
+SBY 23:22:46 [v_bmc] smt2: starting process "cd v_bmc/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY 23:22:46 [v_prove] smt2: finished (returncode=0)
+SBY 23:22:46 [v_prove] engine_0.basecase: starting process "cd v_prove; yosys-smtbmc -s yices --presat --unroll --noprogress -t 4  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY 23:22:46 [v_bmc] smt2: finished (returncode=0)
+SBY 23:22:46 [v_prove] engine_0.induction: starting process "cd v_prove; yosys-smtbmc -s yices --presat --unroll -i --noprogress -t 4  --append 0 --dump-vcd engine_0/trace_induct.vcd --dump-yw engine_0/trace_induct.yw --dump-vlogtb engine_0/trace_induct_tb.v --dump-smtc engine_0/trace_induct.smtc model/design_smt2.smt2"
+SBY 23:22:46 [v_bmc] engine_0: starting process "cd v_bmc; yosys-smtbmc -s yices --presat --unroll --noprogress -t 4  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY 23:22:46 [v_prove] engine_0.basecase: ##   0:00:00  Solver: yices
+SBY 23:22:46 [v_prove] engine_0.induction: ##   0:00:00  Solver: yices
+SBY 23:22:46 [v_bmc] engine_0: ##   0:00:00  Solver: yices
+SBY 23:22:46 [v_prove] engine_0.induction: ##   0:00:00  Trying induction in step 4..
+SBY 23:22:46 [v_bmc] engine_0: ##   0:00:00  Checking assumptions in step 0..
+SBY 23:22:46 [v_prove] engine_0.basecase: ##   0:00:00  Checking assumptions in step 0..
+SBY 23:22:46 [v_prove] engine_0.basecase: ##   0:00:00  Assumptions are unsatisfiable!
+SBY 23:22:46 [v_prove] engine_0.basecase: ##   0:00:00  Status: PREUNSAT
+SBY 23:22:46 [v_prove] engine_0.induction: ##   0:00:00  Temporal induction successful.
+SBY 23:22:46 [v_prove] engine_0.induction: ##   0:00:00  Status: passed
+SBY 23:22:46 [v_bmc] engine_0: ##   0:00:00  Assumptions are unsatisfiable!
+SBY 23:22:46 [v_bmc] engine_0: ##   0:00:00  Status: PREUNSAT
+SBY 23:22:46 [v_prove] engine_0.basecase: finished (returncode=1)
+SBY 23:22:46 [v_prove] engine_0.basecase: Status returned by engine for basecase: ERROR
+SBY 23:22:46 [v_prove] engine_0.induction: terminating process
+SBY 23:22:46 [v_prove] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 23:22:46 [v_prove] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 23:22:46 [v_prove] summary: engine_0 (smtbmc yices) returned ERROR for basecase
+SBY 23:22:46 [v_prove] summary: engine_0 did not produce any traces
+SBY 23:22:46 [v_prove] DONE (ERROR, rc=16)
+SBY 23:22:46 [v_bmc] engine_0: finished (returncode=1)
+SBY 23:22:46 [v_bmc] engine_0: Status returned by engine: ERROR
+SBY 23:22:46 [v_bmc] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 23:22:46 [v_bmc] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY 23:22:46 [v_bmc] summary: engine_0 (smtbmc yices) returned ERROR
+SBY 23:22:46 [v_bmc] summary: engine_0 did not produce any traces
+SBY 23:22:46 [v_bmc] DONE (ERROR, rc=16)
+SBY 23:22:46 The following tasks failed: ['prove', 'bmc']
