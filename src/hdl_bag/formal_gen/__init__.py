@@ -47,8 +47,9 @@ its cover. A cover is generated only where the route model says the signal can b
 a slave no master may write never sees a write request.
 
 The port-protocol family (D60) checks each AXI4-Lite and APB port of the top with
-ZipCPU's property files: the slave checker where the design is the slave (a master port),
-the master checker where it is the master (a slave port). They are read by Yosys's own
+ZipCPU's property files: on a port that connects an external master, the design is the
+slave and gets the slave checker; on a port that connects an external slave, the design is
+the master and gets the master checker. They are read by Yosys's own
 frontend (their dialect is not slang's); each instance gets a copy of the checker module
 with its parameters set (``copy`` and ``chparam``), which the slang-read property module
 instantiates. Each checker sees its domain's reset as the design does: asserted from the
@@ -82,7 +83,11 @@ COVER_DEPTH = 40
 
 # Bounded depth for the protocol checkers, in solver steps: their transaction counters have
 # no invariant tying them to the fabric's state, so they are checked to a depth, not proved.
-# The formal corpus tunes it per config class (Phase 5 PR 4).
+# The cover task runs at the same depth, so a reached cover is a state the check explored.
+# Owner (2026-11-08): 16 until PR 4 sets depths per config class. 16 is one step short on
+# mixed_apb_masters (its first completed write to pmu is at step 16), which so reports an
+# unreached cover; 20 reaches it but takes axil_shared_fixed and axil_xbar_rules past 10
+# minutes (about 40 s at 16).
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
@@ -237,7 +242,11 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
         # sync-deassertion reset leaves the domain only after the synchronizer's stages.
         body += [f"  logic bag_leaving_{d};  // {d} released but not yet out of reset"
                  for d in group]  # fmt: skip
-        leaving = " || ".join(f"bag_leaving_{d}" for d in group)
+        body += [f"  logic bag_in_reset_{d};  // {d} is in reset as the design sees it"
+                 for d in group]  # fmt: skip
+        # A peer is not out while it is held in reset, nor while it is leaving it: the
+        # group's resets release in any order.
+        leaving = " || ".join(f"bag_in_reset_{d} || bag_leaving_{d}" for d in group)
         for d in group:
             clk, rst = clocks[d].name, resets[d]
             held, quiet = f"bag_held_{d}", f"bag_quiet_{d}"
@@ -262,7 +271,7 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
             # In reset as the design sees it: before the first reset has taken effect the
             # design's state is not yet defined, so that counts as reset too.
             in_reset = f"bag_in_reset_{d}"
-            body.append(f"  wire {in_reset} = {quiet} || !bag_done_{d};")
+            body.append(f"  assign {in_reset} = {quiet} || !bag_done_{d};")
             # A checker samples its reset at clock edges. A reset that an edge saw ends at its
             # release, as AXI defines it. But an async reset can come and go between two edges
             # and still clear the domain: no edge saw it, so until the next edge it counts as
@@ -314,9 +323,12 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
 
 
 def _alias_pins(spec: Spec, domains: dict[str, Domain], port: "_Ports") -> list[str]:
-    """Alias-enable pins are quasi-static: they change only while every domain whose fabric
-    uses them is in reset. Without this, a pin toggling under a transfer moves the decode
-    mid-access, which no design contract allows."""
+    """Alias-enable pins (the workbook guide's Address_Decode > Alias enable: a top-level
+    input) are quasi-static, as the RTL requires (bag_addr_decode and bag_apb_mux: "must be
+    quasi-static, or synchronous and stable during a transfer"). Formal takes the strict
+    reading: a pin changes only while every domain whose fabric uses it is in reset, and its
+    last value is sampled on the first such domain's clock. A pin toggling under a transfer
+    would move the decode mid-access. The guide does not state the requirement yet (Phase 6)."""
     users: dict[str, set[str]] = {}
     for f in spec.fabrics:
         for d in f.decode:
@@ -393,7 +405,7 @@ def _signals(spec: Spec, bus: Bus, active: dict[str, set[str]], dom: Domain,
         out += [
             f"  logic {busy};  // active in the last step, after a full reset",
             _step(busy, 0, f"{done} && !{held} && {w.name} != {value}"),
-            f"  logic {hit} = 1'b0;  // the reset came while it was active",
+            f"  logic {hit};  // the reset came while it was active",
             _step(hit, 0, f"{hit} || ({held} && {busy})"),
             f"  always_comb reset_mid_{w.name}: cover ({quiet} && {hit});",
         ]
@@ -408,6 +420,7 @@ class Checker:
     vendor: str  # the vendored module (faxil_slave, ...)
     module: str  # this instance's copy of it, with its parameters set
     params: tuple[tuple[str, int], ...]
+    can: frozenset[str] = frozenset({"read", "write"})  # accesses that can cross the port
 
 
 def _family(bus: Bus) -> str | None:
@@ -427,6 +440,12 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
         if not bus.external or family is None:
             continue
         vendor = _CHECKER[(family, bus.is_slave)]
+        can = frozenset({"read", "write"})  # a master can always issue both (refused or not)
+        if bus.is_slave:
+            active = _active(spec) if active is None else active
+            can = frozenset(active.get(bus.name, set()))
+            if not can:
+                continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
         params: tuple[tuple[str, int], ...]
         if family == "axil":
             params = (("C_AXI_DATA_WIDTH", bus.data_width), ("C_AXI_ADDR_WIDTH", bus.addr_width),
@@ -436,8 +455,6 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             if bus.is_slave:
                 # A slave no master may write (or read), by the route model: the checker
                 # then asserts the design never does, and drops the cover it can't reach.
-                active = _active(spec) if active is None else active
-                can = active.get(bus.name, set())
                 if can == {"read"}:
                     params += (("F_OPT_READ_ONLY", 1),)
                 elif can == {"write"}:
@@ -447,8 +464,49 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             params = (("AW", bus.addr_width), ("DW", bus.data_width), ("F_OPT_MAXSTALL", 0),
                       ("F_OPT_SLVERR", int(slverr)), ("F_OPT_ASYNC_RESET", 1))  # fmt: skip
         out.append(Checker(bus.name, vendor, f"bag_{spec.project.name}_{vendor}_{bus.name}",
-                           params))  # fmt: skip
+                           params, can))  # fmt: skip
     return out
+
+
+def _covers(spec: Spec, bus: Bus, chk: Checker, port: "_Ports") -> list[str]:
+    """BAG's own covers on a checked port, so the protocol job shows it checked something
+    (ZipCPU's APB files have none, and its AXI4-Lite ones only one per direction): transfers
+    completing each way, a wait state, and an error, for what the route model lets cross the
+    port. The cover task runs at the bmc depth, so each one reached is a state the bounded
+    check explored."""
+
+    def v(sig: str) -> str:
+        return _value(spec, bus, sig, port)
+
+    name, out = bus.name, []
+    if chk.vendor.startswith("fapb"):
+        done = f"{v('psel')} && {v('penable')} && {v('pready')}"
+        if "write" in chk.can:
+            out.append((f"proto_write_{name}", f"{done} && {v('pwrite')}"))
+        if "read" in chk.can:
+            out.append((f"proto_read_{name}", f"{done} && !{v('pwrite')}"))
+        out.append((f"proto_wait_{name}", f"{v('psel')} && {v('penable')} && !{v('pready')}"))
+        if bus.is_slave and dict(chk.params).get("F_OPT_SLVERR"):
+            out.append((f"proto_error_{name}", f"{done} && {v('pslverr')}"))
+    else:
+        # The channels the design drives on this port: requests towards a slave, responses
+        # towards a master. Each one stalled, and (towards a master) an error response.
+        if bus.is_slave:
+            pairs = [("aw", "awvalid", "awready", "write"), ("w", "wvalid", "wready", "write"),
+                     ("ar", "arvalid", "arready", "read")]  # fmt: skip
+        else:
+            pairs = [("b", "bvalid", "bready", "write"), ("r", "rvalid", "rready", "read")]
+        for ch, valid, ready, kind in pairs:
+            if kind in chk.can:
+                out.append((f"proto_{ch}_stall_{name}", f"{v(valid)} && !{v(ready)}"))
+        if bus.is_slave:
+            if "write" in chk.can:
+                out.append((f"proto_b_error_{name}",
+                            f"{v('bvalid')} && {v('bready')} && {v('bresp')}[1]"))  # fmt: skip
+            if "read" in chk.can:
+                out.append((f"proto_r_error_{name}",
+                            f"{v('rvalid')} && {v('rready')} && {v('rresp')}[1]"))  # fmt: skip
+    return [f"  always_comb {label}: cover ({expr});" for label, expr in out]
 
 
 # The checkers' port names, in the order of each vendored module's ports.
@@ -493,6 +551,18 @@ def _checker(spec: Spec, bus: Bus, chk: Checker, dom: Domain,
             # and just after reset (when PSEL is low), so it sees PREADY only with PSEL.
             psel = _value(spec, bus, "psel", port)
             conns = [(c, f"({v} && {psel})" if c == ".PREADY" else v) for c, v in conns]
+        else:
+            # fapb_master assumes what the slave drives. The spec defines PREADY only while
+            # PSEL is high, and PSLVERR only in a completing access, so the checker sees just
+            # that part: outside it the slave stays free, which is what makes the fabric's own
+            # gating (D61) visible to the checkers on its master ports (formal review of #46).
+            psel, penable = _value(spec, bus, "psel", port), _value(spec, bus, "penable", port)
+            pready = _value(spec, bus, "pready", port)
+            gated = {".PREADY": f"({pready} && {psel})"}
+            if chk.params and dict(chk.params).get("F_OPT_SLVERR"):
+                pslverr = _value(spec, bus, "pslverr", port)
+                gated[".PSLVERR"] = f"({pslverr} && {psel} && {penable} && {pready})"
+            conns = [(c, gated.get(c, v)) for c, v in conns]
     lines = [f"  {chk.module} u_{chk.port} ("]
     lines += [f"      {c}({v})," for c, v in conns]
     lines[-1] = lines[-1].rstrip(",")
@@ -564,7 +634,8 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
         side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
         body.append(f"  // {chk.port}: {bus.protocol.value} {side} port; the design is its "
                     f"{design} ({chk.vendor})")  # fmt: skip
-        body += [*_checker(spec, bus, chk, domains[bus.domain], ports), ""]
+        body += [*_checker(spec, bus, chk, domains[bus.domain], ports)]
+        body += [*_covers(spec, bus, chk, ports), ""]
     for bus in netlist.ports:
         if bus.external and bus.protocol is Protocol.AXI4:
             body += _axi4_handshake_env(spec, bus, domains[bus.domain], ports)
@@ -603,7 +674,7 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
         sets = " ".join(f"-set {k} {v}" for k, v in c.params)
         prelude += [f"copy {c.vendor} {c.module}", f"chparam {sets} {c.module}"]
     job = sby_job(top=top, files=[*files, props], incdirs=incdirs,
-                  depths={"bmc": PROTOCOL_DEPTH, "cover": COVER_DEPTH},
+                  depths={"bmc": PROTOCOL_DEPTH, "cover": PROTOCOL_DEPTH},
                   copy=[("rtl", "../rtl"), (STEP, STEP), ("zipcpu", "vendor/zipcpu"),
                         (props, props)],
                   engine=ENGINE, prelude=prelude)  # fmt: skip
@@ -633,5 +704,7 @@ def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:
     """The packaged formal files SPEC's jobs read (package paths): the step registers, and the
     vendored checkers with their LICENSE."""
     found = sorted({c.vendor for c in checkers(spec, netlist)})
-    vendored = [f"{ZIPCPU}/{v}.v" for v in found] + ([f"{ZIPCPU}/LICENSE"] if found else [])
+    # The licence and the provenance (source and commit) travel with the files.
+    extra = [f"{ZIPCPU}/LICENSE", f"{ZIPCPU}/SOURCE.md"] if found else []
+    vendored = [f"{ZIPCPU}/{v}.v" for v in found] + extra
     return [f"formal/{STEP}", *vendored]

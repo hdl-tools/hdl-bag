@@ -34,15 +34,30 @@ SOURCE = (
 )
 
 
+def _fetch(url: str) -> bytes:
+    """URL's content, with one retry; a clear message, not a traceback, if it fails."""
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return bytes(r.read())
+        except OSError as exc:  # URLError and HTTPError are OSErrors
+            if attempt == 2:
+                msg = f"cannot fetch {url}: {exc} (network, or the commit moved?)"
+                raise SystemExit(msg) from exc
+    raise AssertionError("unreachable")
+
+
 def expected() -> dict[str, bytes]:
     """Every file of the vendored directory, as it should be."""
     out: dict[str, bytes] = {}
     for name in FILES:
-        with urllib.request.urlopen(URL.format(commit=COMMIT, name=name), timeout=60) as r:
-            data = bytes(r.read())
+        data = _fetch(URL.format(commit=COMMIT, name=name))
         if LICENCE_LINE.encode() not in data[:2000]:
             raise SystemExit(f"{name}: no '{LICENCE_LINE}' header at {COMMIT}; stop and check")
         out[name] = data
+    # wb2axip has no licence text file, so this is the standard Apache-2.0 text, taken from
+    # hdl-bag's own LICENSE (that text, unmodified). Editing hdl-bag's LICENSE therefore makes
+    # --check fail here too, on purpose: the vendored copy must stay the plain licence.
     out["LICENSE"] = (REPO / "LICENSE").read_bytes()
     out["SOURCE.md"] = SOURCE.encode()
     return out

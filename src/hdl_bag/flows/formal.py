@@ -193,6 +193,29 @@ def job_tasks(job: Path) -> list[str]:
     return tasks or [job.stem]
 
 
+def bounded_notes(job: Path) -> list[str]:
+    """For each bmc task of a job file, a note that it is a bounded check, not a proof: a pass
+    says no assertion fails within that many solver steps, nothing beyond."""
+    options: dict[str, dict[str, str]] = {}
+    section = None
+    for raw in job.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line
+        elif section == "[options]" and line and not line.startswith("#"):
+            task, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
+            key, _, value = rest.strip().partition(" ")
+            options.setdefault(task.strip(), {})[key] = value.strip()
+    out = []
+    for task, opts in sorted(options.items()):
+        mode = opts.get("mode", options.get("", {}).get("mode"))
+        depth = opts.get("depth", options.get("", {}).get("depth", "?"))
+        if mode == "bmc":
+            name = f"{job.stem}_{task}" if task else job.stem
+            out.append(f"{name}: bounded check to depth {depth} (bmc), not a proof")
+    return out
+
+
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """Stop PROC and everything it started (POSIX); only PROC itself elsewhere."""
     killpg = getattr(os, "killpg", None)
@@ -252,6 +275,7 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
         tail = output.strip().splitlines()[-1:] or ["no output"]
         message = f"{job.stem}: exit status {proc.returncode}: {tail[0]}"
         findings.append(Finding(backend.name, "", 0, "TOOL-FAILED", "error", message))
+    notes = (*notes, *bounded_notes(job))
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 

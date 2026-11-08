@@ -131,6 +131,13 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     covered = set(re.findall(r"reset_mid_(\w+): cover", text))
     assert asserted and covered <= set(asserted)
     assert covered, f"{config.stem}: no cover at all"
+    # And every checked protocol port has a cover of its own.
+    spec = load(config)
+    protocol = tmp_path / "formal" / f"{spec.project.name}_protocol.sv"
+    if protocol.is_file():
+        ports = set(re.findall(r"proto_\w+?_(\w+): cover", protocol.read_text(encoding="utf-8")))
+        found = {c.port for c in checkers(spec, build_netlist(spec))}
+        assert found and all(any(p.endswith(port) for p in ports) for port in found), found
     # Step registers come from formal/bag_step.v: under yosys-slang a register on a net
     # marked (* gclk *) is clocked by a free net, not the solver's step (PR 1's bug).
     assert "gclk" not in text and "always_ff @(posedge bag_step)" not in text
@@ -201,8 +208,9 @@ def _protocol(tmp_path: Path, config: Path) -> str:
 
 
 def test_each_axi4_lite_and_apb_port_gets_the_checker_for_its_side() -> None:
-    """The slave checker where the design is the slave (a master port), the master checker
-    where it is the master (a slave port). AXI4 and AHB-Lite ports get none here (PR 2b)."""
+    """A port that connects an external master gets the slave checker (the design is the
+    slave there); a port that connects an external slave gets the master checker. AXI4 and
+    AHB-Lite ports get none here (PR 2b)."""
     spec = load(GOLDEN)
     found = {c.port: c.vendor for c in checkers(spec, build_netlist(spec))}
     assert found == {
@@ -266,9 +274,12 @@ def test_masters_stay_quiet_until_the_reset_group_is_out_of_reset(tmp_path: Path
     """Masters and slaves drive nothing while the checker sees reset, until the edge after
     it (AXI A3.1.2: a master first drives VALID at an edge after reset), and until every
     domain of the reset group has left reset (D51 step 4). demo_ss's resets deassert
-    synchronously, so a domain leaves reset two edges after release."""
+    synchronously, so a domain leaves reset two edges after release. A peer still held in
+    reset counts as not out (its resets release in any order): the window once looked only
+    at peers released but not yet out (formal review of #46)."""
     text = _protocol(tmp_path, GOLDEN)
-    group = "bag_leaving_D_AON || bag_leaving_D_CPU || bag_leaving_D_PER || bag_leaving_D_SYS"
+    group = " || ".join(f"bag_in_reset_D_{d} || bag_leaving_D_{d}"
+                        for d in ("AON", "CPU", "PER", "SYS"))  # fmt: skip
     for line in [
         "  always_ff @(posedge clk_per) bag_out_edges_D_PER <= bag_in_reset_D_PER ? 2'd0 : "
         "bag_out_edges_D_PER == 2'd2 ? bag_out_edges_D_PER : bag_out_edges_D_PER + 2'd1;",
@@ -326,10 +337,61 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
         "[files]\nrtl ../rtl\nbag_step.v\nzipcpu vendor/zipcpu\napb3_wide_protocol.sv\n"
     )
     vendored = sorted(p.name for p in (tmp_path / "formal" / "vendor" / "zipcpu").iterdir())
-    assert vendored == ["LICENSE", "fapb_master.v", "fapb_slave.v"]
+    assert vendored == ["LICENSE", "SOURCE.md", "fapb_master.v", "fapb_slave.v"]
 
 
 def test_no_protocol_job_without_an_axi4_lite_or_apb_port(tmp_path: Path) -> None:
     out = generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
     assert out.formal == ("formal/axi_xbar_rules_reset.sby",)
     assert not (tmp_path / "formal" / "vendor").exists()
+
+
+def test_each_checked_port_has_covers_for_what_can_cross_it(tmp_path: Path) -> None:
+    """The protocol job proves it checked something: each port has covers for completed
+    transfers each way the route model allows, a wait state, and (on a slave port that has
+    PSLVERR) an error. ro0 is read-only and wo0 write-only in apb4_rules."""
+    text = _protocol(tmp_path, P2 / "apb4_rules.ir.yaml")
+    labels = set(re.findall(r"(proto_\w+): cover", text))
+    assert {"proto_write_cpu", "proto_read_cpu", "proto_wait_cpu"} <= labels
+    assert {"proto_read_ro0", "proto_wait_ro0"} <= labels and "proto_write_ro0" not in labels
+    assert {"proto_write_wo0", "proto_wait_wo0", "proto_error_wo0"} <= labels
+    assert "proto_read_wo0" not in labels and "proto_error_cpu" not in labels
+    assert ("  always_comb proto_wait_dual0: cover (dual0_apb4_psel && dual0_apb4_penable && "
+            "!dual0_apb4_pready);\n") in text  # fmt: skip
+
+
+def test_an_axi4_lite_port_covers_stalls_and_errors(tmp_path: Path) -> None:
+    """Towards a slave (clkrst0) the design's requests stall and the slave answers with an
+    error; towards a master (dbg0) the design's responses stall."""
+    labels = set(re.findall(r"(proto_\w+): cover", _protocol(tmp_path, GOLDEN)))
+    assert {"proto_aw_stall_clkrst0", "proto_w_stall_clkrst0", "proto_ar_stall_clkrst0",
+            "proto_b_error_clkrst0", "proto_r_error_clkrst0"} <= labels  # fmt: skip
+    assert {"proto_b_stall_dbg0", "proto_r_stall_dbg0"} <= labels
+
+
+def test_the_master_checker_sees_only_the_spec_defined_slave_response(tmp_path: Path) -> None:
+    """fapb_master assumes what the slave drives: it sees PREADY only with PSEL and PSLVERR
+    only in a completing access, so the slave stays free elsewhere, which keeps the fabric's
+    own gating (D61) visible to the checkers on its master ports."""
+    text = _protocol(tmp_path, P2 / "apb4_rules.ir.yaml")
+    dual0 = text.split("u_dual0 (")[1].split(");")[0]
+    assert ".PREADY((dual0_apb4_pready && dual0_apb4_psel))" in dual0
+    assert (".PSLVERR((dual0_apb4_pslverr && dual0_apb4_psel && dual0_apb4_penable && "
+            "dual0_apb4_pready))") in dual0  # fmt: skip
+
+
+def test_a_slave_nothing_can_reach_gets_no_checker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its covers could never be reached (bag check warns: ACC-UNREACHABLE-SLAVE)."""
+    spec = load(GOLDEN)
+    monkeypatch.setattr("hdl_bag.formal_gen._active",
+                        lambda _: {s.name: ({"read"} if s.name != "clkrst0" else set())
+                                   for s in spec.slaves})  # fmt: skip
+    ports = {c.port for c in checkers(spec, build_netlist(spec))}
+    assert "clkrst0" not in ports and "pmu0" in ports
+
+
+def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
+    """So each cover reached is a state the bounded check explored."""
+    generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)
+    job = (tmp_path / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
+    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover: mode cover\ncover: depth {PROTOCOL_DEPTH}\n" in job

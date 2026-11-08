@@ -50,6 +50,13 @@ port style. `hdl-bag` is an alias for the `bag` command. The sample's two
 warnings are real: two of its AXI4 masters reach width converters that answer
 WRAP bursts with SLVERR (`AXI-WRAP-REFUSED`).
 
+`bag formal` runs each job in turn (`--timeout` applies per job). The
+quiet-in-reset job is a proof (k-induction). The protocol job is a bounded
+check: it says no assertion fails within its depth, and its covers show the
+check reached real transfers; the report notes which tasks are bounded. Both
+hold under the environment the job states: AMBA reset and handshake rules, the
+reset sequence of `doc/reset.md`, and alias pins that change only in reset.
+
 Generated output (under the output directory):
 
 ```
