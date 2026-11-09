@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 
 from hdl_bag import __version__
 from hdl_bag.checks import run_checks
-from hdl_bag.ir import ResolveError, Spec, dumps, loads, resolve
+from hdl_bag.ir import IrError, ResolveError, Spec, dumps, loads, resolve
 from hdl_bag.ir.to_workbook import to_spec_data, to_workbook
 from hdl_bag.reader import read_workbook
 from hdl_bag.template.builder import build_workbook
@@ -142,3 +142,20 @@ def test_row_order_never_matters(golden: Spec, tmp_path: Path, seed: int) -> Non
     build_workbook(data=data).save(path)
     shutil.copy(GOLDEN_DIR / "header.txt", tmp_path)
     assert _no_provenance(_resolve(path)) == _no_provenance(golden)
+
+
+def test_a_master_with_two_aliases_is_not_a_valid_ir() -> None:
+    """One alias per master, as the workbook has (one Address_Decode row per master, one
+    alias per row): with two, bag_addr_decode (the last match wins) and the route model and
+    formal reference (the first wins) would disagree where they overlap (owner, PR 3)."""
+    ir = Path(__file__).parents[1] / "configs" / "p2" / "ahb_fixed.ir.yaml"
+    text = ir.read_text(encoding="utf-8")
+    one = ("          - base: '0x0000_0000'\n            size: '0x0000_1000'\n"
+           "            to: '0x2000_0000'\n            enable: always\n")  # fmt: skip
+    assert text.count(one) == 1
+    with pytest.raises(IrError) as exc:
+        loads(text.replace(one, one + one.replace("0x2000_0000", "0x2000_0800")), ir.name)
+    assert str(exc.value) == (
+        "ahb_fixed.ir.yaml is not a valid IR: fabrics.0.decode.0.aliases: Value error, master "
+        "m0 has 2 aliases; a master has at most one (the workbook's Address_Decode row)"
+    )

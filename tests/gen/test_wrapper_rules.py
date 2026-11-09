@@ -229,18 +229,18 @@ def test_priority_and_default_slave() -> None:
         "arbitration": "fixed-priority",
         "master_ports": (PortRef(index=0, port="mcu0", priority=1),
                          PortRef(index=1, port="dbg", priority=0)),
-        "decode": (Decode(master="mcu0", miss="default-slave", default_slave="br_ahb2aon",
-                          aliases=()),
-                   Decode(master="dbg", miss="HRESP_ERROR", default_slave=None,
-                          aliases=(Alias(base=0x0, size=0x1000, to=0x5000_1000, enable="pin_i"),
-                                   Alias(base=0x2000, size=0x100, to=0x0, enable="always")))),
+        # One alias per master (the IR allows no more); dbg's row comes first.
+        "decode": (Decode(master="dbg", miss="HRESP_ERROR", default_slave=None,
+                          aliases=(Alias(base=0x0, size=0x1000, to=0x5000_1000, enable="pin_i"),)),
+                   Decode(master="mcu0", miss="default-slave", default_slave="br_ahb2aon",
+                          aliases=(Alias(base=0x2000, size=0x100, to=0x0, enable="always"),))),
     })  # fmt: skip
     t = decode_tables(two)
     assert t.priority == (1, 0)
     assert t.miss_to_default == (True, False) and t.default_slave == (1, 0)
     assert [(a.master, a.base, a.mask, a.to) for a in t.aliases] == [
+        (0, 0x2000, 0xFF, 0x0),
         (1, 0x0, 0xFFF, 0x5000_1000),
-        (1, 0x2000, 0xFF, 0x0),
     ]  # sorted by (master, base), whatever the input order
     assert set(t.alias_enables) == {"1", "pin_i"}
 

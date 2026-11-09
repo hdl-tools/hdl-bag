@@ -8,7 +8,15 @@ byte-identical files. Addresses and sizes are ints here and hex text in YAML.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    ValidationInfo,
+    field_validator,
+)
 
 from hdl_bag.reader.values import parse_hex
 
@@ -115,6 +123,17 @@ class Decode(_M):
     miss: Literal["DECERR", "SLVERR", "HRESP_ERROR", "PSLVERR", "default-slave"]
     default_slave: str | None
     aliases: tuple[Alias, ...]
+
+    @field_validator("aliases")
+    @classmethod
+    def _one_alias(cls, v: tuple[Alias, ...], info: ValidationInfo) -> tuple[Alias, ...]:
+        """At most one alias per master, as the workbook has: with two, the decoder (the last
+        match wins) and the route model (the first wins) would disagree where they overlap."""
+        if len(v) > 1:
+            master = info.data.get("master", "?")
+            raise ValueError(f"master {master} has {len(v)} aliases; a master has at most one "
+                             "(the workbook's Address_Decode row)")  # fmt: skip
+        return v
 
 
 class Fabric(_M):
