@@ -42,9 +42,12 @@ from hdl_bag.tests_gen.route_model import window
 # br_c8 (64 to 8 bits) at step 33.
 ROUTE_DEPTH = 24
 ROUTE_DEPTH_PER_HALVING = 4
-# A unit in one clock domain runs on one clock, for this many edges (an AXI4-Lite to 8-bit
-# APB bridge's read response came at edge 8).
-ROUTE_CYCLES = 12
+# A unit in one clock domain runs on one clock, for ROUTE_CYCLES edges plus
+# ROUTE_CYCLES_PER_HALVING per halving of a bridge's data width (an AXI4-Lite to 8- or 16-bit
+# APB bridge's read response came at edge 8). A crossbar gets no more: at 12 edges
+# mixed_cdc_chain's reached only edge 10 in 20 minutes.
+ROUTE_CYCLES = 8
+ROUTE_CYCLES_PER_HALVING = 2
 BRIDGES = ("bag_ahb2apb", "bag_ahb2axi", "bag_apb2ahb", "bag_apb2axi", "bag_axi2ahb",
            "bag_axi2apb", "bag_axi2axil")  # fmt: skip
 
@@ -81,11 +84,11 @@ class Unit:
 
 def route_depth(unit: Unit) -> tuple[bool, int]:
     """UNIT's job: whether it needs free clocks (it spans domains), and its depth."""
-    if len(unit.clocks) == 1:
-        return False, ROUTE_CYCLES
     up, down = unit.inst.up, unit.inst.down
     ratio = up.data_width // down.data_width if up is not None and down is not None else 1
     halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
+    if len(unit.clocks) == 1:
+        return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
     return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * halvings
 
 

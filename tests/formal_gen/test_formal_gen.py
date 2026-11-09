@@ -544,23 +544,27 @@ def test_a_channel_the_ir_never_uses_keeps_its_assertion_and_has_no_cover(tmp_pa
 def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
     """CI: axi_xbar_rules's crossbar job reached step 7 of 16 in 20 minutes with free clocks,
     which cost two solver steps per edge and the logic that models them. A unit in one domain
-    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges (an
-    AXI4-Lite to 8-bit APB bridge's read response came at edge 8). A bridge across domains
-    keeps free clocks, ROUTE_DEPTH steps and 4 more per halving of the data width (measured:
-    mixed_cdc_chain's br_per, no conversion, last cover at step 21; mixed_narrow_apb's br_c8,
-    64 to 8 bits, at step 33)."""
-    assert (ROUTE_CYCLES, ROUTE_DEPTH) == (12, 24)
+    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges, and 2
+    more per halving of a bridge's data width (each narrow transfer is another APB access: an
+    AXI4-Lite to 8- or 16-bit APB bridge's read response came at edge 8). At 12 edges
+    mixed_cdc_chain's crossbar reached only edge 10 in 20 minutes. A bridge across domains
+    keeps free clocks, ROUTE_DEPTH steps and 4 more per halving (measured: mixed_cdc_chain's
+    br_per, no conversion, last cover at step 21; mixed_narrow_apb's br_c8, 64 to 8 bits, at
+    step 33)."""
+    assert (ROUTE_CYCLES, ROUTE_DEPTH) == (8, 24)
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
     formal = tmp_path / "bp" / "formal"
     xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
-    assert "bmc: depth 12\ncover: mode cover\ncover: depth 12\nmulticlock off\n" in xbar
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
     cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
     assert "bmc: depth 28\ncover: mode cover\ncover: depth 28\nmulticlock on\n" in cdc
     generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
-    c8 = (tmp_path / "mn" / "formal" / "mixed_narrow_apb_route_br_c8.sby").read_text(
-        encoding="utf-8"
-    )
-    assert "bmc: depth 36\ncover: mode cover\ncover: depth 36\nmulticlock on\n" in c8
+    mn = tmp_path / "mn" / "formal"
+    for unit, depth, clocks in (("br_c8", 36, "on"), ("br_l8", 12, "off"), ("br_l16", 10, "off"),
+                                ("br_lite", 8, "off")):  # fmt: skip
+        job = (mn / f"mixed_narrow_apb_route_{unit}.sby").read_text(encoding="utf-8")
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock {clocks}\n"
+        assert want in job, unit
 
 
 def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
@@ -656,8 +660,8 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     assert " --top bag_ahb_fixed_unit_ahb " in job
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
     # One clock domain: one clock, ROUTE_CYCLES edges.
-    assert ROUTE_CYCLES == 12
-    assert ("bmc: mode bmc\nbmc: depth 12\ncover: mode cover\ncover: depth 12\n"
+    assert ROUTE_CYCLES == 8
+    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\n"
             "multiclock off\n") in job  # fmt: skip
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
