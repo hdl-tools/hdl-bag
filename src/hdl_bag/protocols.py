@@ -41,6 +41,8 @@ DATA_WIDTHS: Final[dict[Protocol, frozenset[int]]] = {
 FABRIC_ADDR_WIDTH: Final = range(12, 65)
 PORT_ADDR_WIDTH: Final = range(1, 65)
 MAX_SLAVE_ID_WIDTH_WARN: Final = 16
+# bag_axi_guard keeps 2^IdWidth in-flight counters per channel on each master port (D65).
+MAX_GUARD_ID_WIDTH_WARN: Final = 8
 
 # Miss responses that suit a fabric of each protocol (D18).
 MISS_RESPONSES: Final[dict[Protocol, frozenset[str]]] = {

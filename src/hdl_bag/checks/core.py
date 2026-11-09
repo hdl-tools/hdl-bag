@@ -45,6 +45,7 @@ RULES: Final[dict[str, Severity]] = {
     "FAB-EMPTY-SIDE": E,
     "FAB-NA-SETTING": W,
     "FAB-ID-GROWTH": W,
+    "FAB-GUARD-ID-WIDTH": W,
     "PORT-ADAPTER": E,
     "AXI-WRAP-REFUSED": W,
     # topology
