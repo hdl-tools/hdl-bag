@@ -471,26 +471,31 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             can = frozenset(active.get(bus.name, set()))
             if not can:
                 continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
-        params: tuple[tuple[str, int], ...]
-        if family == "axil":
-            params = (("C_AXI_DATA_WIDTH", bus.data_width), ("C_AXI_ADDR_WIDTH", bus.addr_width),
-                      ("F_OPT_ASYNC_RESET", 1), ("F_OPT_ASSUME_RESET", 1), ("F_OPT_NO_RESET", 1),
-                      ("F_LGDEPTH", 8), ("F_AXI_MAXWAIT", 0), ("F_AXI_MAXRSTALL", 0),
-                      ("F_AXI_MAXDELAY", 0))  # fmt: skip
-            if bus.is_slave:
-                # A slave no master may write (or read), by the route model: the checker
-                # then asserts the design never does, and drops the cover it can't reach.
-                if can == {"read"}:
-                    params += (("F_OPT_READ_ONLY", 1),)
-                elif can == {"write"}:
-                    params += (("F_OPT_WRITE_ONLY", 1),)
-        else:
-            slverr = "pslverr" in bus.signals and "pslverr" not in bus.ties
-            params = (("AW", bus.addr_width), ("DW", bus.data_width), ("F_OPT_MAXSTALL", 0),
-                      ("F_OPT_SLVERR", int(slverr)), ("F_OPT_ASYNC_RESET", 1))  # fmt: skip
+        params = zipcpu_params(bus, family, can if bus.is_slave else None)
         out.append(Checker(bus.name, vendor, f"bag_{spec.project.name}_{vendor}_{bus.name}",
                            params, can))  # fmt: skip
     return out
+
+
+def zipcpu_params(bus: Bus, family: str,
+                  slave_can: frozenset[str] | None) -> tuple[tuple[str, int], ...]:  # fmt: skip
+    """The parameters of a ZipCPU checker on BUS (FAMILY axil or apb). SLAVE_CAN, for a port
+    towards a slave, is what may reach it: an AXI4-Lite slave no master may write (or read)
+    gets a checker that asserts the design never does, and drops the cover it can't reach."""
+    params: tuple[tuple[str, int], ...]
+    if family == "axil":
+        params = (("C_AXI_DATA_WIDTH", bus.data_width), ("C_AXI_ADDR_WIDTH", bus.addr_width),
+                  ("F_OPT_ASYNC_RESET", 1), ("F_OPT_ASSUME_RESET", 1), ("F_OPT_NO_RESET", 1),
+                  ("F_LGDEPTH", 8), ("F_AXI_MAXWAIT", 0), ("F_AXI_MAXRSTALL", 0),
+                  ("F_AXI_MAXDELAY", 0))  # fmt: skip
+        if slave_can == frozenset({"read"}):
+            params += (("F_OPT_READ_ONLY", 1),)
+        elif slave_can == frozenset({"write"}):
+            params += (("F_OPT_WRITE_ONLY", 1),)
+        return params
+    slverr = "pslverr" in bus.signals and "pslverr" not in bus.ties
+    return (("AW", bus.addr_width), ("DW", bus.data_width), ("F_OPT_MAXSTALL", 0),
+            ("F_OPT_SLVERR", int(slverr)), ("F_OPT_ASYNC_RESET", 1))  # fmt: skip
 
 
 def _covers(spec: Spec, bus: Bus, chk: Checker, port: "_Ports") -> list[str]:
