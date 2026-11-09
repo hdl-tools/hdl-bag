@@ -158,16 +158,22 @@ def test_the_decode_job_holds_unmutated(tmp_path: Path, config: str) -> None:
     assert _failed(tmp_path, spec, "decode") == []
 
 
+ROUTE_CONTROL_CONFIGS = sorted({t[1] for t in ROUTE_TARGETS + MISROUTE}
+                               | {c for _, _, c in ROUTE_RTL} | set(ROUTE_CONTROLS))  # fmt: skip
+# One case per route job, so the jobs spread over the workers and shards, and a failure names
+# its unit (mixed_narrow_apb alone has eleven).
+ROUTE_CONTROL_CASES = [(c, u) for c in ROUTE_CONTROL_CONFIGS for u in _route_units(_spec(c))]
+
+
 @pytest.mark.eda
-@pytest.mark.parametrize("config", sorted({t[1] for t in ROUTE_TARGETS + MISROUTE}
-                                          | {c for _, _, c in ROUTE_RTL}
-                                          | set(ROUTE_CONTROLS)))  # fmt: skip
-def test_the_route_job_holds_unmutated(tmp_path: Path, config: str) -> None:
+@pytest.mark.parametrize(("config", "unit"), ROUTE_CONTROL_CASES,
+                         ids=[f"{c}-{u}" for c, u in ROUTE_CONTROL_CASES])  # fmt: skip
+def test_the_route_job_holds_unmutated(tmp_path: Path, config: str, unit: str) -> None:
     """The control: on each config the route mutants use, every unmutated route job passes,
     covers included. With the misroute targets this runs both crossbars' route jobs."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
-    assert _route_failed(tmp_path, spec, _route_units(spec)) == []
+    assert _failed(tmp_path, spec, f"route_{unit}") == []
 
 
 def _mutate_package(root: Path, spec: Spec, mutation: str, fabric: str, last: bool) -> None:
