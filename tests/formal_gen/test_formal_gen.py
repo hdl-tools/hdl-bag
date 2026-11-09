@@ -515,6 +515,13 @@ def test_route_properties_are_sampled_at_the_clock_edge(tmp_path: Path) -> None:
     assert ("  always @(posedge clk_sys) cover_bus_s0_aw_routed: "
             "cover (bag_live_D_SYS && s0_axil_awvalid);\n") in text  # fmt: skip
     assert "  always @(posedge clk_sys) if (bag_live_D_SYS && (bag_race_aw_" in text
+    # CI (axi_shared_fixed): the bus may grant the winner in the cycle both start, before the
+    # race is registered, so the cover takes a race that starts now too.
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path / "sf", P3)
+    sf = (tmp_path / "sf" / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert ("  always @(posedge clk_sys) cover_bus_ar_m2_before_m0: cover (bag_live_D_SYS && "
+            "(bag_race_ar_2_0 || (bag_ar2_start && bag_ar0_start && bag_ar2_cont && "
+            "bag_ar0_cont)) && bag_ar2_won);\n") in sf  # fmt: skip
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
     for path in sorted((tmp_path / "bp" / "formal").glob("*_route_*.sv")):
         text = path.read_text(encoding="utf-8")

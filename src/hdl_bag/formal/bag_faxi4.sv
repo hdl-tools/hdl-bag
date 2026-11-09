@@ -213,6 +213,9 @@ module bag_faxi4 #(
                   || (wlast == (w_beats == burst_len) && w_beats <= burst_len);
   // An address arriving after its data: the oldest finished burst had awlen + 1 beats.
   wire ok_w_early = !(live && aw_hs && !aw_ahead && n != '0) || awlen == q[0][7:0];
+  // An address arriving with nothing waiting while a data burst is under way is that burst's:
+  // the beats it has taken must fit (the next beat, checked by ok_wlast, is beat w_beats).
+  wire ok_w_partial = !(live && aw_hs && n == '0 && w_beats != '0) || awlen >= w_beats;
 
   // This edge's events, and the write they complete (if any).
   wire w_done = w_hs && wlast;
@@ -390,6 +393,7 @@ module bag_faxi4 #(
         assume (ok_ar_burst);
         assume (ok_wlast);
         assume (ok_w_early);
+        assume (ok_w_partial);
         assume (ok_w_room);
         assume (ok_r_room);
       end
@@ -417,6 +421,7 @@ module bag_faxi4 #(
         ar_burst_legal: assert (ok_ar_burst);
         wlast_on_the_last_beat: assert (ok_wlast);
         wlast_matches_its_address: assert (ok_w_early);
+        address_takes_its_early_data: assert (ok_w_partial);
         tracker_has_room_for_writes: assert (ok_w_room);
         tracker_has_room_for_reads: assert (ok_r_room);
       end

@@ -520,6 +520,25 @@ def test_a_design_master_ending_a_write_burst_early_is_caught(tmp_path: Path) ->
                       "assertion wlast_matches_its_address fails"}, report.format()  # fmt: skip
 
 
+def test_a_design_master_sending_more_early_data_than_its_address_takes_is_caught(
+    tmp_path: Path,
+) -> None:
+    """CI (mixed_narrow_apb's br_lite route job): write data may come before its address, and
+    bag_faxi4 checked an early burst against its address only once the burst had ended. A
+    burst still under way when its address came was not checked: the environment master sent
+    one beat without WLAST, then the address with AWLEN 0, and the bridge's B for that write
+    then failed b_only_for_a_complete_write. Here a design master does the same: one beat
+    without WLAST, then the address of a one-beat burst."""
+    extra = ("  logic sent = 1'b0;  // the early beat was taken\n"
+             "  always_ff @(posedge clk) if (!rst_n) sent <= 1'b0;"
+             " else if (wvalid && wready) sent <= 1'b1;\n")  # fmt: skip
+    report = _axi4_tiny(tmp_path, False, {"wvalid": "rst_n && !sent", "wlast": "1'b0",
+                        "awvalid": "rst_n && sent", "awlen": "8'd0", "awburst": "2'd1"},
+                        extra=extra)  # fmt: skip
+    failed = {f.message.split(": ", 1)[1].split(" (")[0] for f in report.findings}
+    assert failed == {"assertion address_takes_its_early_data fails"}, report.format()
+
+
 def test_an_ahb_master_environment_holds_its_rules_at_every_step(tmp_path: Path) -> None:
     """As for bag_faxi4: the environment master of a design that is an always-ready AHB-Lite
     slave must keep HSIZE within the bus at every solver step, not only at the edges, or

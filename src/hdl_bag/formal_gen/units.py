@@ -438,7 +438,9 @@ class _Harness:
                         f"  always @(posedge {clk}) if (bag_live_{d} && ({race} || {both})) "
                         f"{name}_{ch}_{mi}_before_{mj}: assert (!({b}_won && !{a}_won));",
                         f"  always @(posedge {clk}) cover_{name}_{ch}_{mi}_before_{mj}: "
-                        f"cover (bag_live_{d} && {race} && {a}_won);",
+                        # A race won at once (the bus grants in the cycle both start) is
+                        # never registered: it counts here too.
+                        f"cover (bag_live_{d} && ({race} || {both}) && {a}_won);",
                     ]
 
     def bridge_window(self) -> None:
