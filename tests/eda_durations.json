@@ -20,6 +20,7 @@
  "tests/flows/test_formal_eda.py::test_a_one_cycle_ahb_error_is_caught": 11.83,
  "tests/flows/test_formal_eda.py::test_a_register_on_a_gclk_marked_net_fails_the_same_check": 0.76,
  "tests/flows/test_formal_eda.py::test_a_response_that_waits_for_ready_fails_its_cover": 18.42,
+ "tests/flows/test_formal_eda.py::test_a_waiting_ahb_address_dropped_without_an_error_is_caught": 11.25,
  "tests/flows/test_formal_eda.py::test_an_address_stored_as_the_write_fifo_fills_and_drains_is_kept": 12.19,
  "tests/flows/test_formal_eda.py::test_an_ahb_error_dropped_in_its_second_cycle_is_caught": 9.87,
  "tests/flows/test_formal_eda.py::test_an_ahb_master_environment_holds_its_rules_at_every_step": 0.6,

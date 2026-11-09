@@ -614,6 +614,21 @@ def test_an_ahb_error_dropped_in_its_second_cycle_is_caught(tmp_path: Path) -> N
     assert any("error_second_cycle fails" in m for _, m in failed), failed
 
 
+def test_a_waiting_ahb_address_dropped_without_an_error_is_caught(tmp_path: Path) -> None:
+    """PR 2b review (the slave-port cancel gap): on a slave port bag_fahb let a waiting address
+    phase turn into IDLE at any time, since an ERROR from another slave is invisible there.
+    While this slave's own data phase holds the bus, the ERROR would be its own, so here the
+    fabric drops s12's waiting address phase in its second wait cycle with no ERROR at all."""
+    failed = _ahb_mutant(
+        tmp_path,
+        "assign s12_ahb_htrans = u_ahb_m_htrans[0];",
+        "logic bag_mut_q = 1'b0;\n"
+        "always_ff @(posedge clk_h) bag_mut_q <= !u_ahb_m_hready[0];\n"
+        "assign s12_ahb_htrans = (u_ahb_m_hready[0] || !bag_mut_q) ? u_ahb_m_htrans[0] : 2'b00;",
+    )
+    assert any("address_holds_while_waiting fails" in m for _, m in failed), failed
+
+
 def test_an_ahb_slave_whose_hreadyout_is_not_routed_back_is_caught(tmp_path: Path) -> None:
     """With slave s12's HREADY tied high, its own wait states never reach the bus: bag_fahb
     on that port must fail the routing rule."""

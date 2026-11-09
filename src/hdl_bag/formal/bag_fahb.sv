@@ -19,7 +19,8 @@
 // The checks:
 //   hold       a NONSEQ or SEQ address phase that waits (HREADY low) keeps its address and
 //              control until HREADY is high, unless the master cancels it with IDLE after the
-//              first cycle of an ERROR (3.6.1, 5.1.3); write data holds while its data phase
+//              first cycle of an ERROR (3.6.1, 5.1.3; on a slave port, any IDLE while another
+//              slave's data phase holds the bus); write data holds while its data phase
 //              waits (3.6.1); a waiting IDLE turns only into NONSEQ (3.6.1, environment
 //              masters)
 //   size       HSIZE no wider than the bus, and the address aligned to it (3.4)
@@ -120,10 +121,12 @@ module bag_fahb #(
   end
 
   // ---------------------------------------------------------------- master's rules
-  // The cancel to IDLE after an ERROR's first cycle: on a slave port the ERROR may have come
-  // from another slave or the interconnect, which this port cannot see, so any change to IDLE
-  // is allowed there; every other change of a waiting address phase is not.
-  wire cancel = htrans == Idle && (err1_q || !DesignIsSlave);
+  // The cancel to IDLE after an ERROR's first cycle. On a slave port the ERROR may have come
+  // from another slave or the interconnect, which this port cannot see, so a change to IDLE
+  // is allowed there while another slave's data phase holds the bus; while this slave's own
+  // does (dp_sel: it waits on this slave), the ERROR must be its own. Every other change of
+  // a waiting address phase is not allowed.
+  wire cancel = htrans == Idle && (err1_q || (!DesignIsSlave && !dp_sel));
   wire ok_hold = !(live && pend_q) || ctrl_now == ctrl_q || cancel;
   wire ok_wdata = !(live && wwait_q) || hwdata == hwdata_q;
   // While HREADY is low, a master's IDLE may only turn into NONSEQ (3.6.1). Assumed of an
