@@ -17,10 +17,11 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
-from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH
+from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
+from hdl_bag.protocols import Protocol
 from hdl_bag.templates import builtin_registry
 
 TESTS = Path(__file__).parents[1]
@@ -657,8 +658,9 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     generate(spec, tmp_path / "apb", P2)
     text = (tmp_path / "apb" / "formal" / "apb4_rules_route_apb.sv").read_text(encoding="utf-8")
     assert "module bag_apb4_rules_unit_apb (" in text
-    assert ("apb_wo0_p_routed: assert (apb_target(0, u_apb_m_paddr[1], wo0_apb4_pwrite, "
-            "wo0_apb4_pprot[1]) == 1);") in text  # fmt: skip
+    assert "apb_wo0_p_routed: assert (sb_p0_m1);" in text
+    assert ("  wire sb_p0_m1 = 1'b1 && (sb_p0_hd1_has ? (sb_p0_addr[sb_p0_hd1] == "
+            "32'(u_apb_m_paddr[1]) && ") in text  # fmt: skip
     spec = load(P2 / "ahb_fixed.ir.yaml")
     generate(spec, tmp_path / "ahb", P2)
     text = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
@@ -674,8 +676,8 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
     xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
-    assert ("xbar_regs_aw_routed: assert (xbar_target(int'(u_xbar_m_awid[0][5:4]), "
-            "u_xbar_m_awaddr[0], 1'b1, regs_axi_awprot[1]) == 0);") in xbar  # fmt: skip
+    assert "xbar_regs_aw_routed: assert (sb_aw0_m0 || sb_aw1_m0 || sb_aw2_m0);" in xbar
+    assert "  wire sb_aw1_m0 = (int'(u_xbar_m_awid[0][5:4]) == 1) && (sb_aw1_hd0_has ? " in xbar
     # ahb2apb_pt has three units: three jobs, each reading only its own harness.
     out = generate(load(P2 / "ahb2apb_pt.ir.yaml"), tmp_path / "pt", P2)
     assert [f for f in out.formal if "_route" in f] == [
@@ -694,3 +696,33 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
             "((br_ahb2aon_2_aon_apb_apb4_paddr ^ 32'(65'(bag_win_addr) + "
             "65'(64'h0000_0000_0000_0000) - 65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);"
             ) in bridge  # fmt: skip
+
+
+def test_a_slave_port_request_must_match_its_masters_oldest_entry(tmp_path: Path) -> None:
+    """D71: each master's accepted requests wait in a scoreboard as the reference has them
+    (the address after the master's aliases, write, non-secure bit, the slave port), and a
+    request at slave port k must equal its master's oldest entry for k, or the request the
+    master presents now; the slave's handshake takes it. A miss or a denial (the reference's
+    target is the slave count) is never entered. On an AXI4 crossbar the ID names the
+    master; on an ID-less fabric with several masters the environment keeps two masters'
+    identical requests to one slave from being open at once (D78), so one entry matches."""
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert "  wire [31:0] sb_aw0_a = xbar_aliased(0, 32'(dma_axi_awaddr));\n" in xbar
+    assert "  wire sb_aw0_acc = (dma_axi_awvalid && dma_axi_awready);\n" in xbar
+    assert ("  wire sb_aw0_p = dma_axi_awvalid && !sb_aw0_early && sb_aw0_t != 2'(3);  "
+            "// presented now, bound for a slave\n") in xbar  # fmt: skip
+    assert "      if (sb_aw0_acc && !sb_aw0_early && !took && sb_aw0_t != 2'(3)) begin\n" in xbar
+    assert ("  wire sb_aw0_take0 = (regs_axi_awvalid && regs_axi_awready) && sb_aw0_m0;\n"
+            ) in xbar  # fmt: skip
+    assert "  logic [3:0][31:0] sb_aw0_addr = '0;\n" in xbar  # 4 entries for AXI4
+    assert "clash" not in xbar
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path / "af", P2)
+    ahb = (tmp_path / "af" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
+    assert SCOREBOARD[Protocol.AHB_LITE] == 2
+    assert "  logic [1:0][31:0] sb_a0_addr = '0;\n" in ahb
+    assert "  always_comb if (sb_a1_p) assume (!sb_a_clash_0_1);\n" in ahb
+    assert "  always_comb if (sb_a0_p) assume (!sb_a_clash_1_0);\n" in ahb
+    # Two requests presented together are compared once; queued entries both ways.
+    assert "    sb_a_clash_0_1 = sb_a0_p && sb_a0_t == sb_a1_t && " in ahb
+    assert "    sb_a_clash_1_0 = 1'b0;\n" in ahb

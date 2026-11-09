@@ -22,6 +22,7 @@ import pytest
 from mutations import MUTATIONS, RtlMutation
 from test_mutations import AF, AP, AXR, CONFIGS, IDS, RTL_IDS, RTL_TARGETS, SF, TARGETS, XR
 
+import hdl_bag
 from hdl_bag.flows.base import Finding
 from hdl_bag.flows.formal import run_sby
 from hdl_bag.formal_gen.units import ROUTE_DEPTH, render_unit, route_depth, units
@@ -31,6 +32,7 @@ from hdl_bag.gen.render import camel
 from hdl_bag.ir import Spec, load
 from hdl_bag.tests_gen.route_model import window
 
+RTL = Path(hdl_bag.__file__).parent / "rtl" / "inhouse"
 # Which job catches what: the decode job every table bug but the priorities; the route job
 # the priorities, the bridges' offsets, and (MISROUTE) a decode bug of each fabric kind.
 DECODE_TARGETS = [t for t in TARGETS if t[0] != "priority_inversion"]
@@ -59,6 +61,20 @@ ROUTE_CONTROLS = ["p3/bridges_pulp"]
 # address (protection, strobes, responses). The Phase 4 simulation gate catches them.
 OUT_OF_SCOPE = {"axi2apb_pprot", "axi2apb_pstrb", "axi2apb_pslverr", "axil2apb_pslverr",
                 "axi2axil_bresp", "axi2axil_rresp"}  # fmt: skip
+# D71: the wiring between a fabric's masters and its decoder, which only the master-side
+# scoreboard sees: a region-level check takes any master and the address as it arrives. Each
+# is caught by the scoreboard (_routed) or the delivery check (_delivered) of the unit.
+SCOREBOARD_RTL = [
+    ("ahb_alias_off", RtlMutation("bag_ahb_lite_bus.sv", (
+        (".alias_en_i(alias_en_i),", ".alias_en_i('0),"),), "alias enables cut"), AF, "ahb"),
+    ("ahb_secure_forced", RtlMutation("bag_ahb_lite_bus.sv", (
+        ("assign m_hnonsec_o[s] = bus_hnonsec;", "assign m_hnonsec_o[s] = 1'b0;"),),
+        "HNONSEC forced to secure towards the slaves"), AF, "ahb"),
+    ("axi_master_index", RtlMutation("bag_axi_xbar.sv", (
+        (".MstIdx    (m),", ".MstIdx    ((m + 1) % NoMasters),"),),
+        "each master's guard decodes as the next master"), AXR, "xbar"),
+]  # fmt: skip
+SCOREBOARD_IDS = [f"{n}-{c.split('/')[1]}" for n, _, c, _ in SCOREBOARD_RTL]
 
 # The decode assertions (formal_gen.decode) each table bug must fail: an AXI4 or AXI4-Lite
 # master with no default slave is answered from MissResp, which only the miss-response
@@ -147,6 +163,10 @@ def test_every_package_mutation_fails_a_formal_property() -> None:
         assert _route_units(_spec(config), prefix=fabric), (config, fabric)
     for name, mut, config in ROUTE_RTL:
         assert _route_units(_spec(config), source=mut.file), (name, config)
+    for name, mut, config, unit in SCOREBOARD_RTL:
+        assert unit in _route_units(_spec(config)), (name, config)
+        assert config in ROUTE_CONTROL_CONFIGS, name  # the unmutated job runs as the control
+        mut.apply((RTL / mut.file).read_text(encoding="utf-8"))  # each edit applies once
 
 
 @pytest.mark.eda
@@ -265,3 +285,16 @@ def test_the_route_job_catches_the_bridge_offset(tmp_path: Path, name: str, mut:
     _mutate_rtl(tmp_path, mut)
     bridges = _route_units(spec, source=mut.file)
     _caught(_route_failed(tmp_path, spec, bridges), spec, "route", ("_in_window",))
+
+
+@pytest.mark.eda
+@pytest.mark.parametrize(("name", "mut", "config", "unit"), SCOREBOARD_RTL, ids=SCOREBOARD_IDS)
+def test_the_route_job_catches_the_master_wiring(tmp_path: Path, name: str, mut: RtlMutation,
+                                                 config: str, unit: str) -> None:  # fmt: skip
+    """D71: a fabric that decodes a request with the wrong master's tables, without the
+    master's aliases, or passes it on with the wrong secure bit sends the slave a request
+    its master never made, or answers one it should have passed on."""
+    spec = _spec(config)
+    generate(spec, tmp_path, (CONFIGS / config).parent)
+    _mutate_rtl(tmp_path, mut)
+    _caught(_failed(tmp_path, spec, f"route_{unit}"), spec, "route", ("_routed", "_delivered"))
