@@ -548,16 +548,17 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
     more per halving of a bridge's data width (each narrow transfer is another APB access: an
     AXI4-Lite to 8- or 16-bit APB bridge's read response came at edge 8). At 12 edges
     mixed_cdc_chain's crossbar reached only edge 10 in 20 minutes. A bridge across domains
-    keeps free clocks, ROUTE_DEPTH steps and 4 more per halving (measured: mixed_cdc_chain's
-    br_per, no conversion, last cover at step 21; mixed_narrow_apb's br_c8, 64 to 8 bits, at
-    step 33)."""
+    keeps free clocks, ROUTE_DEPTH steps and 6 more per halving after the first (measured:
+    mixed_cdc_chain's br_per, no conversion, last cover at step 21; bridges_pulp's br_per, 64 to
+    32 bits, passed with every cover at 24 and timed out at 28; mixed_narrow_apb's br_c8, 64
+    to 8 bits, last cover at step 33)."""
     assert (ROUTE_CYCLES, ROUTE_DEPTH) == (8, 24)
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
     formal = tmp_path / "bp" / "formal"
     xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
     assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
     cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
-    assert "bmc: depth 28\ncover: mode cover\ncover: depth 28\nmulticlock on\n" in cdc
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 24\nmulticlock on\n" in cdc
     generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
     mn = tmp_path / "mn" / "formal"
     for unit, depth, clocks in (("br_c8", 36, "on"), ("br_l8", 12, "off"), ("br_l16", 10, "off"),

@@ -37,11 +37,12 @@ from hdl_bag.tests_gen.route_model import window
 
 # Bounded depth of a route job whose unit spans clock domains, in solver steps (free clocks:
 # about two per edge), plus ROUTE_DEPTH_PER_HALVING for each halving of a bridge's data width
-# (each narrow transfer is another APB access). Measured: mixed_cdc_chain's br_per (a round
-# trip through axi_cdc, no conversion) reached its last cover at step 21, mixed_narrow_apb's
-# br_c8 (64 to 8 bits) at step 33.
+# after the first (each narrow transfer is another APB access). Measured: mixed_cdc_chain's
+# br_per (a round trip through axi_cdc, no conversion) reached its last cover at step 21;
+# bridges_pulp's br_per (64 to 32 bits) passed with every cover at 24 and timed out at 28;
+# mixed_narrow_apb's br_c8 (64 to 8 bits) reached its last cover at step 33.
 ROUTE_DEPTH = 24
-ROUTE_DEPTH_PER_HALVING = 4
+ROUTE_DEPTH_PER_HALVING = 6
 # A unit in one clock domain runs on one clock, for ROUTE_CYCLES edges plus
 # ROUTE_CYCLES_PER_HALVING per halving of a bridge's data width (an AXI4-Lite to 8- or 16-bit
 # APB bridge's read response came at edge 8). A crossbar gets no more: at 12 edges
@@ -89,7 +90,7 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
     if len(unit.clocks) == 1:
         return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
-    return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * halvings
+    return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
 
 
 def units(netlist: Netlist) -> list[Instance]:
