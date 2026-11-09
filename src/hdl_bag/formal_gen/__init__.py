@@ -11,6 +11,9 @@ Output layout (relative to the output directory)::
     formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
     formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
     formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
+    formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
+                                  a reference from the IR (D69; formal_gen.decode)
+    formal/<project>_decode.sby   its job: a prove task (the check is combinational)
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
 sv-interface style), so they see its ports by name and the design needs no formal
@@ -75,6 +78,7 @@ fabric behaves (D8).
 from dataclasses import dataclass
 
 from hdl_bag.flows.formal import sby_job
+from hdl_bag.formal_gen.decode import render_decode
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Netlist
 from hdl_bag.gen.render import header, lit
@@ -101,6 +105,8 @@ COVER_DEPTH = 40
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
+# The decode harness is combinational: one step checks every input (D69).
+DECODE_DEPTH = 1
 # The protocol job's engine (D67). With BAG's AXI4 checker, yices needed over 30 minutes per
 # step past step 13 on axi_xbar_rules (stopped at 40 minutes in step 14); bitwuzla checks all
 # 16 steps in about 4 minutes, abc bmc3 in about 2, boolector in 15. Bitwuzla runs under
@@ -788,7 +794,24 @@ def render_formal(spec: Spec, netlist: Netlist, top: str, files: list[str], incd
         out += [(f"formal/{name}.sv", protocol),
                 (f"formal/{name}.sby", render_protocol_sby(spec, netlist, top, files, incdirs,
                                                            f"{name}.sv", user_header))]  # fmt: skip
+    decode = render_decode(spec, netlist, hdr)
+    if decode is not None:
+        name = f"{spec.project.name}_decode"
+        out += [(f"formal/{name}.sv", decode),
+                (f"formal/{name}.sby", render_decode_sby(spec, files, incdirs, f"{name}.sv",
+                                                         user_header))]  # fmt: skip
     return out
+
+
+def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: str,
+                      user_header: str | None) -> str:  # fmt: skip
+    """The decode job: the harness PROPS over the design files, proved outright (it is
+    combinational, so one step covers every input)."""
+    top = f"bag_{spec.project.name}_decode"
+    job = sby_job(top=top, files=[*files, props], incdirs=incdirs, depths={"prove": DECODE_DEPTH},
+                  copy=[("rtl", "../rtl"), (props, props)], engine=ENGINE,
+                  multiclock=False)  # fmt: skip
+    return f"{_sby_header(spec, user_header)}\n{job}"
 
 
 def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:

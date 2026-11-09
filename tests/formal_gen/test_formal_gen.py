@@ -198,7 +198,11 @@ def test_every_port_the_properties_bind_to_is_a_port_of_the_top(tmp_path: Path,
 def test_the_job_reads_the_file_list_then_the_properties(tmp_path: Path) -> None:
     spec = load(GOLDEN)
     out = generate(spec, tmp_path, GOLDEN.parent)
-    assert out.formal == ("formal/demo_ss_protocol.sby", "formal/demo_ss_reset.sby")
+    assert out.formal == (
+        "formal/demo_ss_decode.sby",
+        "formal/demo_ss_protocol.sby",
+        "formal/demo_ss_reset.sby",
+    )
     job = (tmp_path / "formal/demo_ss_reset.sby").read_text(encoding="utf-8")
     read = " ".join([*(f"-I {d.as_posix()}" for d in include_dirs(out)), "--top", out.top,
                      *(f.as_posix() for f in sources(out)), "demo_ss_reset.sv"])  # fmt: skip
@@ -342,8 +346,12 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
     parameters, and instantiated by the slang-read property module."""
     spec = load(P2 / "apb3_wide.ir.yaml")
     out = generate(spec, tmp_path, P2)
-    assert out.formal == ("formal/apb3_wide_protocol.sby", "formal/apb3_wide_reset.sby")
-    job = (tmp_path / out.formal[0]).read_text(encoding="utf-8")
+    assert out.formal == (
+        "formal/apb3_wide_decode.sby",
+        "formal/apb3_wide_protocol.sby",
+        "formal/apb3_wide_reset.sby",
+    )
+    job = (tmp_path / "formal" / "apb3_wide_protocol.sby").read_text(encoding="utf-8")
     for line in [
         "read_verilog -formal zipcpu/fapb_master.v",
         "read_verilog -formal zipcpu/fapb_slave.v",
@@ -376,7 +384,11 @@ def test_the_protocol_bmc_runs_on_bitwuzla_and_everything_else_on_yices(tmp_path
 def test_an_axi4_only_design_gets_a_protocol_job_without_zipcpu(tmp_path: Path) -> None:
     """axi_xbar_rules has only AXI4 ports: BAG's own checker, and no vendored file."""
     out = generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
-    assert out.formal == ("formal/axi_xbar_rules_protocol.sby", "formal/axi_xbar_rules_reset.sby")
+    assert out.formal == (
+        "formal/axi_xbar_rules_decode.sby",
+        "formal/axi_xbar_rules_protocol.sby",
+        "formal/axi_xbar_rules_reset.sby",
+    )
     assert (tmp_path / "formal" / "bag_faxi4.sv").is_file()
     assert not (tmp_path / "formal" / "vendor").exists()
 
@@ -430,3 +442,25 @@ def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
     generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)
     job = (tmp_path / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
     assert f"bmc: depth {PROTOCOL_DEPTH}\ncover: mode cover\ncover: depth {PROTOCOL_DEPTH}\n" in job
+
+
+def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: Path) -> None:
+    """D69: the harness feeds the fabric's package tables to bag_addr_decode and compares
+    its outputs with a reference written from the IR as explicit ranges, so a wrong table
+    entry shows. On apb4_rules, ro0's region takes reads (port 0) and refuses writes (the
+    error, 4 = the slave count); the job is a one-step prove."""
+    spec = load(P2 / "apb4_rules.ir.yaml")
+    out = generate(spec, tmp_path, P2)
+    text = (tmp_path / "formal" / "apb4_rules_decode.sv").read_text(encoding="utf-8")
+    assert "module bag_apb4_rules_decode (" in text
+    assert "      .RuleBase      (apb4_rules_pkg::ApbRuleBase)," in text
+    assert ("      if (apb_hit_sys >= 65'(64'h0000_0000_1000_0000) && "
+            "apb_hit_sys < 65'(64'h0000_0000_1000_1000)) begin  // ro0.regs\n"
+            "        case ({apb_write, apb_nonsec}) 2'b00: apb_tgt = 0; 2'b01: apb_tgt = 0; "
+            "2'b10: apb_tgt = 4; 2'b11: apb_tgt = 4; endcase\n") in text  # fmt: skip
+    for label in ("apb_selects", "apb_errors", "apb_aliases"):
+        assert f"    {label}: assert (" in text
+    job = (tmp_path / "formal" / "apb4_rules_decode.sby").read_text(encoding="utf-8")
+    assert "prove: mode prove\nprove: depth 1\nmulticlock off\n" in job
+    assert "read_slang --top bag_apb4_rules_decode " in job
+    assert "formal/apb4_rules_decode.sby" in out.formal
