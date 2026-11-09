@@ -73,7 +73,10 @@ def _case(fabric: Fabric, master: str, region: Any | None) -> str:
 
 
 def _in(var: str, base: int, size: int) -> str:
-    return f"{var} >= 65'({lit(64, base)}) && {var} < 65'({lit(64, base + size)})"
+    """VAR (a 65-bit system address) lies in [BASE, BASE + SIZE); the end may be 2**64."""
+    end = base + size
+    hi = f"65'({lit(64, end)})" if end < 1 << 64 else "65'h1_0000_0000_0000_0000"
+    return f"{var} >= 65'({lit(64, base)}) && {var} < {hi}"
 
 
 def reference(spec: Spec, fabric: Fabric, name: str) -> list[str]:

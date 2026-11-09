@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, reference
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
-from hdl_bag.gen.render import lit
+from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import flat_signal_name
@@ -179,7 +179,10 @@ class _Harness:
 
             idw = max(bus.id_width, 1)
             conns = [("clk_i", clk), ("rst_ni", f"!bag_in_reset_{d}")]
-            conns += [(s, "1'b0" if s.endswith("id") and not bus.id_width else self.v(bus, s))
+            # An ID-less bus gives the checker a one-bit ID of 0 (only the IDs: *valid ends
+            # in "id" too).
+            ids = ("awid", "bid", "arid", "rid")
+            conns += [(s, "1'b0" if s in ids and not bus.id_width else self.v(bus, s))
                       for s in sigs]  # fmt: skip
             head = (f"  bag_faxi4 #(.DesignIsSlave({int(a.unit_is_slave)}), "
                     f".AddrWidth({bus.addr_width}), .DataWidth({bus.data_width}), "
@@ -259,10 +262,14 @@ class _Harness:
         """SIG of fabric slave port K as the fabric drives it, before it is fitted to the
         slave's own width: a slave sees only its low address bits (D29), and the decode needs
         the whole address."""
+        port = _name(self.spec, bus, sig)
         net = self.ctx.used.get((bus.name, sig), "")
-        if net and net.isidentifier() and net != _name(self.spec, bus, sig):
-            return f"{net}[{k}]"
-        return self.v(bus, sig)
+        if not net or net == port:  # the fabric drives the port itself, at full width
+            return self.v(bus, sig)
+        if not net.isidentifier():
+            raise GenerateError(f"route harness: fabric {self.inst.name} drives {port} as "
+                                f"{net!r}, not a net it can index (template changed?)")  # fmt: skip
+        return f"{net}[{k}]"
 
     # ------------------------------------------------------------------ properties
     def fabric_edge(self) -> None:
@@ -272,6 +279,8 @@ class _Harness:
         name, d = fab.name, fab.domain
         self.body += reference(self.spec, fab, name)
         nm = len(fab.master_ports)
+        # The netlist's slots are by Port index, as the reference numbers masters and slaves.
+        assert len(self.inst.masters) == nm and len(self.inst.slaves) == len(fab.slave_ports)
         for k, bus in enumerate(self.inst.slaves):
             for ch, valid, _, write, ns in self.requests(bus):
                 addr = self.fabric_side(bus, k, {"aw": "awaddr", "ar": "araddr", "a": "haddr",
@@ -301,11 +310,12 @@ class _Harness:
         completes first."""
         fab = self.inst.fabric
         assert fab is not None
-        if fab.arbitration != "fixed-priority" or fab.topology not in (
-            "shared-bus",
-            "single-layer",
-        ):
+        if fab.arbitration != "fixed-priority":
             return
+        if fab.topology not in ("shared-bus", "single-layer"):
+            # FAB-ARBITRATION allows fixed priorities only on the shared and AHB-Lite buses.
+            raise GenerateError(f"route harness: no D70 property for fixed-priority "
+                                f"{fab.topology} fabric {fab.name}")  # fmt: skip
         name, d = fab.name, fab.domain
         clk = self.domains()[d]
         prio = {p.port: p.priority or 0 for p in fab.master_ports}
@@ -345,11 +355,13 @@ class _Harness:
                     # answered by the master's guard), and only one with nothing outstanding on
                     # its channel, which the guard never holds back.
                     resp = "b" if ch == "aw" else "r"
+                    ends = f"{self.v(bus, resp + 'valid')} && {self.v(bus, resp + 'ready')}"
+                    if resp == "r" and "rlast" in bus.signals:
+                        ends += f" && {self.v(bus, 'rlast')}"  # a read ends at its last beat
                     self.body += [
                         f"  logic [7:0] {pre}_out = '0;",
                         f"  always_ff @(posedge {clk}) if (!bag_live_{d}) {pre}_out <= '0; else "
-                        f"{pre}_out <= {pre}_out + 8'({pre}_acc) - "
-                        f"8'({self.v(bus, resp + 'valid')} && {self.v(bus, resp + 'ready')});",
+                        f"{pre}_out <= {pre}_out + 8'({pre}_acc) - 8'({ends});",
                         f"  wire {pre}_cont = {pre}_out == '0 && {name}_target({m}, "
                         f"{name}_aliased({m}, {addr}), {write}, {n}) != {ns};",
                     ]
@@ -412,7 +424,8 @@ class _Harness:
                               f"  always_comb assume ({v(up, 'arlen')} == 8'd0);"]  # fmt: skip
             self.body.append(f"  always_comb assume (!({v(up, 'awvalid')} && {v(up, 'arvalid')}));")
         elif p is Protocol.AHB_LITE:
-            phase = f"{v(up, 'hsel')} && {v(up, 'htrans')}[1] && {v(up, 'hready')}"
+            hsel = v(up, "hsel") if "hsel" in up.signals else "1'b1"
+            phase = f"{hsel} && {v(up, 'htrans')}[1] && {v(up, 'hready')}"
             acc = [(phase, v(up, "haddr"))]
             done = f"bag_dp_{br.name} && {v(up, 'hready')}"
             start = f"{v(up, 'htrans')}[1]"

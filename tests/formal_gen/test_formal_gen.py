@@ -465,7 +465,7 @@ def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: 
     out = generate(spec, tmp_path, P2)
     text = (tmp_path / "formal" / "apb4_rules_decode.sv").read_text(encoding="utf-8")
     assert "module bag_apb4_rules_decode (" in text
-    assert "      .RuleBase      (apb4_rules_pkg::ApbRuleBase)," in text
+    assert re.search(r"\n      \.RuleBase +\(apb4_rules_pkg::ApbRuleBase\),\n", text)
     assert "  function automatic int unsigned apb_target(int unsigned m, " in text
     assert ("      if (sys >= 65'(64'h0000_0000_1000_0000) && "
             "sys < 65'(64'h0000_0000_1000_1000))  // ro0.regs\n"
@@ -477,6 +477,71 @@ def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: 
     assert "prove: mode prove\nprove: depth 1\nmulticlock off\n" in job
     assert "read_slang --top bag_apb4_rules_decode " in job
     assert "formal/apb4_rules_decode.sby" in out.formal
+
+
+def test_the_decode_reference_aliases_and_answers_misses_as_the_ir_says(tmp_path: Path) -> None:
+    """The alias and miss-response parts of the reference. ahb_fixed: m1's boot alias, while
+    boot_a_i is high, sends its first 4 KiB to s1's base. axi_xbar_rules: a master without a
+    default slave is answered from MissResp: dma SLVERR (2'b10), cpu DECERR (2'b11)."""
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path / "af", P2)
+    text = (tmp_path / "af" / "formal" / "ahb_fixed_decode.sv").read_text(encoding="utf-8")
+    assert ("    if (m == 1 && boot_a_i && sys >= 65'(64'h0000_0000_0000_0000) && "
+            "sys < 65'(64'h0000_0000_0000_1000))  // m1\n"
+            "      return 32'(65'(64'h0000_0000_2001_0000) + (sys - 65'(64'h0000_0000_0000_0000)) "
+            "- 65'(64'h0000_0000_0000_0000));\n") in text  # fmt: skip
+    assert "    ahb_aliases: assert (ahb_dec_addr == ahb_ref_addr);\n" in text
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    text = (tmp_path / "xr" / "formal" / "axi_xbar_rules_decode.sv").read_text(encoding="utf-8")
+    for m, resp, master in ((0, "2'b10", "dma"), (1, "2'b11", "cpu")):
+        assert (
+            f"    if (xbar_tgt == 3 && xbar_mst[{m}]) xbar_miss_response_{m}: assert "
+            f"(axi_xbar_rules_pkg::XbarMissResp[{m}] == {resp});  // {master}\n"
+        ) in text
+
+
+def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
+    """Review weakness: the D70 race on AR is armed only with nothing outstanding, so the
+    count drops once per read, at RLAST, not once per beat (a 4-beat read left it wrapped
+    and the race disarmed for the rest of the trace). AXI4-Lite has one beat per read."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert ("bag_ar0_out <= bag_ar0_out + 8'(bag_ar0_acc) - "
+            "8'(m0_axi_rvalid && m0_axi_rready && m0_axi_rlast);") in text  # fmt: skip
+    assert ("bag_aw0_out <= bag_aw0_out + 8'(bag_aw0_acc) - "
+            "8'(m0_axi_bvalid && m0_axi_bready);") in text  # fmt: skip
+
+
+def test_an_axi4_bus_without_ids_feeds_its_valids_to_the_checker(tmp_path: Path) -> None:
+    """Review bug: on an ID-less AXI4 bus only the ID signals are tied to 0 at the checker.
+    Matching names that end in "id" tied every *valid too, so the checker assumed nothing
+    about the master behind bridges_pulp's dbg_pc_2_xbar and asserted nothing about it."""
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "bridges_pulp_route_xbar.sv").read_text(encoding="utf-8")
+    chk = text.split(" u_chk_dbg_pc_2_xbar (\n", 1)[1].split("  );", 1)[0]
+    for ch in ("aw", "w", "b", "ar", "r"):
+        assert f"      .{ch}valid(dbg_pc_2_xbar_axi_{ch}valid),\n" in chk, ch
+    for sig in ("awid", "bid", "arid", "rid"):
+        assert f"      .{sig}(1'b0)," in chk, sig
+
+
+@pytest.mark.parametrize("ir", CONFIGS, ids=lambda p: p.stem.removesuffix(".ir"))
+def test_every_property_label_is_unique_and_every_assertion_has_its_cover(
+    tmp_path: Path, ir: Path
+) -> None:
+    """In each decode and route harness, labels are unique (a duplicate is an SV error that
+    names the wrong property in a report), and each route assertion has the cover of its
+    condition (cover_<label>), so none holds only because its condition never comes."""
+    out = generate(load(ir), tmp_path, ir.parent)
+    texts = [(tmp_path / f).with_suffix(".sv").read_text(encoding="utf-8")
+             for f in out.formal if "_route_" in f or f.endswith("_decode.sby")]  # fmt: skip
+    for text in texts:
+        for module in text.split("\nmodule ")[1:]:
+            asserts = re.findall(r"(\w+): assert \(", module)
+            covers = re.findall(r"(\w+): cover \(", module)
+            labels = asserts + covers
+            assert len(labels) == len(set(labels)), sorted(labels)
+            if "_unit_" in module.split("(", 1)[0]:
+                assert asserts and {f"cover_{a}" for a in asserts} <= set(covers), module[:60]
 
 
 def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -> None:
@@ -498,6 +563,13 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     job = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sby").read_text(encoding="utf-8")
     assert " --top bag_ahb_fixed_unit_ahb " in job
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
+    assert ROUTE_DEPTH == 16
+    assert "bmc: mode bmc\nbmc: depth 16\ncover: mode cover\ncover: depth 16\n" in job
+    # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert ("xbar_regs_aw_routed: assert (xbar_target(int'(u_xbar_m_awid[0][5:4]), "
+            "u_xbar_m_awaddr[0], 1'b1, regs_axi_awprot[1]) == 0);") in xbar  # fmt: skip
     # ahb2apb_pt has three units: three jobs, each reading only its own harness.
     out = generate(load(P2 / "ahb2apb_pt.ir.yaml"), tmp_path / "pt", P2)
     assert [f for f in out.formal if "_route" in f] == [
@@ -505,7 +577,12 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
         "formal/demo_ss_route_aon_apb.sby",
         "formal/demo_ss_route_br_ahb2aon.sby",
     ]
-    bridge = (tmp_path / "pt" / "formal" / "demo_ss_route_br_ahb2aon.sv").read_text()
+    bridge = (tmp_path / "pt" / "formal" / "demo_ss_route_br_ahb2aon.sv").read_text(
+        encoding="utf-8"
+    )
     assert "module bag_demo_ss_unit_br_ahb2aon (" in bridge
     assert "module bag_demo_ss_unit_ahb_bus (" not in bridge
-    assert f"bmc: depth {ROUTE_DEPTH}\ncover: mode cover" in job
+    # The bridge's window: the downstream address within the upstream word, both windows 0.
+    assert ("br_ahb2aon_p_in_window: assert (bag_busy && ((br_ahb2aon_2_aon_apb_apb4_paddr ^ "
+            "32'(65'(bag_up_addr) + 65'(64'h0000_0000_0000_0000) - "
+            "65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);") in bridge  # fmt: skip
