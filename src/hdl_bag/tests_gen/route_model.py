@@ -112,6 +112,22 @@ def fallback(fabric: Any, master: str, region: Any | None) -> str | None:
     return str(decode.default_slave)
 
 
+def window(spec: Spec, fabric: Any) -> int:
+    """The system address FABRIC's address 0 stands for: the window base of the nearest
+    pass-through N bridge on the way to it (a pass-through Y bridge keeps its upstream's),
+    as route() tracks per access. Every master of a fabric sees the same translation
+    (generation refuses a fabric whose masters differ), so the first master port decides."""
+    bridges = {b.name: b for b in spec.bridges}
+    for p in fabric.master_ports:
+        b = bridges.get(p.port)
+        if b is None:
+            return 0
+        if not b.pass_through:
+            return int(b.window_base)
+        return window(spec, next(f for f in spec.fabrics if f.name == b.upstream))
+    return 0
+
+
 def decide(spec: Spec, fabric: Any, master: str, addr: int, write: bool,
            nonsec: bool) -> str | None:  # fmt: skip
     """The slave port (slave or bridge name) FABRIC sends MASTER's access at ADDR (already

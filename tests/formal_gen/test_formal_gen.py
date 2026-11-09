@@ -454,10 +454,11 @@ def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: 
     text = (tmp_path / "formal" / "apb4_rules_decode.sv").read_text(encoding="utf-8")
     assert "module bag_apb4_rules_decode (" in text
     assert "      .RuleBase      (apb4_rules_pkg::ApbRuleBase)," in text
-    assert ("      if (apb_hit_sys >= 65'(64'h0000_0000_1000_0000) && "
-            "apb_hit_sys < 65'(64'h0000_0000_1000_1000)) begin  // ro0.regs\n"
-            "        case ({apb_write, apb_nonsec}) 2'b00: apb_tgt = 0; 2'b01: apb_tgt = 0; "
-            "2'b10: apb_tgt = 4; 2'b11: apb_tgt = 4; endcase\n") in text  # fmt: skip
+    assert "  function automatic int unsigned apb_target(int unsigned m, " in text
+    assert ("      if (sys >= 65'(64'h0000_0000_1000_0000) && "
+            "sys < 65'(64'h0000_0000_1000_1000))  // ro0.regs\n"
+            "        case ({write, nonsec}) 2'b00: return 0; 2'b01: return 0; "
+            "2'b10: return 4; 2'b11: return 4; endcase\n") in text  # fmt: skip
     for label in ("apb_selects", "apb_errors", "apb_aliases"):
         assert f"    {label}: assert (" in text
     job = (tmp_path / "formal" / "apb4_rules_decode.sby").read_text(encoding="utf-8")
