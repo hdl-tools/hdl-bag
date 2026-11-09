@@ -634,9 +634,12 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
 
     params = (f"DesignIsSlave({int(not bus.is_slave)}), AddrWidth({bus.addr_width}), "
               f"DataWidth({bus.data_width}), IdWidth({idw})")  # fmt: skip
-    lines = [f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} ("]
+    events = ("multi_write", "w_first", "same_id", "full")
+    lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
+    lines.append(f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} (")
     conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}")]
     conns += [(f".{s}", v(s)) for s in _FAXI4]
+    conns += [(f".{e}_o", f"bag_{bus.name}_{e}") for e in events]
     lines += [f"      {c}({x})," for c, x in conns]
     lines[-1] = lines[-1].rstrip(",")
     lines.append("  );")
@@ -661,6 +664,17 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
     if bus.is_slave and "write" in can:
         covers.append((f"proto_b_error_{bus.name}",
                        f"{v('bvalid')} && {v('bready')} && {v('bresp')}[1]"))  # fmt: skip
+    if bus.is_slave and "read" in can:
+        covers.append((f"proto_r_error_{bus.name}",
+                       f"{v('rvalid')} && {v('rready')} && {v('rresp')}[1]"))  # fmt: skip
+    if not bus.is_slave:
+        # What the environment master can always do, so the checker's tracking is explored:
+        # a multi-beat write, data before its address, two reads of one ID open together,
+        # and a full table. No EXOKAY cover: it needs an AXI4 slave the exclusive reaches with
+        # AxLOCK intact (AXI4-Lite and bag_axi2ahb drop it), which the port alone does not
+        # tell; test_an_axi4_slave_environment_may_give_exokay_to_an_exclusive_access keeps
+        # the EXOKAY rules from holding vacuously.
+        covers += [(f"proto_{e}_{bus.name}", f"bag_{bus.name}_{e}") for e in events]
     lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
     if bus.is_slave:
         lines += _only_what_reaches(bus, dom, can, write=f"{v('awvalid')} || {v('wvalid')}",

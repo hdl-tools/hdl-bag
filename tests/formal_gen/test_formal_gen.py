@@ -343,6 +343,20 @@ def test_each_axi4_port_gets_bags_checker_on_the_right_side(tmp_path: Path) -> N
     assert "track" not in text and "bag_pend_" not in text
 
 
+def test_an_axi4_master_port_covers_the_states_its_checker_tracks(tmp_path: Path) -> None:
+    """PR 2b review (richer AXI4 covers): towards a master the environment can always make a
+    multi-beat write, send data before its address, open two reads of one ID and fill a
+    table, so the checker's FIFO and tables are explored, not only single beats. Towards a
+    slave, an R error where reads reach, as a B error where writes do."""
+    text = _protocol(tmp_path, GOLDEN)
+    assert "      .full_o(bag_cpu0_full)\n  );\n" in text
+    for e in ("multi_write", "w_first", "same_id", "full"):
+        assert f"  always_comb proto_{e}_cpu0: cover (bag_cpu0_{e});\n" in text, e
+        assert f"proto_{e}_ddr0" not in text, e
+    assert ("  always_comb proto_r_error_ddr0: cover (ddr0_axi_rvalid && ddr0_axi_rready && "
+            "ddr0_axi_rresp[1]);\n") in text  # fmt: skip
+
+
 def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
     """Phase 4: alias pins are quasi-static. Formal assumes the strict form."""
     text = _protocol(tmp_path, P2 / "apb4_min.ir.yaml")

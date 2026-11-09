@@ -94,7 +94,14 @@ module bag_faxi4 #(
     input wire [IdWidth-1:0]       rid,
     input wire [DataWidth-1:0]     rdata,
     input wire [1:0]               rresp,
-    input wire                     rlast
+    input wire                     rlast,
+    // Events, for the generated job's covers: a write burst of more than one beat ends; a
+    // data beat arrives before its address; a read is accepted while a read of its ID is
+    // open; a response table is full.
+    output wire                    multi_write_o,
+    output wire                    w_first_o,
+    output wire                    same_id_o,
+    output wire                    full_o
 );
 
   localparam int unsigned MaxSize = $clog2(DataWidth / 8);
@@ -375,6 +382,19 @@ module bag_faxi4 #(
                       && !(n == Full && aw_ahead && awready)
                       && !(n == Full && !aw_ahead && wready)
                       && !(rn == Full && arready);
+
+  // ---------------------------------------------------------------- events
+  logic id_open;  // a read of ARID's ID is open
+  always_comb begin
+    id_open = 1'b0;
+    for (int i = 0; i < int'(MaxOutstanding); i++) begin
+      if (Cw'(i) < rn && rq_id[i] == arid) id_open = 1'b1;
+    end
+  end
+  assign multi_write_o = live && w_done && w_beats != '0;
+  assign w_first_o = live && w_hs && !len_known;
+  assign same_id_o = live && ar_hs && id_open;
+  assign full_o = live && (rn == Full || bn == Full);
 
   // ---------------------------------------------------------------- assert or assume
   // The design's rules are asserted at each edge. The environment's are assumed at every
