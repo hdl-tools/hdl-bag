@@ -12,6 +12,7 @@ from hdl_bag.protocols import (
     DATA_WIDTHS,
     ERROR_RESPONSES,
     FABRIC_ADDR_WIDTH,
+    MAX_GUARD_ID_WIDTH_WARN,
     MAX_SLAVE_ID_WIDTH_WARN,
     OPTIONAL_SIGNALS,
     PORT_ADDR_WIDTH,
@@ -29,6 +30,8 @@ LATENCY: Final = ("NO_LATENCY", "CUT_SLV_AX", "CUT_MST_AX", "CUT_ALL_AX",
                   "CUT_SLV_PORTS", "CUT_MST_PORTS", "CUT_ALL_PORTS")  # fmt: skip
 REG_SLICE: Final = ("none", "cut", "multicut-2", "multicut-3", "n/a")
 SIG_DRIVE: Final = ("drive", "tie-0", "tie-default", "n/a")
+# The guard in front of each master port of BAG's AXI4 fabrics (FAB-GUARD-ID-WIDTH).
+GUARD_SOURCE: Final = "rtl/inhouse/bag_axi_guard.sv"
 # Topologies that suit each protocol (guide, Fabrics > Topology)
 PROTOCOL_TOPOLOGIES: Final = {
     Protocol.AXI4: ("crossbar", "shared-bus"),
@@ -128,6 +131,18 @@ def check_fabrics(ctx: Context) -> None:
         if name and (ids := ctx.fabric_id_widths(name)) and ids[1] > MAX_SLAVE_ID_WIDTH_WARN:
             ctx.report("FAB-ID-GROWTH", row["Fabric"],
                        f"slave-side ID width of {name} is {ids[1]} bits (> {MAX_SLAVE_ID_WIDTH_WARN})")  # fmt: skip
+        # Each master port's bag_axi_guard counts in flight per full ID (D65): its tables
+        # double with every master-side ID bit. Not a limit, only a cost the user should see.
+        manifest = ctx.registry.get(template) if template else None
+        guarded = manifest is not None and GUARD_SOURCE in manifest.sources
+        if (
+            name
+            and guarded
+            and (ids := ctx.fabric_id_widths(name))
+            and ids[0] > MAX_GUARD_ID_WIDTH_WARN
+        ):
+            ctx.report("FAB-GUARD-ID-WIDTH", row["Fabric"],
+                       f"master-side ID width of {name} is {ids[0]} bits (> {MAX_GUARD_ID_WIDTH_WARN}): each master port's guard keeps {2 ** ids[0]} in-flight counters per channel, one per ID (D65); narrow the master IDs if that area matters")  # fmt: skip
 
 
 def _check_port_row(ctx: Context, row: Row, kind: Literal["master", "slave"]) -> None:

@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from hdl_bag.formal_gen import COVER_DEPTH, PROTOCOL_DEPTH, PROVE_DEPTH, checkers, props_module
+from hdl_bag.formal_gen import (
+    COVER_DEPTH,
+    PROTOCOL_DEPTH,
+    PROVE_DEPTH,
+    ahb_ports,
+    axi4_ports,
+    checkers,
+    props_module,
+)
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -109,16 +117,30 @@ def test_a_reset_group_asserts_together_and_releases_in_any_order(tmp_path: Path
     assert "&& !bag_was_" not in two  # a group of one: nothing to assert together
 
 
-def test_a_sync_assertion_gets_the_synchronizer_stages_first(tmp_path: Path) -> None:
-    """ahb_fixed's reset asserts synchronously: bag_rst_sync passes it on after 2 edges, so
-    the domain is checked from then on (the generated reset test allows the same), and the
-    reset may only be released once it has taken effect (D51)."""
-    text = _props(tmp_path, P2 / "ahb_fixed.ir.yaml")
-    assert "  wire bag_quiet_D_H = bag_held_D_H && bag_edges_D_H == 2'd2;\n" in text
-    release = "always_comb if (bag_was_rst_h_n && !bag_held_D_H) assume (bag_quiet_was_D_H);"
+def test_a_synchronized_sync_assertion_gets_the_synchronizer_stages_first(
+    tmp_path: Path,
+) -> None:
+    """apb4_rules's reset asserts and deasserts synchronously, so the wrapper puts it through
+    bag_rst_sync, which passes the assertion on after 2 edges: the domain is checked from then
+    on (the generated reset test allows the same), and the reset may only be released once it
+    has taken effect (D51)."""
+    text = _props(tmp_path, P2 / "apb4_rules.ir.yaml")
+    assert "  wire bag_quiet_D_R = bag_held_D_R && bag_edges_D_R == 2'd2;\n" in text
+    release = "always_comb if (bag_was_rst_r_n && !bag_held_D_R) assume (bag_quiet_was_D_R);"
     assert f"  {release}\n" in text
-    assert re.search(r"if \(bag_quiet_D_H\) quiet_\w+: assert", text)
-    assert not re.search(r"if \(bag_held_D_H\) quiet_\w+: assert", text)
+    assert re.search(r"if \(bag_quiet_D_R\) quiet_\w+: assert", text)
+    assert not re.search(r"if \(bag_held_D_R\) quiet_\w+: assert", text)
+
+
+def test_a_sync_assertion_without_a_synchronizer_takes_effect_at_once(tmp_path: Path) -> None:
+    """ahb_fixed's reset asserts synchronously but deasserts asynchronously: the wrapper wires
+    it as is (only bag_rst_sync, for sync deassertion, delays an assertion), so the design
+    is in reset as soon as it is asserted. Modelling 2 synchronizer edges there kept the
+    protocol checkers live for 2 edges into the reset (a false failure on ahb_fixed in PR 2b)
+    and started the quiet checks 2 edges late."""
+    text = _props(tmp_path, P2 / "ahb_fixed.ir.yaml")
+    assert "  wire bag_quiet_D_H = bag_held_D_H;\n" in text
+    assert "bag_edges_D_H" not in text
 
 
 @pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
@@ -136,7 +158,9 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     protocol = tmp_path / "formal" / f"{spec.project.name}_protocol.sv"
     if protocol.is_file():
         ports = set(re.findall(r"proto_\w+?_(\w+): cover", protocol.read_text(encoding="utf-8")))
-        found = {c.port for c in checkers(spec, build_netlist(spec))}
+        netlist = build_netlist(spec)
+        own = [*axi4_ports(netlist), *ahb_ports(netlist)]
+        found = {c.port for c in checkers(spec, netlist)} | {b.name for b in own}
         assert found and all(any(p.endswith(port) for p in ports) for port in found), found
     # Step registers come from formal/bag_step.v: under yosys-slang a register on a net
     # marked (* gclk *) is clocked by a free net, not the solver's step (PR 1's bug).
@@ -290,21 +314,18 @@ def test_masters_stay_quiet_until_the_reset_group_is_out_of_reset(tmp_path: Path
         assert f"{line}\n" in text, line
 
 
-def test_an_axi4_port_gets_the_handshake_rule_on_what_the_environment_drives(
-    tmp_path: Path,
-) -> None:
-    """Until PR 2b brings BAG's AXI4 properties, the environment still follows the AXI
-    handshake rule: a master that withdrew a stalled request would move a fabric's
-    arbitration under a stalled transfer downstream (found on mixed_lite_shared)."""
+def test_each_axi4_port_gets_bags_checker_on_the_right_side(tmp_path: Path) -> None:
+    """Every AXI4 port of demo_ss gets bag_faxi4, asserting what the design drives: its
+    responses towards a master (cpu0), its requests towards a slave (ddr0). The checker follows
+    every ID by itself (D64): no tracked ID, so an 8-bit slave ID needs nothing special. The
+    2a stopgap handshake assumptions are gone."""
     text = _protocol(tmp_path, GOLDEN)
-    for line in [
-        "  always_ff @(posedge clk_cpu) bag_pend_cpu0_aw <= cpu0_axi_awvalid && !cpu0_axi_awready;",
-        "  always_comb if (bag_pend_cpu0_aw && !bag_checker_reset_D_CPU) "
-        "assume (cpu0_axi_awvalid);",
-        "  always_ff @(posedge clk_sys) bag_pend_ddr0_r <= ddr0_axi_rvalid && !ddr0_axi_rready;",
-    ]:
-        assert f"{line}\n" in text, line
-    assert "bag_pend_cpu0_b" not in text  # the design drives B to a master: PR 2b asserts it
+    assert ("  bag_faxi4 #(.DesignIsSlave(1), .AddrWidth(32), .DataWidth(128), .IdWidth(6)) "
+            "u_cpu0 (\n      .clk_i(clk_cpu),\n      .rst_ni(!bag_checker_reset_D_CPU),\n"
+            "      .awvalid(cpu0_axi_awvalid),\n") in text  # fmt: skip
+    assert ("  bag_faxi4 #(.DesignIsSlave(0), .AddrWidth(32), .DataWidth(128), .IdWidth(8)) "
+            "u_ddr0 (\n") in text  # fmt: skip
+    assert "track" not in text and "bag_pend_" not in text
 
 
 def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
@@ -340,9 +361,23 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
     assert vendored == ["LICENSE", "SOURCE.md", "fapb_master.v", "fapb_slave.v"]
 
 
-def test_no_protocol_job_without_an_axi4_lite_or_apb_port(tmp_path: Path) -> None:
+def test_the_protocol_bmc_runs_on_bitwuzla_and_everything_else_on_yices(tmp_path: Path) -> None:
+    """D67: yices could not reach depth 16 on axi_xbar_rules's protocol bmc; bitwuzla can.
+    Its cover task, where bitwuzla was slower, and the reset job keep yices."""
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
+    formal = tmp_path / "formal"
+    assert (
+        "[engines]\nbmc: smtbmc bitwuzla\ncover: smtbmc yices\n"
+        in (formal / "axi_xbar_rules_protocol.sby").read_text()
+    )
+    assert "[engines]\nsmtbmc yices\n" in (formal / "axi_xbar_rules_reset.sby").read_text()
+
+
+def test_an_axi4_only_design_gets_a_protocol_job_without_zipcpu(tmp_path: Path) -> None:
+    """axi_xbar_rules has only AXI4 ports: BAG's own checker, and no vendored file."""
     out = generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
-    assert out.formal == ("formal/axi_xbar_rules_reset.sby",)
+    assert out.formal == ("formal/axi_xbar_rules_protocol.sby", "formal/axi_xbar_rules_reset.sby")
+    assert (tmp_path / "formal" / "bag_faxi4.sv").is_file()
     assert not (tmp_path / "formal" / "vendor").exists()
 
 

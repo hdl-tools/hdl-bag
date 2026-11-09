@@ -7,7 +7,9 @@ Output layout (relative to the output directory)::
     formal/<project>_reset.sv     quiet-in-reset property module, bound into the lint top
     formal/<project>_reset.sby    its SymbiYosys job: a prove task and a cover task
     formal/<project>_protocol.sv  port-protocol checkers, bound into the lint top (D60)
-    formal/<project>_protocol.sby its job: a bmc task and a cover task
+    formal/<project>_protocol.sby its job: a bmc task (bitwuzla, D67) and a cover task
+    formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
+    formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
     formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
@@ -23,7 +25,8 @@ The first property family is quiet-in-reset, the formal form of the generated te
 ``reset_during_traffic_leaves_nothing_behind``: while a domain's reset is held, the design
 asks nothing of the masters and slaves in that domain (no request VALID, PSEL or HTRANS
 towards a slave, no response VALID towards an AXI master, HREADY high towards an AHB-Lite
-master). A domain whose reset asserts synchronously gets the synchronizer's stages first.
+master). A domain whose reset asserts synchronously through bag_rst_sync (sync assertion
+and deassertion) gets the synchronizer's stages first; any other reset acts at once.
 It is proved by k-induction, so it holds in every reachable state, not only to a depth.
 
 The environment, from the AMBA specifications and the reset sequence (D51):
@@ -36,8 +39,8 @@ The environment, from the AMBA specifications and the reset sequence (D51):
   reset group has left reset (D51 step 4: a sync-deassertion reset leaves the domain only
   after the synchronizer's stages);
 - alias-enable pins change only in reset (Phase 4: they are quasi-static);
-- in the protocol job, what the environment drives into an AXI4 port follows the AXI
-  handshake rule (A3.2.1), until PR 2b brings BAG's own AXI4 properties.
+- in the protocol job, what the environment drives into each port follows that port's
+  protocol: the checkers assume it.
 
 Covers keep each assertion honest, as ``checked > 0`` does for a test: for each asserted
 signal, the reset arrives while the signal is active (after the design has been through a
@@ -55,8 +58,15 @@ with its parameters set (``copy`` and ``chparam``), which the slang-read propert
 instantiates. Each checker sees its domain's reset as the design does: asserted from the
 start until the first reset has taken effect, then whenever the reset has passed the
 synchronizer. ZipCPU's bounded-wait checks are off, because a port's latency depends on how
-long the slaves beyond it stall, which nothing bounds. AXI4 and AHB-Lite ports get BAG's
-own properties (PR 2b).
+long the slaves beyond it stall, which nothing bounds.
+
+AXI4 and AHB-Lite ports get BAG's own checkers, written in SystemVerilog and read by slang
+with the design: ``formal/bag_faxi4.sv`` (the public ZipCPU full-AXI4 files are
+non-functional) and ``formal/bag_fahb.sv`` (D54). Each takes a parameter for the side the
+design is on, so one rule is asserted on what the design drives and assumed on what the
+environment drives. The AXI4 checker follows every ID of its port through one bounded table
+of outstanding transactions (D64, 4 entries, D66), so no ID mapping across the fabric is
+needed.
 
 A design with a user-supplied fabric gets no formal, because BAG does not know how that
 fabric behaves (D8).
@@ -65,7 +75,7 @@ fabric behaves (D8).
 from dataclasses import dataclass
 
 from hdl_bag.flows.formal import sby_job
-from hdl_bag.gen.collateral import RST_SYNC_STAGES, reset_groups
+from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Netlist
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
@@ -91,9 +101,18 @@ COVER_DEPTH = 40
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
+# The protocol job's engine (D67). With BAG's AXI4 checker, yices needed over 30 minutes per
+# step past step 13 on axi_xbar_rules (stopped at 40 minutes in step 14); bitwuzla checks all
+# 16 steps in about 4 minutes, abc bmc3 in about 2, boolector in 15. Bitwuzla runs under
+# smtbmc like yices, so counterexamples name their assertion as before. The cover task stays
+# on yices: there bitwuzla was slower (over 15 minutes against yices's 4:40).
+PROTOCOL_ENGINE = "bmc: smtbmc bitwuzla\ncover: smtbmc yices"
 
-# The solver-step registers (formal/bag_step.v), copied next to the jobs.
+# The solver-step registers (formal/bag_step.v), copied next to the jobs; BAG's own AXI4 and
+# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv).
 STEP = "bag_step.v"
+FAXI4 = "bag_faxi4.sv"
+FAHB = "bag_fahb.sv"
 
 # Vendored ZipCPU checkers (D60), by protocol family and by which side the design is on.
 ZIPCPU = "formal/vendor/zipcpu"
@@ -252,9 +271,9 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
             held, quiet = f"bag_held_{d}", f"bag_quiet_{d}"
             body += ["", f"  // {d}: clock {clk}, reset {rst.name} ({rst.assertion} assertion)",
                      f"  wire {held} = {_asserted(spec, rst.name)};"]  # fmt: skip
-            if rst.assertion == "sync":
-                # The synchronizer takes its stages to pass a sync assertion into the domain,
-                # and the reset is held until it has (D51).
+            if assertion_delayed(rst.assertion, rst.deassertion):
+                # bag_rst_sync takes its stages to pass a sync assertion into the domain, and
+                # the reset is held until it has (D51). Without it, any reset acts at once.
                 edges = f"bag_edges_{d}"
                 body += [
                     f"  logic [{bits - 1}:0] {edges} = {bits}'d0;",
@@ -521,7 +540,7 @@ _APB = {"PSEL": "psel", "PENABLE": "penable", "PREADY": "pready", "PADDR": "padd
 def _value(spec: Spec, bus: Bus, sig: str, port: "_Ports") -> str:
     """What BUS carries on SIG: its top-level port, a tied value, or for a signal the
     protocol lacks (APB3 PSTRB and PPROT, a PSLVERR not used) the value the spec implies."""
-    width = signal_width(sig, bus.addr_width, bus.data_width)
+    width = signal_width(sig, bus.addr_width, bus.data_width, bus.id_width, bus.user_width)
     prefix = {p.port: p.prefix for p in spec.wrapper.ports}.get(bus.name)
     name = flat_signal_name(spec.wrapper.signal_pattern, bus.name, PROTO_TOKEN[bus.protocol],
                             sig, prefix)  # fmt: skip
@@ -569,62 +588,119 @@ def _checker(spec: Spec, bus: Bus, chk: Checker, dom: Domain,
     return [*lines, "  );"]
 
 
-# AXI4 channels: VALID, READY, and the payload VALID qualifies.
-_AXI4_CHANNELS = {
-    "aw": ("awvalid", "awready", ("awid", "awaddr", "awlen", "awsize", "awburst", "awlock",
-                                  "awcache", "awprot", "awqos", "awregion", "awuser")),
-    "w": ("wvalid", "wready", ("wdata", "wstrb", "wlast", "wuser")),
-    "ar": ("arvalid", "arready", ("arid", "araddr", "arlen", "arsize", "arburst", "arlock",
-                                  "arcache", "arprot", "arqos", "arregion", "aruser")),
-    "b": ("bvalid", "bready", ("bid", "bresp", "buser")),
-    "r": ("rvalid", "rready", ("rid", "rdata", "rresp", "rlast", "ruser")),
-}  # fmt: skip
+def axi4_ports(netlist: Netlist) -> list[Bus]:
+    """The top's AXI4 ports, which BAG's own checker watches (D64)."""
+    return [b for b in netlist.ports if b.external and b.protocol is Protocol.AXI4]
 
 
-def _axi4_handshake_env(spec: Spec, bus: Bus, dom: Domain, port: "_Ports") -> list[str]:
-    """The AXI handshake rule (AMBA AXI A3.2.1) as an assumption on what the environment
-    drives into an AXI4 port: once VALID is high without READY at a clock edge, VALID and its
-    payload hold until the handshake; a reset abandons the transfer. A master that withdrew
-    a request would otherwise move a fabric's arbitration under a stalled transfer
-    downstream. BAG's own AXI4 assertions, and the burst rules, are PR 2b."""
-    theirs = ("aw", "w", "ar") if not bus.is_slave else ("b", "r")
-    prefix = {p.port: p.prefix for p in spec.wrapper.ports}.get(bus.name)
-    token, pattern = PROTO_TOKEN[bus.protocol], spec.wrapper.signal_pattern
+# bag_faxi4's ports besides clock and reset, in its order.
+_FAXI4 = ("awvalid", "awready", "awid", "awaddr", "awlen", "awsize", "awburst", "awlock",
+          "awcache", "awprot", "awqos", "awregion", "wvalid", "wready", "wdata", "wstrb",
+          "wlast", "bvalid", "bready", "bid", "bresp", "arvalid", "arready", "arid", "araddr",
+          "arlen", "arsize", "arburst", "arlock", "arcache", "arprot", "arqos", "arregion",
+          "rvalid", "rready", "rid", "rdata", "rresp", "rlast")  # fmt: skip
 
-    def name(sig: str) -> str:
-        return flat_signal_name(pattern, bus.name, token, sig, prefix)
 
-    def width(sig: str) -> int:
-        return signal_width(sig, bus.addr_width, bus.data_width, bus.id_width, bus.user_width)
+def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
+          active: dict[str, set[str]]) -> list[str]:  # fmt: skip
+    """BAG's AXI4 checker on BUS, and its covers. The checker follows every ID of the port by
+    itself (D64), so it needs no ID mapping. A signal the port lacks takes the value the spec
+    implies (no ID: a single ID 0; no AxLOCK, AxCACHE, AxQOS, AxREGION: 0)."""
+    idw = max(bus.id_width, 1)
 
-    out = [f"  // {bus.name}: AXI4 handshake rule on what the environment drives (A3.2.1)"]
-    for ch in theirs:
-        valid, ready, payload = _AXI4_CHANNELS[ch]
-        sigs = [s for s in payload if s in bus.signals and s not in bus.ties]
-        for s in (valid, ready, *sigs):
-            port(name(s), width(s))
-        pend, held = f"bag_pend_{bus.name}_{ch}", f"bag_payload_{bus.name}_{ch}"
-        total = sum(width(s) for s in sigs)
-        cat = "{" + ", ".join(name(s) for s in sigs) + "}"
-        out += [
-            f"  logic {pend} = 1'b0;",
-            f"  always_ff @(posedge {dom.clock}) {pend} <= {name(valid)} && !{name(ready)};",
-        ]
-        cond = f"{pend} && !{dom.checker_reset}"
-        out.append(f"  always_comb if ({cond}) assume ({name(valid)});")
-        if sigs:
-            out += [
-                f"  logic [{total - 1}:0] {held};",
-                f"  always_ff @(posedge {dom.clock}) {held} <= {cat};",
-                f"  always_comb if ({cond}) assume ({cat} == {held});",
-            ]
-    return [*out, ""]
+    def v(sig: str) -> str:
+        if sig in ("awid", "bid", "arid", "rid") and bus.id_width == 0:
+            return "1'b0"
+        return _value(spec, bus, sig, port)
+
+    params = (f"DesignIsSlave({int(not bus.is_slave)}), AddrWidth({bus.addr_width}), "
+              f"DataWidth({bus.data_width}), IdWidth({idw})")  # fmt: skip
+    lines = [f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} ("]
+    conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}")]
+    conns += [(f".{s}", v(s)) for s in _FAXI4]
+    lines += [f"      {c}({x})," for c, x in conns]
+    lines[-1] = lines[-1].rstrip(",")
+    lines.append("  );")
+    # Covers: the channels the design drives each stalled, a burst completed each way the
+    # route model allows, and (towards a slave) an error response.
+    can = active.get(bus.name, set()) if bus.is_slave else {"read", "write"}
+    covers = []
+    if bus.is_slave:
+        chans = [("aw", "awvalid", "awready", "write"), ("w", "wvalid", "wready", "write"),
+                 ("ar", "arvalid", "arready", "read")]  # fmt: skip
+    else:
+        chans = [("b", "bvalid", "bready", "write"), ("r", "rvalid", "rready", "read")]
+    for ch, valid, ready, kind in chans:
+        if kind in can:
+            covers.append((f"proto_{ch}_stall_{bus.name}", f"{v(valid)} && !{v(ready)}"))
+    if "write" in can:
+        covers.append((f"proto_write_{bus.name}",
+                       f"{v('wvalid')} && {v('wready')} && {v('wlast')}"))  # fmt: skip
+    if "read" in can:
+        covers.append((f"proto_read_{bus.name}",
+                       f"{v('rvalid')} && {v('rready')} && {v('rlast')}"))  # fmt: skip
+    if bus.is_slave and "write" in can:
+        covers.append((f"proto_b_error_{bus.name}",
+                       f"{v('bvalid')} && {v('bready')} && {v('bresp')}[1]"))  # fmt: skip
+    lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
+    return lines
+
+
+def ahb_ports(netlist: Netlist) -> list[Bus]:
+    """The top's AHB-Lite ports, which BAG's own checker watches (D54)."""
+    return [b for b in netlist.ports if b.external and b.protocol is Protocol.AHB_LITE]
+
+
+def own_checkers(netlist: Netlist) -> list[str]:
+    """BAG's own checker files (in formal/) the protocol job reads."""
+    return [f for f, ports in ((FAXI4, axi4_ports(netlist)), (FAHB, ahb_ports(netlist))) if ports]
+
+
+# bag_fahb's ports between hsel and hreadyout, in its order; then hresp and hrdata.
+_FAHB = ("haddr", "htrans", "hwrite", "hsize", "hburst", "hprot", "hmastlock", "hnonsec",
+         "hwdata", "hready")  # fmt: skip
+
+
+def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
+         active: dict[str, set[str]]) -> list[str]:  # fmt: skip
+    """BAG's AHB-Lite checker on BUS, and its covers. On a master port there is no HSEL (the
+    port is always selected) and the design's HREADY is also the data phase's HREADYOUT."""
+
+    def v(sig: str) -> str:
+        return _value(spec, bus, sig, port)
+
+    params = (f".DesignIsSlave({int(not bus.is_slave)}), .AddrWidth({bus.addr_width}), "
+              f".DataWidth({bus.data_width})")  # fmt: skip
+    events = ("write_done", "read_done", "wait", "error", "seq")
+    lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
+    lines.append(f"  bag_fahb #({params}) u_{bus.name} (")
+    conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}"),
+             (".hsel", v("hsel") if bus.is_slave else "1'b1")]  # fmt: skip
+    conns += [(f".{s}", v(s)) for s in _FAHB]
+    conns += [(".hreadyout", v("hreadyout") if bus.is_slave else v("hready")),
+              (".hresp", v("hresp")), (".hrdata", v("hrdata"))]  # fmt: skip
+    conns += [(f".{e}_o", f"bag_{bus.name}_{e}") for e in events]
+    lines += [f"      {c}({x})," for c, x in conns]
+    lines[-1] = lines[-1].rstrip(",")
+    lines.append("  );")
+    # Covers: a transfer completed each way the route model allows, a waited data phase, and
+    # towards a slave an ERROR, towards a master a burst beat.
+    can = active.get(bus.name, set()) if bus.is_slave else {"read", "write"}
+    covers: list[tuple[str, str]] = [(k, f"{k}_done") for k in ("write", "read") if k in can]
+    if can:
+        covers.append(("wait", "wait"))
+        covers.append(("error", "error") if bus.is_slave else ("burst", "seq"))
+    lines += [f"  always_comb proto_{label}_{bus.name}: cover (bag_{bus.name}_{event});"
+              for label, event in covers]  # fmt: skip
+    return lines
 
 
 def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | None:
     """The port-protocol property module for SPEC, bound into TOP; None with no port to check."""
     found = checkers(spec, netlist)
-    if not found:
+    axi4 = axi4_ports(netlist)
+    ahb = ahb_ports(netlist)
+    if not found and not axi4 and not ahb:
         return None
     ports = _Ports()
     body, domains = _environment(spec, netlist, ports)
@@ -636,11 +712,22 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
                     f"{design} ({chk.vendor})")  # fmt: skip
         body += [*_checker(spec, bus, chk, domains[bus.domain], ports)]
         body += [*_covers(spec, bus, chk, ports), ""]
-    for bus in netlist.ports:
-        if bus.external and bus.protocol is Protocol.AXI4:
-            body += _axi4_handshake_env(spec, bus, domains[bus.domain], ports)
+    if axi4:
+        active = _active(spec)
+        for bus in axi4:
+            side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
+            body.append(f"  // {bus.name}: AXI4 {side} port; the design is its {design} "
+                        "(bag_faxi4)")  # fmt: skip
+            body += [*_axi4(spec, bus, domains[bus.domain], ports, active), ""]
+    if ahb:
+        active = _active(spec)
+        for bus in ahb:
+            side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
+            body.append(f"  // {bus.name}: AHB-Lite {side} port; the design is its {design} "
+                        "(bag_fahb)")  # fmt: skip
+            body += [*_ahb(spec, bus, domains[bus.domain], ports, active), ""]
     name = f"bag_{spec.project.name}_protocol_props"
-    return _module(name, top, hdr, "Port-protocol checkers (ZipCPU, D60)", ports, body)
+    return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
 
 def render_sby(spec: Spec, top: str, files: list[str], incdirs: list[str], props: str,
@@ -663,7 +750,8 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
                         incdirs: list[str], props: str,
                         user_header: str | None) -> str:  # fmt: skip
     """The SymbiYosys job for the protocol checkers: the vendored files read by Yosys's own
-    frontend, one parameterised copy per checker instance, then the design and PROPS."""
+    frontend, one parameterised copy per checker instance, then the design, BAG's own AXI4 and
+    AHB-Lite checkers (where there are such ports) and PROPS."""
     found = checkers(spec, netlist)
     vendored = sorted({c.vendor for c in found})
     prelude = [
@@ -673,11 +761,14 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
     for c in found:
         sets = " ".join(f"-set {k} {v}" for k, v in c.params)
         prelude += [f"copy {c.vendor} {c.module}", f"chparam {sets} {c.module}"]
-    job = sby_job(top=top, files=[*files, props], incdirs=incdirs,
+    own = own_checkers(netlist)
+    copy = [("rtl", "../rtl"), (STEP, STEP), *((f, f) for f in own)]
+    if found:
+        copy.append(("zipcpu", "vendor/zipcpu"))
+    job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs,
                   depths={"bmc": PROTOCOL_DEPTH, "cover": PROTOCOL_DEPTH},
-                  copy=[("rtl", "../rtl"), (STEP, STEP), ("zipcpu", "vendor/zipcpu"),
-                        (props, props)],
-                  engine=ENGINE, prelude=prelude)  # fmt: skip
+                  copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
+                  prelude=prelude)  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"
 
 
@@ -707,4 +798,5 @@ def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:
     # The licence and the provenance (source and commit) travel with the files.
     extra = [f"{ZIPCPU}/LICENSE", f"{ZIPCPU}/SOURCE.md"] if found else []
     vendored = [f"{ZIPCPU}/{v}.v" for v in found] + extra
-    return [f"formal/{STEP}", *vendored]
+    own = [f"formal/{f}" for f in own_checkers(netlist)]
+    return [f"formal/{STEP}", *own, *vendored]

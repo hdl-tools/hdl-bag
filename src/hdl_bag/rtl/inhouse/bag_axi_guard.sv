@@ -62,9 +62,10 @@ module bag_axi_guard #(
 );
 
   localparam logic [NoMasters-1:0] MstOneHot = NoMasters'(1) << MstIdx;
-  // The demux only separates "core" from "error slave": IDs that share their low bits are
-  // merely serialised, so 2^3 counters per channel (PULP's default) suffice for any width.
-  localparam int unsigned LookBits = (IdWidth < 3) ? IdWidth : 3;
+  // The demux counts transactions in flight per full ID (D65), one counter per ID value and
+  // channel: with fewer bits, IDs sharing their low bits would share one limit and be
+  // serialised against each other (PULP's default of 3 bits did that).
+  localparam int unsigned LookBits = IdWidth;
   // axi_demux_simple sizes its per-ID counters as idx_width(MaxTrans) bits and stops
   // accepting once any counter is all ones, so MaxTrans = N admits only 2^clog2(N) - 1
   // (N = 2 admits 1). MaxTrans + 1 lets every ID have at least MaxTrans in flight.

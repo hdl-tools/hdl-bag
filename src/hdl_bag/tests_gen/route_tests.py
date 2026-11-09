@@ -1103,7 +1103,9 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
 
 async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
     """Every AXI4 crossbar, master and AXI4 slave with no adapter between: with the slave
-    taking requests but holding R, reads on one ID reach it until Max mst trans at least."""
+    taking requests but holding R, reads on one ID reach it until Max mst trans at least. A
+    master with more than 3 ID bits reads on IDs 0 and 8 at once, which share their low 3 bits:
+    the limit is per full ID, so each gets its Max mst trans (D65)."""
     masters, slaves, clocks = await _bring_up(dut)
     checked = 0
     for f in SPEC.fabrics:
@@ -1124,8 +1126,9 @@ async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
             )
             read_if.ar_channel.queue_occupancy_limit = read_if.r_channel.queue_occupancy_limit = -1
             read_if.r_channel.pause = True
-            reads = [cocotb.start_soon(drv.master.read(a, 4, arid=0, size=2, prot=drv._prot(0)))
-                     for a in words]  # fmt: skip
+            ids = [0, 8] if (m.id_width or 0) > 3 else [0]
+            reads = [cocotb.start_soon(drv.master.read(a, 4, arid=i, size=2, prot=drv._prot(0)))
+                     for i in ids for a in words]  # fmt: skip
             await ClockCycles(clocks[f.domain], 100)
             taken = sum(not e.write for e in slave.log[n:])
             read_if.r_channel.pause = False
@@ -1133,9 +1136,9 @@ async def axi4_crossbars_admit_max_mst_trans_per_id(dut: Any) -> None:
             read_if.ar_channel.queue_occupancy_limit, read_if.r_channel.queue_occupancy_limit = (
                 limits
             )
-            assert f.max_mst_trans is not None and taken >= f.max_mst_trans, (
-                f"{f.name}: {taken} reads on one ID reached {exp.slave}, "
-                f"Max mst trans is {f.max_mst_trans}"
+            assert f.max_mst_trans is not None and taken >= len(ids) * f.max_mst_trans, (
+                f"{f.name}: {taken} reads on IDs {ids} of {m.name} reached {exp.slave}, "
+                f"Max mst trans is {f.max_mst_trans} per ID"
             )
             checked += 1
     assert checked > 0

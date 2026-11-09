@@ -138,3 +138,45 @@ def test_illegal_parameters_stop_elaboration(tmp_path: Path, tool: str, module: 
     assert legal == [], f"{module} with its defaults: {legal}"
     errors = _elaborate(tmp_path, module, params, tool)
     assert any(message in e for e in errors), f"{module} #({params}): {errors}"
+
+
+# BAG's protocol checkers (formal/, PR 2b): the formal flow reads them with slang, so slang
+# elaborates them here.
+FORMAL = Path(str(files("hdl_bag"))) / "formal"
+FORMAL_CASES: list[tuple[str, str, str]] = [
+    ("bag_faxi4", ".MaxOutstanding(3)", "bag_faxi4: MaxOutstanding must be a power of two from 2 to 8"),
+    ("bag_faxi4", ".MaxOutstanding(16)", "bag_faxi4: MaxOutstanding must be a power of two from 2 to 8"),
+    ("bag_faxi4", ".AddrWidth(11)", "bag_faxi4: AddrWidth must be at least 12"),
+    ("bag_faxi4", ".DataWidth(24)", "bag_faxi4: DataWidth must be a power of two from 8 to 1024"),
+    ("bag_faxi4", ".DataWidth(2048)", "bag_faxi4: DataWidth must be a power of two from 8 to 1024"),
+    ("bag_faxi4", ".IdWidth(0)", "bag_faxi4: IdWidth must be at least 1"),
+    ("bag_fahb", ".DataWidth(4)", "bag_fahb: DataWidth must be a power of two from 8 to 1024"),
+]  # fmt: skip
+
+
+def test_every_check_in_the_protocol_checkers_has_a_case() -> None:
+    found = set()
+    for path in FORMAL.glob("*.sv"):
+        text = path.read_text(encoding="utf-8")
+        msgs = re.findall(r'\$(?:error|fatal)\((?:1, )?"([^"]+)"\)', text)
+        assert len(msgs) == len(re.findall(r"\$(?:error|fatal)\b", text)), path.name
+        found |= {(path.stem, msg) for msg in msgs}
+    assert found == {(m, msg) for m, _, msg in FORMAL_CASES}
+
+
+@pytest.mark.eda
+@pytest.mark.parametrize(("module", "params", "message"), FORMAL_CASES,
+                         ids=[f"{m}-{i}" for i, (m, _, _) in enumerate(FORMAL_CASES)])  # fmt: skip
+def test_illegal_checker_parameters_stop_elaboration(tmp_path: Path, module: str, params: str,
+                                                     message: str) -> None:  # fmt: skip
+    def errors(p: str) -> list[str]:
+        top = tmp_path / "neg_top.sv"
+        top.write_text(f"module neg_top;\n  {module} #({p}) u_dut ();\nendmodule\n")
+        found = run_backend(BACKENDS["slang"], [FORMAL / f"{module}.sv", top], "neg_top",
+                            tmp_path, [])  # fmt: skip
+        return [f.message for f in found if f.severity == "error"]
+
+    legal = errors("")
+    assert legal == [], f"{module} with its defaults: {legal}"
+    illegal = errors(params)
+    assert any(message in e for e in illegal), f"{module} #({params}): {illegal}"
