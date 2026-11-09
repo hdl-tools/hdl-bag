@@ -78,8 +78,14 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("config", "jobs"),
-    [(c, ("decode", "protocol", "reset", "route")) for c in ("ahb_fixed", "ahb2apb_pt", "apb4_min",
-     "apb4_rules", "axil_shared_one", "axi_shared_one", "ahb_single")],
+    [("ahb_fixed", ("decode", "protocol", "reset", "route_ahb")),
+     ("ahb2apb_pt", ("decode", "protocol", "reset", "route_ahb_bus", "route_aon_apb",
+                     "route_br_ahb2aon")),
+     ("apb4_min", ("decode", "protocol", "reset", "route_apb")),
+     ("apb4_rules", ("decode", "protocol", "reset", "route_apb")),
+     ("axil_shared_one", ("decode", "protocol", "reset", "route_bus")),
+     ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
+     ("ahb_single", ("decode", "protocol", "reset", "route_ahb"))],
 )  # fmt: skip
 def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, ...]) -> None:
     """ahb_fixed asserts its reset synchronously and deasserts it asynchronously, so it has

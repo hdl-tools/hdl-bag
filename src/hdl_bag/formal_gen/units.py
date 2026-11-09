@@ -2,8 +2,8 @@
 # Copyright 2026 The hdl-bag Authors
 """Route properties (Phase 5 PR 3): each fabric and bridge on its own, against the IR.
 
-The route job's top instantiates one harness per unit (an in-house fabric that decodes, or
-a bridge), each with free inputs of its own. A unit harness holds the unit exactly as the
+Each unit (an in-house fabric that decodes, or a bridge) has a route job of its own, whose
+top is the unit's harness, with free inputs. A unit harness holds the unit exactly as the
 generated top instantiates it (the same instance template, rendered with every bus as a
 harness port), an environment and the properties:
 
@@ -35,7 +35,7 @@ from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
 
-# Bounded depth of the route job, in solver steps (free clocks: about half as many edges).
+# Bounded depth of each route job, in solver steps (free clocks: about half as many edges).
 ROUTE_DEPTH = 16
 BRIDGES = ("bag_ahb2apb", "bag_ahb2axi", "bag_apb2ahb", "bag_apb2axi", "bag_axi2ahb",
            "bag_axi2apb", "bag_axi2axil")  # fmt: skip
@@ -501,28 +501,23 @@ def render_unit(spec: Spec, inst: Instance) -> Unit:
     return Unit(inst, module, "\n".join(lines), ports, h.zipcpu, h.own)
 
 
-def render_route(spec: Spec, netlist: Netlist, hdr: str) -> tuple[str, list[Unit]] | None:
-    """The route harness for SPEC (top bag_<project>_route) and its units; None with none."""
-    found = [render_unit(spec, i) for i in units(netlist)]
-    if not found:
-        return None
-    top = f"bag_{spec.project.name}_route"
-    ports = [(f"{u.inst.name}__{n}", w, i) for u in found for n, w, i in u.ports]
-    decl = _decls(ports)
-    body = []
-    for u in found:
-        conns = ",\n".join(f"      .{n}({u.inst.name}__{n})" for n, _, _ in u.ports)
-        body += [f"  {u.module} u_{u.inst.name} (", conns, "  );"]
-    lines = [hdr.rstrip("\n"), "",
-             f"// Route properties of {spec.project.name}: each fabric and bridge on its own "
-             "(see hdl_bag.formal_gen.units).",
-             f"module {top} (", decl, ");", *body, "endmodule", "",
-             *(u.text for u in found)]  # fmt: skip
-    return "\n".join(lines), found
+def render_route(spec: Spec, netlist: Netlist, hdr: str) -> list[tuple[str, Unit]]:
+    """SPEC's route harnesses: per unit, its file's text (the unit's harness module, the
+    job's top) and the unit. Each unit has a job of its own: the units share nothing, and a
+    joint job's every solver step holds them all (bridges_pulp's eight units reached step 9
+    of 16 in 20 minutes)."""
+    out = []
+    for inst in units(netlist):
+        u = render_unit(spec, inst)
+        text = "\n".join([hdr.rstrip("\n"), "",
+                          f"// Route properties of {spec.project.name}'s {inst.kind} {inst.name} "
+                          "on its own (see hdl_bag.formal_gen.units).", u.text])  # fmt: skip
+        out.append((text, u))
+    return out
 
 
 def route_needs(netlist: Netlist) -> tuple[set[str], set[str]]:
-    """The checker files the route job reads: BAG's own (formal/) and the ZipCPU vendors."""
+    """The checker files the route jobs read: BAG's own (formal/) and the ZipCPU vendors."""
     from hdl_bag.formal_gen import _CHECKER
 
     own: set[str] = set()

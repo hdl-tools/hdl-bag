@@ -6,9 +6,9 @@ The mutants (mutations.py) each edit one table of one fabric in the generated pa
 package, or one in-house RTL file. Here a formal job of the config runs on the mutant and
 must fail one of its assertions, whose reference comes from the IR, not from the package:
 - the decode job (formal/<project>_decode.sv) for the decode tables and the decoder;
-- the route job (formal/<project>_route.sv) for the fixed priorities (D70) and the bridges'
-  address offsets (D69 part 3).
-The control is the same job on the unmutated config, which must pass.
+- the route jobs (formal/<project>_route_<unit>.sv, one per fabric or bridge) for the fixed
+  priorities (D70) and the bridges' address offsets (D69 part 3): the mutated units' jobs.
+The control is the same job, or every route job, on the unmutated config, which must pass.
 """
 
 from pathlib import Path
@@ -18,8 +18,12 @@ from mutations import MUTATIONS, RtlMutation
 from test_mutations import CONFIGS, IDS, RTL_IDS, RTL_TARGETS, TARGETS
 
 from hdl_bag.flows.formal import run_sby
+from hdl_bag.formal_gen.units import units
 from hdl_bag.gen import generate
+from hdl_bag.gen.netlist import build_netlist
+from hdl_bag.gen.render import camel
 from hdl_bag.ir import Spec, load
+from hdl_bag.templates import builtin_registry
 
 # Which job catches what: the decode job every table bug but the priorities; the route job
 # the priorities and the bridges' offsets.
@@ -38,15 +42,37 @@ def _spec(config: str) -> Spec:
 
 
 def _failed(root: Path, spec: Spec, job: str) -> list[str]:
-    """JOB's (decode or route) failures on the output at ROOT, as "<file>: <message>"."""
+    """JOB's (decode, or route_<unit>) failures on the output at ROOT, as "<file>: <message>"."""
     name = spec.project.name
     report = run_sby(root / "formal" / f"{name}_{job}.sby", root, timeout=1200)
     return [f"{f.file}: {f.message}" for f in report.findings]
 
 
+def _route_failed(root: Path, spec: Spec, unit_names: list[str]) -> list[str]:
+    """The failures of the route jobs of UNIT_NAMES (each its own job), in order."""
+    assert unit_names, "no route job to run"
+    return [f for u in unit_names for f in _failed(root, spec, f"route_{u}")]
+
+
+def _route_units(spec: Spec, *, source: str = "", prefix: str = "") -> list[str]:
+    """SPEC's route units (fabrics that decode, and bridges): all, or those whose template
+    reads rtl/inhouse/SOURCE, or the fabric whose package prefix (as the mutants name it) is
+    PREFIX."""
+    registry = builtin_registry()
+    found = units(build_netlist(spec))
+    if source:
+        manifests = {i.template: registry.get(i.template) for i in found}
+        found = [i for i in found if (m := manifests[i.template]) is not None
+                 and f"rtl/inhouse/{source}" in m.sources]  # fmt: skip
+    if prefix:
+        found = [i for i in found if camel(i.name) == prefix]
+    return [i.name for i in found]
+
+
 def _caught(failed: list[str], spec: Spec, job: str, label: str = "") -> None:
-    """FAILED includes an assertion of JOB's harness whose name contains LABEL."""
-    harness = f"formal/{spec.project.name}_{job}.sv: "
+    """FAILED includes an assertion of a harness of JOB (decode, or route: any unit's) whose
+    name contains LABEL."""
+    harness = f"formal/{spec.project.name}_{job}"
     assert any(f.startswith(harness) and "assertion" in f and label in f for f in failed), failed
 
 
@@ -57,6 +83,11 @@ def test_every_package_mutation_fails_a_formal_property() -> None:
     assert {m for m, _, _, _ in DECODE_TARGETS + ROUTE_TARGETS} == set(MUTATIONS)
     assert {n for n, _, _ in ROUTE_RTL} == {"axi2apb_offset", "axi2axil_offset",
                                             "axil2apb_offset"}  # fmt: skip
+    # Each route mutant has a unit job to fail: its fabric, or a bridge reading its file.
+    for _, config, fabric, _ in ROUTE_TARGETS:
+        assert _route_units(_spec(config), prefix=fabric), (config, fabric)
+    for name, mut, config in ROUTE_RTL:
+        assert _route_units(_spec(config), source=mut.file), (name, config)
 
 
 @pytest.mark.eda
@@ -72,11 +103,11 @@ def test_the_decode_job_holds_unmutated(tmp_path: Path, config: str) -> None:
 @pytest.mark.parametrize("config", sorted({t[1] for t in ROUTE_TARGETS}
                                           | {c for _, _, c in ROUTE_RTL}))  # fmt: skip
 def test_the_route_job_holds_unmutated(tmp_path: Path, config: str) -> None:
-    """The control: on each config the route mutants use, the unmutated route job passes,
+    """The control: on each config the route mutants use, every unmutated route job passes,
     covers included."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
-    assert _failed(tmp_path, spec, "route") == []
+    assert _route_failed(tmp_path, spec, _route_units(spec)) == []
 
 
 def _mutate_package(root: Path, spec: Spec, mutation: str, fabric: str, last: bool) -> None:
@@ -124,7 +155,8 @@ def test_the_route_job_catches_the_priority_inversion(tmp_path: Path, mutation: 
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
     _mutate_package(tmp_path, spec, mutation, fabric, last)
-    _caught(_failed(tmp_path, spec, "route"), spec, "route", "_before_")
+    _caught(_route_failed(tmp_path, spec, _route_units(spec, prefix=fabric)), spec, "route",
+            "_before_")  # fmt: skip
 
 
 @pytest.mark.eda
@@ -136,4 +168,5 @@ def test_the_route_job_catches_the_bridge_offset(tmp_path: Path, name: str, mut:
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
     _mutate_rtl(tmp_path, mut)
-    _caught(_failed(tmp_path, spec, "route"), spec, "route", "_in_window")
+    bridges = _route_units(spec, source=mut.file)
+    _caught(_route_failed(tmp_path, spec, bridges), spec, "route", "_in_window")

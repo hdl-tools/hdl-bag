@@ -11,7 +11,7 @@ compares in system addresses: ``<fabric>_aliased`` (an address after the master'
 and ``<fabric>_target`` (the slave port an aliased address goes to, or the slave count for
 an error). It never reads the generated package or the generator's decode tables
 (``gen.decode``), so a wrong table entry, which the Phase 4 mutants model, shows as a
-difference. The route job (``formal_gen.units``) uses the same functions.
+difference. The route jobs (``formal_gen.units``) use the same functions.
 
 The decode job's top is a generated harness, not the design. Per fabric it instantiates
 ``bag_addr_decode`` with the fabric's tables from the generated package, as the fabric

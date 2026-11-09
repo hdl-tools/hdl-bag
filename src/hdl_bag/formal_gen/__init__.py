@@ -14,10 +14,10 @@ Output layout (relative to the output directory)::
     formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
                                   a reference from the IR (D69; formal_gen.decode)
     formal/<project>_decode.sby   its job: a prove task (the check is combinational)
-    formal/<project>_route.sv     each in-house fabric and bridge on its own: slave-port
+    formal/<project>_route_<unit>.sv   one in-house fabric or bridge on its own: slave-port
                                   routing, fixed-priority arbitration, bridge windows
                                   (D69, D70; formal_gen.units)
-    formal/<project>_route.sby    its job: a bmc task and a cover task
+    formal/<project>_route_<unit>.sby  its job: a bmc task and a cover task
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
 sv-interface style), so they see its ports by name and the design needs no formal
@@ -815,33 +815,31 @@ def render_formal(spec: Spec, netlist: Netlist, top: str, files: list[str], incd
                                                          user_header))]  # fmt: skip
     from hdl_bag.formal_gen.units import render_route
 
-    route = render_route(spec, netlist, hdr)
-    if route is not None:
-        name = f"{spec.project.name}_route"
-        text, found = route
+    for text, unit in render_route(spec, netlist, hdr):
+        name = f"{spec.project.name}_route_{unit.inst.name}"
         out += [(f"formal/{name}.sv", text),
-                (f"formal/{name}.sby", render_route_sby(spec, found, files, incdirs, f"{name}.sv",
+                (f"formal/{name}.sby", render_route_sby(spec, unit, files, incdirs, f"{name}.sv",
                                                         user_header))]  # fmt: skip
     return out
 
 
-def render_route_sby(spec: Spec, found: list["Unit"], files: list[str], incdirs: list[str],
+def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[str],
                      props: str, user_header: str | None) -> str:  # fmt: skip
-    """The route job: ZipCPU's files read by Yosys's own frontend with one parameterised copy
-    per checker instance, then the design, BAG's own checkers and the route harness PROPS."""
+    """UNIT's route job: ZipCPU's files read by Yosys's own frontend with one parameterised
+    copy per checker instance, then the design, BAG's own checkers and the unit's harness
+    PROPS, whose module is the top."""
     from hdl_bag.formal_gen.units import ROUTE_DEPTH
 
-    zips = [z for u in found for z in u.zipcpu]
+    zips = unit.zipcpu
     prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
     for z in zips:
         sets = " ".join(f"-set {k} {v}" for k, v in z.params)
         prelude += [f"copy {z.vendor} {z.module}", f"chparam {sets} {z.module}"]
-    own = sorted({f for u in found for f in u.own})
+    own = sorted(unit.own)
     copy = [("rtl", "../rtl"), *((f, f) for f in own)]
     if zips:
         copy.append(("zipcpu", "vendor/zipcpu"))
-    top = f"bag_{spec.project.name}_route"
-    job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs,
+    job = sby_job(top=unit.module, files=[*files, *own, props], incdirs=incdirs,
                   depths={"bmc": ROUTE_DEPTH, "cover": ROUTE_DEPTH},
                   copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
                   prelude=prelude)  # fmt: skip
