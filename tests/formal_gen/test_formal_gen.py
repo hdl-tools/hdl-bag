@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import hdl_bag
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
@@ -375,6 +376,47 @@ def test_each_ahb_port_gets_bags_checker_bound_for_its_side(tmp_path: Path) -> N
     labels = set(re.findall(r"(proto_\w+): cover", text))
     assert {"proto_burst_m0", "proto_error_m0", "proto_error_s0"} <= labels
     assert "proto_burst_s0" not in labels
+
+
+def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
+    """The checks BRANCH (gen_design_is_slave or _master) of a checker assumes and asserts,
+    each found under the always block it belongs to: assumes at every solver step
+    (always_comb), asserts at the clock edge (always_ff)."""
+    part = text.split(f": {branch}\n", 1)[1].split("\n  end", 1)[0]
+    assumed, asserted, block = set(), set(), ""
+    for line in part.splitlines():
+        if m := re.match(r"\s*(always_comb|always_ff)\b", line):
+            block = m[1]
+        if m := re.search(r"\bassume \((\w+)\);", line):
+            assert block == "always_comb", line
+            assumed.add(m[1])
+        if m := re.search(r"\bassert \((\w+)\);", line):
+            assert block == "always_ff", line
+            asserted.add(m[1])
+    return assumed, asserted
+
+
+@pytest.mark.parametrize(("checker", "env_only", "design_only"), [
+    ("bag_faxi4.sv", {"ok_slave_cap"}, set()),
+    ("bag_fahb.sv", {"ok_burst_ends", "ok_idle_wait"}, {"ok_routed"}),
+])  # fmt: skip
+def test_every_environment_rule_is_assumed_at_every_step(
+    checker: str, env_only: set[str], design_only: set[str]
+) -> None:
+    """PR 2b review (every-step tests for the remaining environment rules): the two EDA tests
+    show one rule each holding at every solver step; this pins it for all of them. Each rule
+    asserted on the design on one side is assumed on the environment on the other, in an
+    always_comb block, so what the design passes on combinationally is legal at a trace's
+    last step too. The exceptions are one-sided by the spec: a slave environment's
+    acceptance cap (D66), an AHB-Lite master's fixed-burst ends and waiting IDLE (assumed
+    only), and the interconnect's HREADYOUT routing (asserted only)."""
+    text = (Path(hdl_bag.__file__).parent / "formal" / checker).read_text(encoding="utf-8")
+    env_master, design_slave = _rules(text, "gen_design_is_slave")
+    env_slave, design_master = _rules(text, "gen_design_is_master")
+    assert env_master and env_slave and design_master and design_slave  # the split found them
+    assert env_master - env_only == design_master - design_only
+    assert env_slave - env_only == design_slave - design_only
+    assert env_only <= env_master | env_slave and design_only <= design_master | design_slave
 
 
 def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
