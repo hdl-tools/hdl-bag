@@ -17,6 +17,10 @@ on:
         description: Save the ccache entries (the nightly only restores, to spare the cache limit)
         type: boolean
         default: true
+      timeout-minutes:
+        description: Each shard's time limit (the nightly's deep tests need more, D74)
+        type: number
+        default: 30
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ permissions:
 jobs:
   shard:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     strategy:
       fail-fast: false
       matrix:

@@ -15,6 +15,7 @@
  "tests/flows/test_formal_eda.py::test_a_design_master_burst_is_judged_by_the_axi_rules[32'hff4-8'd3-3'd2-2'd1-1'b0-False]": 0.77,
  "tests/flows/test_formal_eda.py::test_a_design_master_dropping_a_waiting_address_is_caught": 0.97,
  "tests/flows/test_formal_eda.py::test_a_design_master_ending_a_write_burst_early_is_caught": 1.28,
+ "tests/flows/test_formal_eda.py::test_a_design_master_sending_more_early_data_than_its_address_takes_is_caught": 10.0,
  "tests/flows/test_formal_eda.py::test_a_job_over_its_time_limit_stops": 8.16,
  "tests/flows/test_formal_eda.py::test_a_one_cycle_ahb_error_is_caught": 11.83,
  "tests/flows/test_formal_eda.py::test_a_register_on_a_gclk_marked_net_fails_the_same_check": 0.76,

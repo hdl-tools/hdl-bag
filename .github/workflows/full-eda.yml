@@ -17,7 +17,7 @@ jobs:
     if: github.event.label.name == 'full-eda'
     uses: ./.github/workflows/eda-shards.yml
     with:
-      marks: eda
+      marks: eda and not deep
     permissions:
       contents: read
       packages: read

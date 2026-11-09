@@ -24,7 +24,7 @@ from test_mutations import AF, AP, AXR, CONFIGS, IDS, RTL_IDS, RTL_TARGETS, SF, 
 
 from hdl_bag.flows.base import Finding
 from hdl_bag.flows.formal import run_sby
-from hdl_bag.formal_gen.units import render_unit, units
+from hdl_bag.formal_gen.units import ROUTE_DEPTH, render_unit, route_depth, units
 from hdl_bag.gen import generate
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.render import camel
@@ -78,10 +78,10 @@ def _spec(config: str) -> Spec:
     return load(CONFIGS / f"{config}.ir.yaml")
 
 
-def _failed(root: Path, spec: Spec, job: str) -> list[Finding]:
+def _failed(root: Path, spec: Spec, job: str, timeout: float = 1200) -> list[Finding]:
     """JOB's (decode, or route_<unit>) findings on the output at ROOT."""
     name = spec.project.name
-    return list(run_sby(root / "formal" / f"{name}_{job}.sby", root, timeout=1200).findings)
+    return list(run_sby(root / "formal" / f"{name}_{job}.sby", root, timeout=timeout).findings)
 
 
 def _route_failed(root: Path, spec: Spec, unit_names: list[str]) -> list[Finding]:
@@ -165,15 +165,36 @@ ROUTE_CONTROL_CONFIGS = sorted({t[1] for t in ROUTE_TARGETS + MISROUTE}
 ROUTE_CONTROL_CASES = [(c, u) for c in ROUTE_CONTROL_CONFIGS for u in _route_units(_spec(c))]
 
 
+def _deep(config: str, unit: str) -> bool:
+    """A route job deeper than ROUTE_DEPTH (a bridge across domains that narrows the data more
+    than once): the nightly runs it, with a longer time limit (D74)."""
+    spec = _spec(config)
+    inst = next(i for i in units(build_netlist(spec)) if i.name == unit)
+    return route_depth(render_unit(spec, inst))[1] > ROUTE_DEPTH
+
+
+DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)}
+DEEP_TIMEOUT_S = 3600
+
+
+def test_only_the_deepest_route_jobs_wait_for_the_nightly() -> None:
+    """D74: mixed_narrow_apb's br_c8 (AXI4-Lite 64 to APB 8 bits, across domains) needs 36
+    steps; its bmc reached step 27 in CI's 1200 s. Only such jobs carry the deep mark, which
+    the PR and main full runs skip and the nightly runs."""
+    assert {("p3/mixed_narrow_apb", "br_c8")} == DEEP_CONTROLS
+
+
 @pytest.mark.eda
-@pytest.mark.parametrize(("config", "unit"), ROUTE_CONTROL_CASES,
-                         ids=[f"{c}-{u}" for c, u in ROUTE_CONTROL_CASES])  # fmt: skip
+@pytest.mark.parametrize(("config", "unit"), [
+    pytest.param(c, u, id=f"{c}-{u}", marks=[pytest.mark.deep] if (c, u) in DEEP_CONTROLS else [])
+    for c, u in ROUTE_CONTROL_CASES])  # fmt: skip
 def test_the_route_job_holds_unmutated(tmp_path: Path, config: str, unit: str) -> None:
     """The control: on each config the route mutants use, every unmutated route job passes,
     covers included. With the misroute targets this runs both crossbars' route jobs."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
-    assert _failed(tmp_path, spec, f"route_{unit}") == []
+    timeout = DEEP_TIMEOUT_S if (config, unit) in DEEP_CONTROLS else 1200
+    assert _failed(tmp_path, spec, f"route_{unit}", timeout) == []
 
 
 def _mutate_package(root: Path, spec: Spec, mutation: str, fabric: str, last: bool) -> None:

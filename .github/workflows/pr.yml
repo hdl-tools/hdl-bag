@@ -99,14 +99,17 @@ jobs:
   eda-shard:
     # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold
     # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
-    # label is added). The full list runs on every push to main, nightly, and on demand.
+    # label is added). The full list runs on every push to main and on demand, without the
+    # deep tests (D74); the nightly runs everything, with longer shard limits.
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: >-
         ${{ ((github.event_name == 'pull_request'
               && !contains(github.event.pull_request.labels.*.name, 'full-eda'))
              || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
-            && 'eda and smoke' || 'eda' }}
+            && 'eda and smoke'
+            || (github.event_name == 'schedule' && 'eda' || 'eda and not deep') }}
+      timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 30 }}
       save-cache: ${{ github.event_name != 'schedule' }}
     permissions:
       contents: read
