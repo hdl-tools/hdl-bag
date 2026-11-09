@@ -828,7 +828,7 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     """UNIT's route job: ZipCPU's files read by Yosys's own frontend with one parameterised
     copy per checker instance, then the design, BAG's own checkers and the unit's harness
     PROPS, whose module is the top."""
-    from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH
+    from hdl_bag.formal_gen.units import route_depth
 
     zips = unit.zipcpu
     prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
@@ -839,10 +839,9 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     copy = [("rtl", "../rtl"), *((f, f) for f in own)]
     if zips:
         copy.append(("zipcpu", "vendor/zipcpu"))
-    # A unit in one clock domain has no clock ratio to explore: one clock, ROUTE_CYCLES edges
-    # (free clocks cost two solver steps an edge and the logic that models them).
-    multi = len(unit.clocks) > 1
-    depth = ROUTE_DEPTH if multi else ROUTE_CYCLES
+    # A unit in one clock domain has no clock ratio to explore: one clock (free clocks cost
+    # two solver steps an edge and the logic that models them).
+    multi, depth = route_depth(unit)
     job = sby_job(top=unit.module, files=[*files, *own, props], incdirs=incdirs,
                   depths={"bmc": depth, "cover": depth},
                   copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,

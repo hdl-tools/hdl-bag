@@ -544,15 +544,47 @@ def test_a_channel_the_ir_never_uses_keeps_its_assertion_and_has_no_cover(tmp_pa
 def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
     """CI: axi_xbar_rules's crossbar job reached step 7 of 16 in 20 minutes with free clocks,
     which cost two solver steps per edge and the logic that models them. A unit in one domain
-    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges, as
-    many as the free-clock depth gives. A bridge across domains keeps free clocks."""
+    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges (an
+    AXI4-Lite to 8-bit APB bridge's read response came at edge 8). A bridge across domains
+    keeps free clocks, ROUTE_DEPTH steps and 4 more per halving of the data width (measured:
+    mixed_cdc_chain's br_per, no conversion, last cover at step 21; mixed_narrow_apb's br_c8,
+    64 to 8 bits, at step 33)."""
+    assert (ROUTE_CYCLES, ROUTE_DEPTH) == (12, 24)
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
+    formal = tmp_path / "bp" / "formal"
+    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 12\ncover: mode cover\ncover: depth 12\nmulticlock off\n" in xbar
+    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
+    assert "bmc: depth 28\ncover: mode cover\ncover: depth 28\nmulticlock on\n" in cdc
+    generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
+    c8 = (tmp_path / "mn" / "formal" / "mixed_narrow_apb_route_br_c8.sby").read_text(
+        encoding="utf-8"
+    )
+    assert "bmc: depth 36\ncover: mode cover\ncover: depth 36\nmulticlock on\n" in c8
+
+
+def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
+    tmp_path: Path,
+) -> None:
+    """Local runs: br_lp (bridges_pulp, AXI4-Lite to APB, PULP's request path a fall-through
+    register) raised PSEL in the cycle it accepted the AR, before the harness had registered
+    the access; br_lite (mixed_narrow_apb, AXI4 to AXI4-Lite, a pass-through) raised the
+    downstream AWVALID while the upstream AW still waited for AWREADY. Both are legal. In one
+    domain the window check takes the upstream request being presented (valid, accepted or
+    not) at its own address; across domains (br_per) nothing passes the CDC before the
+    upstream handshake, so only a registered access counts."""
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
     formal = tmp_path / "formal"
-    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
-    assert ROUTE_CYCLES == ROUTE_DEPTH // 2 == 8
-    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
-    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")
-    assert "bmc: depth 16\ncover: mode cover\ncover: depth 16\nmulticlock on\n" in cdc
+    lp = (formal / "bridges_pulp_route_br_lp.sv").read_text(encoding="utf-8")
+    assert "  wire bag_up_req = (cfg_2_br_lp_axil_awvalid) || (cfg_2_br_lp_axil_arvalid);\n" in lp
+    assert ("  wire [31:0] bag_win_addr = bag_up_req ? ((cfg_2_br_lp_axil_awvalid) ? "
+            "cfg_2_br_lp_axil_awaddr : cfg_2_br_lp_axil_araddr) : bag_up_addr;\n"
+            ) in lp  # fmt: skip
+    assert "br_lp_p_in_window: assert ((bag_busy || bag_up_req) && ((br_lp_2_lp_apb3_paddr ^ " in lp
+    assert "32'(65'(bag_win_addr) + " in lp
+    per = (formal / "bridges_pulp_route_br_per.sv").read_text(encoding="utf-8")
+    assert "br_per_p_in_window: assert (bag_busy && ((br_per_2_per_apb4_paddr ^ " in per
+    assert "bag_up_req" not in per
 
 
 def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
@@ -624,8 +656,9 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     assert " --top bag_ahb_fixed_unit_ahb " in job
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
     # One clock domain: one clock, ROUTE_CYCLES edges.
-    assert ROUTE_CYCLES == 8
-    assert "bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in job
+    assert ROUTE_CYCLES == 12
+    assert ("bmc: mode bmc\nbmc: depth 12\ncover: mode cover\ncover: depth 12\n"
+            "multiclock off\n") in job  # fmt: skip
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
     xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
@@ -643,7 +676,9 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     )
     assert "module bag_demo_ss_unit_br_ahb2aon (" in bridge
     assert "module bag_demo_ss_unit_ahb_bus (" not in bridge
-    # The bridge's window: the downstream address within the upstream word, both windows 0.
-    assert ("br_ahb2aon_p_in_window: assert (bag_busy && ((br_ahb2aon_2_aon_apb_apb4_paddr ^ "
-            "32'(65'(bag_up_addr) + 65'(64'h0000_0000_0000_0000) - "
-            "65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);") in bridge  # fmt: skip
+    # The bridge's window: the downstream address within the upstream word, both windows 0
+    # (one domain: the request being presented counts too).
+    assert ("br_ahb2aon_p_in_window: assert ((bag_busy || bag_up_req) && "
+            "((br_ahb2aon_2_aon_apb_apb4_paddr ^ 32'(65'(bag_win_addr) + "
+            "65'(64'h0000_0000_0000_0000) - 65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);"
+            ) in bridge  # fmt: skip

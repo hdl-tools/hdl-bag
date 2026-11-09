@@ -36,9 +36,15 @@ from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_s
 from hdl_bag.tests_gen.route_model import window
 
 # Bounded depth of a route job whose unit spans clock domains, in solver steps (free clocks:
-# about half as many edges); a unit in one domain runs on one clock for as many edges.
-ROUTE_DEPTH = 16
-ROUTE_CYCLES = ROUTE_DEPTH // 2
+# about two per edge), plus ROUTE_DEPTH_PER_HALVING for each halving of a bridge's data width
+# (each narrow transfer is another APB access). Measured: mixed_cdc_chain's br_per (a round
+# trip through axi_cdc, no conversion) reached its last cover at step 21, mixed_narrow_apb's
+# br_c8 (64 to 8 bits) at step 33.
+ROUTE_DEPTH = 24
+ROUTE_DEPTH_PER_HALVING = 4
+# A unit in one clock domain runs on one clock, for this many edges (an AXI4-Lite to 8-bit
+# APB bridge's read response came at edge 8).
+ROUTE_CYCLES = 12
 BRIDGES = ("bag_ahb2apb", "bag_ahb2axi", "bag_apb2ahb", "bag_apb2axi", "bag_axi2ahb",
            "bag_axi2apb", "bag_axi2axil")  # fmt: skip
 
@@ -71,6 +77,16 @@ class Unit:
     zipcpu: list[ZipChecker]
     own: set[str]
     clocks: tuple[str, ...]  # one per clock domain the unit touches
+
+
+def route_depth(unit: Unit) -> tuple[bool, int]:
+    """UNIT's job: whether it needs free clocks (it spans domains), and its depth."""
+    if len(unit.clocks) == 1:
+        return False, ROUTE_CYCLES
+    up, down = unit.inst.up, unit.inst.down
+    ratio = up.data_width // down.data_width if up is not None and down is not None else 1
+    halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
+    return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * halvings
 
 
 def units(netlist: Netlist) -> list[Instance]:
@@ -485,13 +501,34 @@ class _Harness:
         elif p is Protocol.AHB_LITE:
             self.body.append(f"  always_comb if (bag_busy) assume (!{v(up, 'htrans')}[1]);")
         dw = dn.addr_width
-        exp = f"{dw}'(65'(bag_up_addr) + 65'({lit(64, w_up)}) - 65'({lit(64, w_dn)}))"
+        open_, win = "bag_busy", "bag_up_addr"
+        if du == dd:
+            # In one domain a bridge may forward the request it is presented before its own
+            # handshake (a pass-through, or a fall-through request path): that request
+            # counts too, at its own address (held while it waits). Across domains nothing
+            # passes the CDC before the upstream handshake.
+            if p in (Protocol.AXI4, Protocol.AXI4_LITE):
+                req = [(v(up, "awvalid"), v(up, "awaddr")), (v(up, "arvalid"), v(up, "araddr"))]
+            elif p is Protocol.AHB_LITE:
+                sel = v(up, "hsel") if "hsel" in up.signals else "1'b1"
+                req = [(f"{sel} && {v(up, 'htrans')}[1]", v(up, "haddr"))]
+            else:
+                req = [(v(up, "psel"), v(up, "paddr"))]
+            now = req[-1][1]
+            for c, a in reversed(req[:-1]):
+                now = f"(({c}) ? {a} : {now})"
+            self.body += [
+                f"  wire bag_up_req = {' || '.join(f'({c})' for c, _ in req)};",
+                f"  wire [{uw - 1}:0] bag_win_addr = bag_up_req ? {now} : bag_up_addr;",
+            ]
+            open_, win = "(bag_busy || bag_up_req)", "bag_win_addr"
+        exp = f"{dw}'(65'({win}) + 65'({lit(64, w_up)}) - 65'({lit(64, w_dn)}))"
         mask = f"~{dw}'({beat - 1})"
         for ch, valid, addr, _, _ in self.requests(dn):
             label = f"{br.name}_{ch}_in_window"
             self.body += [
                 f"  always @(posedge {cd}) if (bag_live_{du} && bag_live_{dd} && {valid}) "
-                f"{label}: assert (bag_busy && (({addr} ^ {exp}) & {mask}) == '0);",
+                f"{label}: assert ({open_} && (({addr} ^ {exp}) & {mask}) == '0);",
                 f"  always @(posedge {cd}) cover_{label}: "
                 f"cover (bag_live_{du} && bag_live_{dd} && {valid});",
             ]

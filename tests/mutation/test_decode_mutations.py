@@ -24,12 +24,12 @@ from test_mutations import AF, AP, AXR, CONFIGS, IDS, RTL_IDS, RTL_TARGETS, SF, 
 
 from hdl_bag.flows.base import Finding
 from hdl_bag.flows.formal import run_sby
-from hdl_bag.formal_gen.units import units
+from hdl_bag.formal_gen.units import render_unit, units
 from hdl_bag.gen import generate
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.render import camel
 from hdl_bag.ir import Spec, load
-from hdl_bag.templates import builtin_registry
+from hdl_bag.tests_gen.route_model import window
 
 # Which job catches what: the decode job every table bug but the priorities; the route job
 # the priorities, the bridges' offsets, and (MISROUTE) a decode bug of each fabric kind.
@@ -45,8 +45,16 @@ MISROUTE = [("swapped_port_index", XR, "Xbar", F), ("swapped_port_index", AXR, "
 MISROUTE_IDS = [dict(zip(TARGETS, IDS, strict=True))[t] for t in MISROUTE]
 DECODE_RTL = [t for t in RTL_TARGETS if t[1].file == "bag_addr_decode.sv"]
 DECODE_RTL_IDS = [i for t, i in zip(RTL_TARGETS, RTL_IDS, strict=True) if t in DECODE_RTL]
-ROUTE_RTL = [t for t in RTL_TARGETS if t[0].endswith("_offset")]
-ROUTE_RTL_IDS = [i for t, i in zip(RTL_TARGETS, RTL_IDS, strict=True) if t in ROUTE_RTL]
+# The bridge offset mutants, each on a config with a pass-through N bridge of its file. Phase 4
+# put axi2apb_offset on bridges_pulp, whose br_per crosses clock domains: on the mutant its
+# free-clock job reached step 18 of 24 in 20 minutes. mixed_narrow_apb's br_a8 and br_a16 are
+# the same bridge with an offset, in one domain.
+ROUTE_CONFIG = {"axi2apb_offset": "p3/mixed_narrow_apb"}
+ROUTE_RTL = [(n, mut, ROUTE_CONFIG.get(n, c)) for n, mut, c in RTL_TARGETS if n.endswith("_offset")]
+ROUTE_RTL_IDS = [f"{n}-{c.split('/')[1]}" for n, _, c in ROUTE_RTL]
+# Route controls beyond the configs the mutants use: bridges_pulp has AXI4 and CDC bridges and
+# an ID-less AXI4 master on its crossbar.
+ROUTE_CONTROLS = ["p3/bridges_pulp"]
 # RTL mutants no address or arbitration property can see: what a bridge drives besides the
 # address (protection, strobes, responses). The Phase 4 simulation gate catches them.
 OUT_OF_SCOPE = {"axi2apb_pprot", "axi2apb_pstrb", "axi2apb_pslverr", "axil2apb_pslverr",
@@ -83,18 +91,25 @@ def _route_failed(root: Path, spec: Spec, unit_names: list[str]) -> list[Finding
 
 
 def _route_units(spec: Spec, *, source: str = "", prefix: str = "") -> list[str]:
-    """SPEC's route units (fabrics that decode, and bridges): all, or those whose template
-    reads rtl/inhouse/SOURCE, or the one fabric whose package prefix (as the mutants name
-    it) is PREFIX."""
-    registry = builtin_registry()
+    """SPEC's route units (fabrics that decode, and bridges): all, or the one fabric whose
+    package prefix (as the mutants name it) is PREFIX, or the bridges that instantiate the
+    module of rtl/inhouse/SOURCE with an offset to get wrong (their fabrics' windows
+    differ). Of those, the ones in one clock domain when there are any: their jobs run on
+    one clock, while on a mutant a free-clock job through a CDC can outlast the time limit."""
     found = units(build_netlist(spec))
-    if source:
-        manifests = {i.template: registry.get(i.template) for i in found}
-        found = [i for i in found if (m := manifests[i.template]) is not None
-                 and f"rtl/inhouse/{source}" in m.sources]  # fmt: skip
     if prefix:
         found = [i for i in found if camel(i.name) == prefix]
         assert len(found) <= 1, (prefix, [i.name for i in found])
+    if source:
+        fabrics = {f.name: f for f in spec.fabrics}
+        module = source.removesuffix(".sv")
+        found = [i for i in found if i.bridge is not None
+                 and re.search(rf"^\s*{module} #\(", render_unit(spec, i).text, re.M)
+                 and window(spec, fabrics[i.bridge.upstream])
+                 != window(spec, fabrics[i.bridge.downstream])]  # fmt: skip
+        sync = [i for i in found if i.up is not None and i.down is not None
+                and i.up.domain == i.down.domain]  # fmt: skip
+        found = sync or found
     return [i.name for i in found]
 
 
@@ -145,7 +160,8 @@ def test_the_decode_job_holds_unmutated(tmp_path: Path, config: str) -> None:
 
 @pytest.mark.eda
 @pytest.mark.parametrize("config", sorted({t[1] for t in ROUTE_TARGETS + MISROUTE}
-                                          | {c for _, _, c in ROUTE_RTL}))  # fmt: skip
+                                          | {c for _, _, c in ROUTE_RTL}
+                                          | set(ROUTE_CONTROLS)))  # fmt: skip
 def test_the_route_job_holds_unmutated(tmp_path: Path, config: str) -> None:
     """The control: on each config the route mutants use, every unmutated route job passes,
     covers included. With the misroute targets this runs both crossbars' route jobs."""
