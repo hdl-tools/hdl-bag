@@ -450,6 +450,24 @@ def test_a_slave_nothing_can_reach_gets_no_checker(monkeypatch: pytest.MonkeyPat
     assert "clkrst0" not in ports and "pmu0" in ports
 
 
+def test_an_axi4_or_ahb_slave_gets_only_the_accesses_the_ir_sends_it(tmp_path: Path) -> None:
+    """PR 2b review (the unreachable-slave policy): BAG's AXI4 and AHB-Lite checkers check a
+    slave port whatever the route model says, as ZipCPU's do with F_OPT_READ_ONLY: the
+    design never sends a read-only slave a write (axi_shared_fixed's s1, bridges_inhouse_cdc's
+    rom), sampled at the clock edge out of reset."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path / "sf", P3)
+    sf = (tmp_path / "sf" / "formal" / "axi_shared_fixed_protocol.sv").read_text(encoding="utf-8")
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_write_s1: assert (!(s1_axi_awvalid || s1_axi_wvalid));\n") in sf  # fmt: skip
+    assert "proto_no_read_s1" not in sf and "proto_no_write_s0" not in sf
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path / "bc", P3)
+    bc = (tmp_path / "bc" / "formal" / "bridges_inhouse_cdc_protocol.sv").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"\) proto_no_write_rom: assert \(!\(rom_ahb_hsel && rom_ahb_htrans\[1\] "
+                     r"&& rom_ahb_hwrite\)\);\n", bc), bc[:0]  # fmt: skip
+
+
 def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
     """So each cover reached is a state the bounded check explored."""
     generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)

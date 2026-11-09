@@ -662,7 +662,22 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
         covers.append((f"proto_b_error_{bus.name}",
                        f"{v('bvalid')} && {v('bready')} && {v('bresp')}[1]"))  # fmt: skip
     lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
+    if bus.is_slave:
+        lines += _only_what_reaches(bus, dom, can, write=f"{v('awvalid')} || {v('wvalid')}",
+                                    read=v("arvalid"))  # fmt: skip
     return lines
+
+
+def _only_what_reaches(bus: Bus, dom: Domain, can: set[str], write: str, read: str) -> list[str]:
+    """On slave port BUS, the design sends no write (WRITE: its request is active) or read
+    (READ) the route model never sends there (CAN): the policy ZipCPU's AXI4-Lite checker has
+    with F_OPT_READ_ONLY and F_OPT_WRITE_ONLY, and on a slave nothing reaches, neither."""
+    out = []
+    for kind, active in (("write", write), ("read", read)):
+        if kind not in can:
+            out.append(f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
+                       f"proto_no_{kind}_{bus.name}: assert (!({active}));")  # fmt: skip
+    return out
 
 
 def ahb_ports(netlist: Netlist) -> list[Bus]:
@@ -711,6 +726,10 @@ def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
         covers.append(("error", "error") if bus.is_slave else ("burst", "seq"))
     lines += [f"  always_comb proto_{label}_{bus.name}: cover (bag_{bus.name}_{event});"
               for label, event in covers]  # fmt: skip
+    if bus.is_slave:
+        req = f"{v('hsel')} && {v('htrans')}[1]"
+        lines += _only_what_reaches(bus, dom, can, write=f"{req} && {v('hwrite')}",
+                                    read=f"{req} && !{v('hwrite')}")  # fmt: skip
     return lines
 
 
