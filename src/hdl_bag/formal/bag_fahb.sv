@@ -67,6 +67,12 @@ module bag_fahb #(
   localparam int unsigned MaxSize = $clog2(DataWidth / 8);
   localparam logic [1:0] Idle = 2'b00, Busy = 2'b01, NonSeq = 2'b10, Seq = 2'b11;
 
+  // HSIZE codes widths from 8 to 1024 bits.
+  if (DataWidth < 8 || DataWidth > 1024 || (DataWidth & (DataWidth - 1)) != 0)
+  begin : gen_check_data
+    $error("bag_fahb: DataWidth must be a power of two from 8 to 1024");
+  end
+
   // `live`: this edge and the one before were out of reset.
   logic was_out = 1'b0;
   always_ff @(posedge clk_i) was_out <= rst_ni;

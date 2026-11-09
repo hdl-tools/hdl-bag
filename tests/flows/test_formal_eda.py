@@ -5,6 +5,7 @@ quiet-in-reset jobs on real designs, a reset bug they must catch, and the time l
 
 import re
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -79,16 +80,19 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
     ("config", "jobs"),
     [("ahb_fixed", ("protocol", "reset")), ("ahb2apb_pt", ("protocol", "reset")),
      ("apb4_min", ("protocol", "reset")), ("apb4_rules", ("protocol", "reset")),
-     ("axil_shared_one", ("protocol", "reset"))],
+     ("axil_shared_one", ("protocol", "reset")), ("axi_shared_one", ("protocol", "reset")),
+     ("ahb_single", ("protocol", "reset"))],
 )  # fmt: skip
 def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, ...]) -> None:
-    """ahb_fixed asserts its reset synchronously (the synchronizer's stages come first);
-    ahb2apb_pt has a bridge with state on both sides; apb4_min has two reset groups and an
-    alias pin; apb4_rules has a sync-assertion reset on APB ports, with read-only,
-    write-only and secure slaves; axil_shared_one has AXI4-Lite ports. Every cover is
-    reached (the protocol job's at its bmc depth), so no assertion holds vacuously; the
-    AXI4-Lite and APB ports pass ZipCPU's protocol checkers (D60)."""
-    where = P3 if config.startswith("axil") else P2
+    """ahb_fixed asserts its reset synchronously and deasserts it asynchronously, so it has
+    no synchronizer and its reset acts at once; ahb2apb_pt has a bridge with state on both
+    sides; apb4_min has two reset groups and an alias pin; apb4_rules has a sync-assertion
+    reset on APB ports, with read-only, write-only and secure slaves; axil_shared_one has
+    AXI4-Lite ports; axi_shared_one has AXI4 ports (bag_faxi4); ahb_single is the AHB-Lite
+    mutants' base. Every cover is reached (the protocol job's at its bmc depth), so no
+    assertion holds vacuously; the AXI4-Lite and APB ports pass ZipCPU's protocol checkers
+    (D60), the AXI4 and AHB-Lite ports BAG's own."""
+    where = P3 if config.startswith(("axil", "axi_")) else P2
     spec = load(where / f"{config}.ir.yaml")
     out = generate(spec, tmp_path, where)
     report = run_formal(out, timeout=600)
@@ -212,10 +216,13 @@ def _axi4_props(design_is_slave: bool, check: str) -> str:
 
 
 def _axi4_tiny(root: Path, design_is_slave: bool, drive: dict[str, str], check: str = "",
-               props: str | None = None) -> Report:  # fmt: skip
+               props: str | None = None, mode: Literal["bmc", "prove", "cover"] = "bmc",
+               depth: int = 12, extra: str = "",
+               checker: str | None = None) -> Report:  # fmt: skip
     """A design t on one AXI4 port: it drives the slave's signals (DESIGN_IS_SLAVE) or the
-    master's, each from DRIVE or 0, and takes the others from the environment, which
-    bag_faxi4 constrains. Returns the bmc report."""
+    master's, each from DRIVE or 0, with EXTRA (registers) in its body, and takes the others
+    from the environment, which bag_faxi4 (or CHECKER, a changed copy) constrains. Returns
+    the report of the MODE run."""
     ports = ", ".join(
         f"{'output' if master != design_is_slave else 'input'} logic [{w - 1}:0] {n}"
         for n, w, master in _AXI4
@@ -225,14 +232,15 @@ def _axi4_tiny(root: Path, design_is_slave: bool, drive: dict[str, str], check: 
                    for n, _, master in _AXI4 if master != design_is_slave)  # fmt: skip
     (root / "rtl").mkdir(parents=True)
     (root / "rtl" / "t.sv").write_text(
-        f"module t (input logic clk, input logic rst_n, {ports});\n{body}endmodule\n",
+        f"module t (input logic clk, input logic rst_n, {ports});\n{extra}{body}endmodule\n",
         encoding="utf-8",
     )
-    (root / "bag_faxi4.sv").write_text(FAXI4.read_text(encoding="utf-8"), encoding="utf-8")
+    text = checker if checker is not None else FAXI4.read_text(encoding="utf-8")
+    (root / "bag_faxi4.sv").write_text(text, encoding="utf-8")
     text = props if props is not None else _axi4_props(design_is_slave, check)
     (root / "t_props.sv").write_text(text, encoding="utf-8")
     return prove([Path("rtl/t.sv")], "t", root, properties=[Path("bag_faxi4.sv"),
-                 Path("t_props.sv")], depth=12, mode="bmc")  # fmt: skip
+                 Path("t_props.sv")], depth=depth, mode=mode)  # fmt: skip
 
 
 def test_an_axi4_slave_environment_answers_no_id_it_was_not_asked(tmp_path: Path) -> None:
@@ -260,17 +268,37 @@ def test_an_axi4_slave_environment_holds_its_rules_at_every_step(tmp_path: Path)
     assert report.ok, report.format()
 
 
-def test_an_axi4_slave_environment_accepts_no_more_than_the_tables_hold(tmp_path: Path) -> None:
-    """The design is a master that keeps opening single-beat reads and writes and never
-    takes a response. A crossbar may legally keep more open on one port than bag_faxi4's
-    tables hold (axi_xbar_pow2: a 5th read to s3), so the environment slave stops accepting
-    once a table is full, as a slave with that acceptance capability may (D66). The design's
-    side of the bound, tracker_has_room_*, then holds."""
-    report = _axi4_tiny(tmp_path, False, {
-        "awvalid": "rst_n", "wvalid": "rst_n", "wlast": "1'b1", "awburst": "2'd1",
-        "arvalid": "rst_n", "arburst": "2'd1",
-    })  # fmt: skip
+# What a design master keeps opening, taking no response, and the table it fills: completed
+# writes (B), addresses waiting for data, data bursts waiting for an address, reads (R).
+_FILLS = {
+    "writes": ({"awvalid": "rst_n", "wvalid": "rst_n", "wlast": "1'b1", "awburst": "2'd1"},
+               "tracker_has_room_for_writes"),
+    "addresses": ({"awvalid": "rst_n", "awburst": "2'd1"}, "tracker_has_room_for_writes"),
+    "data": ({"wvalid": "rst_n", "wlast": "1'b1"}, "tracker_has_room_for_writes"),
+    "reads": ({"arvalid": "rst_n", "arburst": "2'd1"}, "tracker_has_room_for_reads"),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("fill", sorted(_FILLS))
+def test_an_axi4_slave_environment_accepts_no_more_than_the_tables_hold(
+    tmp_path: Path, fill: str
+) -> None:
+    """The design is a master that keeps opening single-beat transactions of one kind and
+    never takes a response. A crossbar may legally keep more open on one port than
+    bag_faxi4's tables hold (axi_xbar_pow2: a 5th read to s3), so the environment slave
+    stops accepting once the table they fill is full, as a slave with that acceptance
+    capability may (D66). The design's side of the bound, tracker_has_room_*, then holds;
+    without the cap it fails within the depth, so the pass is not vacuous (formal review of
+    PR 2b)."""
+    drive, room = _FILLS[fill]
+    report = _axi4_tiny(tmp_path / "cap", False, drive, depth=16)
     assert report.ok, report.format()
+    text = FAXI4.read_text(encoding="utf-8")
+    assert text.count("        assume (ok_slave_cap);\n") == 1
+    uncapped = text.replace("        assume (ok_slave_cap);\n", "")
+    report = _axi4_tiny(tmp_path / "uncapped", False, drive, depth=16, checker=uncapped)
+    failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
+    assert any(f"assertion {room} fails" in m for m in failed), report.format()
 
 
 def test_an_axi4_slave_environment_gives_exokay_only_to_exclusive_accesses(
@@ -295,12 +323,197 @@ def test_an_axi4_slave_environment_gives_exokay_only_to_exclusive_accesses(
     assert report.ok, report.format()
 
 
-def test_an_axi4_slave_design_answering_an_unasked_id_is_caught(tmp_path: Path) -> None:
-    """The design is a slave that raises BVALID on ID 3 with no write ever made: the checker
-    must fail it, whichever ID that is (D64)."""
-    report = _axi4_tiny(tmp_path, True, {"bvalid": "rst_n", "bid": "2'd3"})
+def test_an_axi4_slave_environment_may_give_exokay_to_an_exclusive_access(
+    tmp_path: Path,
+) -> None:
+    """The control for the test above: with AxLOCK high on single-beat 4-byte accesses at
+    address 0 (legal exclusive accesses), the environment slave can still answer EXOKAY on
+    both channels, so the EXOKAY rule does not forbid it outright."""
+    props = _axi4_props(False, "").replace(
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n\n  end\n",
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n"
+        "    exokay_b: cover (bvalid && bresp == 2'b01);\n"
+        "    exokay_r: cover (rvalid && rresp == 2'b01);\n"
+        "  end\n",
+    )
+    assert "exokay_r" in props
+    report = _axi4_tiny(tmp_path, False, {
+        "awvalid": "rst_n", "awsize": "3'd2", "awburst": "2'd1", "awlock": "1'b1",
+        "wvalid": "rst_n", "wlast": "1'b1", "wstrb": "4'hf",
+        "arvalid": "rst_n", "arsize": "3'd2", "arburst": "2'd1", "arlock": "1'b1",
+        "bready": "1'b1", "rready": "1'b1",
+    }, props=props, mode="cover")  # fmt: skip
+    assert report.ok, report.format()
+
+
+def test_an_address_stored_as_the_write_fifo_fills_and_drains_is_kept(tmp_path: Path) -> None:
+    """The design is a slave that always takes addresses and data. The environment master
+    sends four single-beat addresses with no data, so bag_faxi4's write FIFO is full (4
+    entries, D66), then a fifth address, AWLEN 1, at the same edge as the first burst's WLAST:
+    one entry leaves as one arrives. The fifth must be kept, so its burst may then take two
+    beats. The FIFO's tail index was computed at 32 bits from a truncated count, so at a full
+    count it was out of range (RTL and formal reviews of PR 2b). The LRM drops such a write,
+    leaving a copy of the fourth address (AWLEN 0), which forces WLAST on the first beat; yosys
+    happened to wrap the index onto the right entry. Checked against a copy of the old code
+    with the write dropped at a full count: the cover is then unreached."""
+    props = _axi4_props(True, "").replace(
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n\n  end\n",
+        "  logic [2:0] aws = '0;  // addresses accepted\n"
+        "  always_ff @(posedge clk)\n"
+        "    if (!rst_n) aws <= '0;\n"
+        "    else if (awvalid && awready && aws != 3'd7) aws <= aws + 3'd1;\n"
+        "  always_comb if (rst_n) begin\n"
+        "    if (awvalid) assume (awlen == (aws == 3'd4 ? 8'd1 : 8'd0));\n"
+        "    if (aws < 3'd4) assume (!wvalid);\n"
+        "    if (aws == 3'd4) assume (wvalid == awvalid && (!awvalid || wlast));\n"
+        "    if (aws > 3'd4) assume (!awvalid);\n"
+        "  end\n"
+        "  always_ff @(posedge clk) if (rst_n && was_out)\n"
+        "    two_beat_burst: cover (wvalid && wready && !wlast);\n",
+    )
+    assert "two_beat_burst" in props
+    report = _axi4_tiny(tmp_path, True, {"awready": "1'b1", "wready": "1'b1"}, props=props,
+                        mode="cover", depth=24)  # fmt: skip
+    assert report.ok, report.format()
+
+
+@pytest.mark.parametrize("ident", range(4))
+@pytest.mark.parametrize(("channel", "rule"), [("b", "b_only_for_a_complete_write"),
+                                               ("r", "r_only_for_an_open_read")])  # fmt: skip
+def test_an_axi4_slave_design_answering_an_unasked_id_is_caught(
+    tmp_path: Path, channel: str, rule: str, ident: int
+) -> None:
+    """The design is a slave that raises BVALID (or RVALID) on one ID with nothing ever
+    asked: the checker must fail it, whichever ID that is (D64)."""
+    drive = {f"{channel}valid": "rst_n", f"{channel}id": f"2'd{ident}", "rlast": "1'b1"}
+    report = _axi4_tiny(tmp_path, True, drive)
     failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
-    assert any("assertion b_only_for_a_complete_write fails" in m for m in failed), report.format()
+    assert any(f"assertion {rule} fails" in m for m in failed), report.format()
+
+
+# A design slave answering one single-beat access at a time on each channel, with RESP and
+# RLAST as given: it takes an address (with its data, for a write) only while idle, and
+# holds its response until taken.
+_ANSWERS = """  logic bv = 1'b0, rv = 1'b0;
+  logic [1:0] bi = '0, ri = '0;
+  always_ff @(posedge clk)
+    if (!rst_n) begin bv <= 1'b0; rv <= 1'b0; end
+    else begin
+      if (bv && bready) bv <= 1'b0;
+      else if (!bv && awvalid && wvalid) begin bv <= 1'b1; bi <= awid; end
+      if (rv && rready) rv <= 1'b0;
+      else if (!rv && arvalid) begin rv <= 1'b1; ri <= arid; end
+    end
+"""
+
+
+def _assuming(condition: str) -> str:
+    """bag_faxi4 around a design slave, with CONDITION assumed of the environment master
+    whenever out of reset: from the first edge, as the checker records from there."""
+    props = _axi4_props(True, "").replace(
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n\n  end\n",
+        f"  always_comb if (rst_n) single_beat: assume ({condition});\n",
+    )
+    assert "single_beat" in props
+    return props
+
+
+def _answering_slave(resp: str, rlast: str) -> dict[str, str]:
+    return {"awready": "!bv && awvalid && wvalid", "wready": "!bv && awvalid && wvalid",
+            "bvalid": "bv", "bid": "bi", "bresp": resp, "arready": "!rv", "rvalid": "rv",
+            "rid": "ri", "rresp": resp, "rlast": rlast}  # fmt: skip
+
+
+@pytest.mark.parametrize("lock", [0, 1])
+def test_an_axi4_slave_design_giving_exokay_to_a_normal_access_is_caught(
+    tmp_path: Path, lock: int
+) -> None:
+    """The design is a slave that answers every single-beat access EXOKAY. For a normal
+    access (AxLOCK low) the checker must fail it on both channels (A7.2); for an exclusive
+    one it is legal, so nothing fails."""
+    props = _assuming(f"wlast && awlen == 8'd0 && arlen == 8'd0 && awlock == 1'b{lock}"
+                      f" && arlock == 1'b{lock}")  # fmt: skip
+    report = _axi4_tiny(tmp_path, True, _answering_slave("2'b01", "1'b1"), props=props,
+                        extra=_ANSWERS)  # fmt: skip
+    if lock:
+        assert report.ok, report.format()
+        return
+    failed = {f.message.split(": ", 1)[1].split(" (")[0] for f in report.findings}
+    assert failed <= {"assertion b_exokay_only_if_exclusive fails",
+                      "assertion r_exokay_only_if_exclusive fails"}, report.format()  # fmt: skip
+    assert failed, report.format()
+
+
+def test_an_axi4_slave_design_ending_a_read_early_or_late_is_caught(tmp_path: Path) -> None:
+    """The design is a slave that answers single-beat reads with RLAST low: the checker must
+    fail rlast_on_the_last_beat."""
+    report = _axi4_tiny(tmp_path, True, _answering_slave("2'b00", "1'b0"),
+                        props=_assuming("wlast && awlen == 8'd0 && arlen == 8'd0"),
+                        extra=_ANSWERS)  # fmt: skip
+    failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
+    assert failed, report.format()
+    assert all("assertion rlast_on_the_last_beat fails" in m for m in failed), report.format()
+
+
+# (AWADDR, AWLEN, AWSIZE, AWBURST, AWLOCK, legal) on a 32-bit bus, for a design master
+# (A3.4.1, A7.2.4).
+_BURSTS = [
+    ("32'hff0", "8'd3", "3'd2", "2'd1", "1'b0", True),    # INCR ending at the 4 KB line
+    ("32'hff4", "8'd3", "3'd2", "2'd1", "1'b0", False),   # INCR crossing it by one beat
+    ("32'h44", "8'd15", "3'd2", "2'd2", "1'b0", True),    # WRAP16
+    ("32'h0", "8'd2", "3'd2", "2'd2", "1'b0", False),     # WRAP of 3 beats
+    ("32'h2", "8'd3", "3'd2", "2'd2", "1'b0", False),     # WRAP not aligned to its size
+    ("32'h0", "8'd15", "3'd2", "2'd0", "1'b0", True),     # FIXED of 16 beats
+    ("32'h0", "8'd16", "3'd2", "2'd0", "1'b0", False),    # FIXED of 17 beats
+    ("32'h0", "8'd0", "3'd3", "2'd1", "1'b0", False),     # AWSIZE above the bus
+    ("32'h0", "8'd0", "3'd2", "2'd3", "1'b0", False),     # reserved AWBURST
+    ("32'h40", "8'd15", "3'd2", "2'd1", "1'b1", True),    # exclusive, 64 bytes, aligned
+    ("32'h0", "8'd2", "3'd2", "2'd1", "1'b1", False),     # exclusive of 12 bytes
+    ("32'h4", "8'd1", "3'd2", "2'd1", "1'b1", False),     # exclusive not aligned to 8 bytes
+    ("32'h0", "8'd16", "3'd0", "2'd1", "1'b1", False),    # exclusive of 17 beats
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("addr", "length", "size", "burst", "lock", "legal"), _BURSTS)
+def test_a_design_master_burst_is_judged_by_the_axi_rules(
+    tmp_path: Path, addr: str, length: str, size: str, burst: str, lock: str, legal: bool
+) -> None:
+    """The design is a master offering one write address, held until taken: the checker
+    passes it if the burst is legal and fails aw_burst_legal if not."""
+    report = _axi4_tiny(tmp_path, False, {"awvalid": "rst_n", "awaddr": addr, "awlen": length,
+                        "awsize": size, "awburst": burst, "awlock": lock})  # fmt: skip
+    if legal:
+        assert report.ok, report.format()
+        return
+    failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
+    assert failed, report.format()
+    assert all("assertion aw_burst_legal fails" in m for m in failed), report.format()
+
+
+def test_a_design_master_dropping_a_waiting_address_is_caught(tmp_path: Path) -> None:
+    """The design is a master whose AWVALID toggles every cycle, whether or not it was
+    taken: the checker must fail aw_hold (A3.2.1)."""
+    report = _axi4_tiny(
+        tmp_path,
+        False,
+        {"awvalid": "rst_n && tg", "awburst": "2'd1"},
+        extra="  logic tg = 1'b0;\n  always_ff @(posedge clk) tg <= !tg;\n",
+    )
+    failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
+    assert failed, report.format()
+    assert all("assertion aw_hold fails" in m for m in failed), report.format()
+
+
+def test_a_design_master_ending_a_write_burst_early_is_caught(tmp_path: Path) -> None:
+    """The design is a master offering a two-beat write burst whose every beat has WLAST:
+    the checker must fail it, by the burst's address if that came first and by the data if
+    the data did."""
+    report = _axi4_tiny(tmp_path, False, {"awvalid": "rst_n", "awlen": "8'd1",
+                        "awburst": "2'd1", "wvalid": "rst_n", "wlast": "1'b1"})  # fmt: skip
+    failed = {f.message.split(": ", 1)[1].split(" (")[0] for f in report.findings}
+    assert failed, report.format()
+    assert failed <= {"assertion wlast_on_the_last_beat fails",
+                      "assertion wlast_matches_its_address fails"}, report.format()  # fmt: skip
 
 
 def test_an_ahb_master_environment_holds_its_rules_at_every_step(tmp_path: Path) -> None:
@@ -364,6 +577,18 @@ def test_a_one_cycle_ahb_error_is_caught(tmp_path: Path) -> None:
         "assign mcu_ahb_hresp = u_ahb_s_hresp[0] & u_ahb_s_hready[0];",
     )
     assert any("error_takes_two_cycles fails" in m for _, m in failed), failed
+
+
+def test_an_ahb_error_dropped_in_its_second_cycle_is_caught(tmp_path: Path) -> None:
+    """With master mcu seeing HRESP only while HREADY is low, an ERROR (a decode miss) is
+    dropped in its second cycle: bag_fahb on that port must fail error_second_cycle
+    (IHI0033A 5.1.3)."""
+    failed = _ahb_mutant(
+        tmp_path,
+        "assign mcu_ahb_hresp = u_ahb_s_hresp[0];",
+        "assign mcu_ahb_hresp = u_ahb_s_hresp[0] & ~u_ahb_s_hready[0];",
+    )
+    assert any("error_second_cycle fails" in m for _, m in failed), failed
 
 
 def test_an_ahb_slave_whose_hreadyout_is_not_routed_back_is_caught(tmp_path: Path) -> None:

@@ -100,10 +100,22 @@ module bag_faxi4 #(
   localparam int unsigned MaxSize = $clog2(DataWidth / 8);
   localparam int unsigned Cw = $clog2(MaxOutstanding + 2);
   localparam logic [Cw-1:0] CwOne = 1;
+  localparam int unsigned Iw = $clog2(MaxOutstanding);  // a table index
 
   if (MaxOutstanding < 2 || MaxOutstanding > 8 || (MaxOutstanding & (MaxOutstanding - 1)) != 0)
   begin : gen_check
     $error("bag_faxi4: MaxOutstanding must be a power of two from 2 to 8");
+  end
+  // The 4 KB rule reads the low 12 address bits; AxSIZE codes widths from 8 to 1024 bits.
+  if (AddrWidth < 12) begin : gen_check_addr
+    $error("bag_faxi4: AddrWidth must be at least 12");
+  end
+  if (DataWidth < 8 || DataWidth > 1024 || (DataWidth & (DataWidth - 1)) != 0)
+  begin : gen_check_data
+    $error("bag_faxi4: DataWidth must be a power of two from 8 to 1024");
+  end
+  if (IdWidth < 1) begin : gen_check_id
+    $error("bag_faxi4: IdWidth must be at least 1");
   end
 
   // ---------------------------------------------------------------- sampling
@@ -228,14 +240,15 @@ module bag_faxi4 #(
         for (int unsigned i = 0; i + 1 < MaxOutstanding; i++) begin
           q[i] <= q[i+1];
         end
-        if (push_aw && n > CwOne) q[n[Cw-2:0]-1] <= {awlock, awid, awlen};
+        // The index is cast after the subtraction: n can equal MaxOutstanding.
+        if (push_aw && n > CwOne) q[Iw'(n - CwOne)] <= {awlock, awid, awlen};
         else if (push_aw) q[0] <= {awlock, awid, awlen};
-        if (push_w && n > CwOne) q[n[Cw-2:0]-1] <= {1'b0, IdWidth'(0), w_beats};
+        if (push_w && n > CwOne) q[Iw'(n - CwOne)] <= {1'b0, IdWidth'(0), w_beats};
         else if (push_w) q[0] <= {1'b0, IdWidth'(0), w_beats};
         n <= n - 1'b1 + Cw'(push_aw || push_w);
         if (n == CwOne && (push_aw || push_w)) aw_ahead <= push_aw;
       end else if ((push_aw || push_w) && !overflow) begin
-        q[n[Cw-2:0]] <= push_aw ? {awlock, awid, awlen} : {1'b0, IdWidth'(0), w_beats};
+        q[Iw'(n)] <= push_aw ? {awlock, awid, awlen} : {1'b0, IdWidth'(0), w_beats};
         n <= n + 1'b1;
         aw_ahead <= push_aw;
       end
@@ -245,7 +258,6 @@ module bag_faxi4 #(
   // ---------------------------------------------------------------- response tables
   // Oldest entry first. A response belongs to the oldest open entry of its ID: one ID's
   // responses come in order, different IDs' may interleave (A5.3).
-  localparam int unsigned Iw = $clog2(MaxOutstanding);
   wire b_hs = bvalid && bready, ar_hs = arvalid && arready, r_hs = rvalid && rready;
 
   // Completed writes owed a response: their IDs, and whether each was exclusive.
