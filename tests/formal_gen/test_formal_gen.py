@@ -17,7 +17,7 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
-from hdl_bag.formal_gen.units import ROUTE_DEPTH
+from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -541,6 +541,20 @@ def test_a_channel_the_ir_never_uses_keeps_its_assertion_and_has_no_cover(tmp_pa
     assert "formal/axil_shared_fixed_route_bus.sby" in out.formal
 
 
+def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
+    """CI: axi_xbar_rules's crossbar job reached step 7 of 16 in 20 minutes with free clocks,
+    which cost two solver steps per edge and the logic that models them. A unit in one domain
+    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges, as
+    many as the free-clock depth gives. A bridge across domains keeps free clocks."""
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    formal = tmp_path / "formal"
+    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
+    assert ROUTE_CYCLES == ROUTE_DEPTH // 2 == 8
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
+    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 16\ncover: mode cover\ncover: depth 16\nmulticlock on\n" in cdc
+
+
 def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
     """Review weakness: the D70 race on AR is armed only with nothing outstanding, so the
     count drops once per read, at RLAST, not once per beat (a 4-beat read left it wrapped
@@ -609,8 +623,9 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     job = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sby").read_text(encoding="utf-8")
     assert " --top bag_ahb_fixed_unit_ahb " in job
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
-    assert ROUTE_DEPTH == 16
-    assert "bmc: mode bmc\nbmc: depth 16\ncover: mode cover\ncover: depth 16\n" in job
+    # One clock domain: one clock, ROUTE_CYCLES edges.
+    assert ROUTE_CYCLES == 8
+    assert "bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in job
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
     xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")

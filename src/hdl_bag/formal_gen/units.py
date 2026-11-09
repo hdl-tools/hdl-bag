@@ -35,8 +35,10 @@ from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
 
-# Bounded depth of each route job, in solver steps (free clocks: about half as many edges).
+# Bounded depth of a route job whose unit spans clock domains, in solver steps (free clocks:
+# about half as many edges); a unit in one domain runs on one clock for as many edges.
 ROUTE_DEPTH = 16
+ROUTE_CYCLES = ROUTE_DEPTH // 2
 BRIDGES = ("bag_ahb2apb", "bag_ahb2axi", "bag_apb2ahb", "bag_apb2axi", "bag_axi2ahb",
            "bag_axi2apb", "bag_axi2axil")  # fmt: skip
 
@@ -68,6 +70,7 @@ class Unit:
     ports: list[tuple[str, int, bool]]
     zipcpu: list[ZipChecker]
     own: set[str]
+    clocks: tuple[str, ...]  # one per clock domain the unit touches
 
 
 def units(netlist: Netlist) -> list[Instance]:
@@ -533,7 +536,8 @@ def render_unit(spec: Spec, inst: Instance) -> Unit:
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,
              "endmodule", ""]  # fmt: skip
-    return Unit(inst, module, "\n".join(lines), ports, h.zipcpu, h.own)
+    clocks = tuple(sorted(set(h.domains().values())))
+    return Unit(inst, module, "\n".join(lines), ports, h.zipcpu, h.own, clocks)
 
 
 def render_route(spec: Spec, netlist: Netlist, hdr: str) -> list[tuple[str, Unit]]:

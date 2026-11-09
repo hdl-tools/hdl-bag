@@ -41,7 +41,8 @@ F = False
 MISROUTE = [("swapped_port_index", XR, "Xbar", F), ("swapped_port_index", AXR, "Xbar", F),
             ("swapped_port_index", SF, "Bus", F), ("swapped_port_index", AP, "Apb", F),
             ("decode_long", AF, "Ahb", F)]  # fmt: skip
-MISROUTE_IDS = [i for t, i in zip(TARGETS, IDS, strict=True) if t in MISROUTE]
+# In MISROUTE's own order, so each case carries its own ID.
+MISROUTE_IDS = [dict(zip(TARGETS, IDS, strict=True))[t] for t in MISROUTE]
 DECODE_RTL = [t for t in RTL_TARGETS if t[1].file == "bag_addr_decode.sv"]
 DECODE_RTL_IDS = [i for t, i in zip(RTL_TARGETS, RTL_IDS, strict=True) if t in DECODE_RTL]
 ROUTE_RTL = [t for t in RTL_TARGETS if t[0].endswith("_offset")]
@@ -119,7 +120,9 @@ def test_every_package_mutation_fails_a_formal_property() -> None:
     each RTL mutation one or a reason it has none, and each route target a unit job."""
     assert {m for m, _, _, _ in DECODE_TARGETS} == set(MUTATIONS) - {"priority_inversion"}
     assert {m for m, _, _, _ in ROUTE_TARGETS} == {"priority_inversion"}
-    assert set(MISROUTE) <= set(DECODE_TARGETS) and len(MISROUTE_IDS) == len(MISROUTE)
+    assert set(MISROUTE) <= set(DECODE_TARGETS)
+    for (mutation, config, _, last), case in zip(MISROUTE, MISROUTE_IDS, strict=True):
+        assert case == f"{mutation}-{config.split('/')[1]}{'-last' if last else ''}"
     decode, route = {n for n, _, _ in DECODE_RTL}, {n for n, _, _ in ROUTE_RTL}
     assert decode == {"secure_polarity"}
     assert route == {"axi2apb_offset", "axi2axil_offset", "axil2apb_offset"}
