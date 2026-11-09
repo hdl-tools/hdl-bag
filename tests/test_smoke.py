@@ -14,9 +14,11 @@ import pytest
 from smoke import SMOKE, matches
 
 REPO = Path(__file__).parents[1]
-# Warm compute seconds from tests/eda_durations.json. The cold CI run of #43 took 6:52 on its
-# slowest of four shards for about 1180 s; 2000 s keeps a cold run well under 15 minutes.
-BUDGET_S = 2000
+# Compute seconds from tests/eda_durations.json. The cold CI run of #43 took 6:52 on its
+# slowest of four shards for about 1180 s; PR 3's smoke run 42610438783 (cold Verilator builds
+# after D73) took 9:31 on its slowest for 2501 s. 3200 s keeps a cold run near 12 minutes, under
+# the 15 of D58 (owner, 2026-11-09).
+BUDGET_S = 3200
 
 
 @cache

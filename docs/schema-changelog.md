@@ -12,6 +12,7 @@ Changes from 0.5, approved by the owner (D45):
 - Fabrics sharing a module must also match in what `bag check` cannot see, such as ID widths: `bag generate` fails if their ports differ.
 - **IR:** new field `external_module` on each fabric.
 - No other sheet, column or dropdown-list changes. A 0.5 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.6 and add the column header.
+- **IR, Phase 5 (owner, 2026-11-09), no version change:** a decode entry may hold at most one alias, as the workbook always gave (one Address_Decode row per master, one alias per row). A hand-written IR with more is refused on load. The decoder lets the last matching alias win, and the route model and the formal reference the first, so with two overlapping aliases they would disagree.
 
 ## 0.5 (2026-11-03, hdl-bag 0.0.x)
 

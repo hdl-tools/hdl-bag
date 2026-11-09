@@ -17,6 +17,7 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
+from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -198,7 +199,20 @@ def test_every_port_the_properties_bind_to_is_a_port_of_the_top(tmp_path: Path,
 def test_the_job_reads_the_file_list_then_the_properties(tmp_path: Path) -> None:
     spec = load(GOLDEN)
     out = generate(spec, tmp_path, GOLDEN.parent)
-    assert out.formal == ("formal/demo_ss_protocol.sby", "formal/demo_ss_reset.sby")
+    assert out.formal == (
+        "formal/demo_ss_decode.sby",
+        "formal/demo_ss_protocol.sby",
+        "formal/demo_ss_reset.sby",
+        "formal/demo_ss_route_ahb_bus.sby",
+        "formal/demo_ss_route_aon_apb.sby",
+        "formal/demo_ss_route_br_ahb2aon.sby",
+        "formal/demo_ss_route_br_ahb2main.sby",
+        "formal/demo_ss_route_br_main2cfg.sby",
+        "formal/demo_ss_route_br_main2per.sby",
+        "formal/demo_ss_route_cfg_bus.sby",
+        "formal/demo_ss_route_main_xbar.sby",
+        "formal/demo_ss_route_periph_apb.sby",
+    )
     job = (tmp_path / "formal/demo_ss_reset.sby").read_text(encoding="utf-8")
     read = " ".join([*(f"-I {d.as_posix()}" for d in include_dirs(out)), "--top", out.top,
                      *(f.as_posix() for f in sources(out)), "demo_ss_reset.sv"])  # fmt: skip
@@ -342,8 +356,13 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
     parameters, and instantiated by the slang-read property module."""
     spec = load(P2 / "apb3_wide.ir.yaml")
     out = generate(spec, tmp_path, P2)
-    assert out.formal == ("formal/apb3_wide_protocol.sby", "formal/apb3_wide_reset.sby")
-    job = (tmp_path / out.formal[0]).read_text(encoding="utf-8")
+    assert out.formal == (
+        "formal/apb3_wide_decode.sby",
+        "formal/apb3_wide_protocol.sby",
+        "formal/apb3_wide_reset.sby",
+        "formal/apb3_wide_route_apb.sby",
+    )
+    job = (tmp_path / "formal" / "apb3_wide_protocol.sby").read_text(encoding="utf-8")
     for line in [
         "read_verilog -formal zipcpu/fapb_master.v",
         "read_verilog -formal zipcpu/fapb_slave.v",
@@ -376,7 +395,12 @@ def test_the_protocol_bmc_runs_on_bitwuzla_and_everything_else_on_yices(tmp_path
 def test_an_axi4_only_design_gets_a_protocol_job_without_zipcpu(tmp_path: Path) -> None:
     """axi_xbar_rules has only AXI4 ports: BAG's own checker, and no vendored file."""
     out = generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
-    assert out.formal == ("formal/axi_xbar_rules_protocol.sby", "formal/axi_xbar_rules_reset.sby")
+    assert out.formal == (
+        "formal/axi_xbar_rules_decode.sby",
+        "formal/axi_xbar_rules_protocol.sby",
+        "formal/axi_xbar_rules_reset.sby",
+        "formal/axi_xbar_rules_route_xbar.sby",
+    )
     assert (tmp_path / "formal" / "bag_faxi4.sv").is_file()
     assert not (tmp_path / "formal" / "vendor").exists()
 
@@ -430,3 +454,243 @@ def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
     generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)
     job = (tmp_path / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
     assert f"bmc: depth {PROTOCOL_DEPTH}\ncover: mode cover\ncover: depth {PROTOCOL_DEPTH}\n" in job
+
+
+def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: Path) -> None:
+    """D69: the harness feeds the fabric's package tables to bag_addr_decode and compares
+    its outputs with a reference written from the IR as explicit ranges, so a wrong table
+    entry shows. On apb4_rules, ro0's region takes reads (port 0) and refuses writes (the
+    error, 4 = the slave count); the job is a one-step prove."""
+    spec = load(P2 / "apb4_rules.ir.yaml")
+    out = generate(spec, tmp_path, P2)
+    text = (tmp_path / "formal" / "apb4_rules_decode.sv").read_text(encoding="utf-8")
+    assert "module bag_apb4_rules_decode (" in text
+    assert re.search(r"\n      \.RuleBase +\(apb4_rules_pkg::ApbRuleBase\),\n", text)
+    assert "  function automatic int unsigned apb_target(int unsigned m, " in text
+    assert ("      if (sys >= 65'(64'h0000_0000_1000_0000) && "
+            "sys < 65'(64'h0000_0000_1000_1000))  // ro0.regs\n"
+            "        case ({write, nonsec}) 2'b00: return 0; 2'b01: return 0; "
+            "2'b10: return 4; 2'b11: return 4; endcase\n") in text  # fmt: skip
+    for label in ("apb_selects", "apb_errors", "apb_aliases"):
+        assert f"    {label}: assert (" in text
+    job = (tmp_path / "formal" / "apb4_rules_decode.sby").read_text(encoding="utf-8")
+    assert "prove: mode prove\nprove: depth 1\nmulticlock off\n" in job
+    assert "read_slang --top bag_apb4_rules_decode " in job
+    assert "formal/apb4_rules_decode.sby" in out.formal
+
+
+def test_the_decode_reference_aliases_and_answers_misses_as_the_ir_says(tmp_path: Path) -> None:
+    """The alias and miss-response parts of the reference. ahb_fixed: m1's boot alias, while
+    boot_a_i is high, sends its first 4 KiB to s1's base. axi_xbar_rules: a master without a
+    default slave is answered from MissResp: dma SLVERR (2'b10), cpu DECERR (2'b11)."""
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path / "af", P2)
+    text = (tmp_path / "af" / "formal" / "ahb_fixed_decode.sv").read_text(encoding="utf-8")
+    assert ("    if (m == 1 && boot_a_i && sys >= 65'(64'h0000_0000_0000_0000) && "
+            "sys < 65'(64'h0000_0000_0000_1000))  // m1\n"
+            "      return 32'(65'(64'h0000_0000_2001_0000) + (sys - 65'(64'h0000_0000_0000_0000)) "
+            "- 65'(64'h0000_0000_0000_0000));\n") in text  # fmt: skip
+    assert "    ahb_aliases: assert (ahb_dec_addr == ahb_ref_addr);\n" in text
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    text = (tmp_path / "xr" / "formal" / "axi_xbar_rules_decode.sv").read_text(encoding="utf-8")
+    for m, resp, master in ((0, "2'b10", "dma"), (1, "2'b11", "cpu")):
+        assert (
+            f"    if (xbar_tgt == 3 && xbar_mst[{m}]) xbar_miss_response_{m}: assert "
+            f"(axi_xbar_rules_pkg::XbarMissResp[{m}] == {resp});  // {master}\n"
+        ) in text
+
+
+def test_route_properties_are_sampled_at_the_clock_edge(tmp_path: Path) -> None:
+    """CI bug (axil_shared_fixed): the checkers constrain the environment at clock edges
+    only, so between edges a free clock lets a waiting master's address take any value and
+    return by the next edge. A request counts where its slave samples it, at the edge, so
+    every route property and its cover is clocked: an always_comb check failed on such a
+    between-edge address the shared bus passed through. Bridge windows are sampled at the
+    downstream clock (bridges_pulp's br_per crosses to D_PER)."""
+    generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path / "asf", P3)
+    text = (tmp_path / "asf" / "formal" / "axil_shared_fixed_route_bus.sv").read_text(
+        encoding="utf-8"
+    )
+    assert ("  always @(posedge clk_sys) if (bag_live_D_SYS && s0_axil_awvalid) "
+            "bus_s0_aw_routed: assert (") in text  # fmt: skip
+    assert ("  always @(posedge clk_sys) cover_bus_s0_aw_routed: "
+            "cover (bag_live_D_SYS && s0_axil_awvalid);\n") in text  # fmt: skip
+    assert "  always @(posedge clk_sys) if (bag_live_D_SYS && (bag_race_aw_" in text
+    # CI (axi_shared_fixed): the bus may grant the winner in the cycle both start, before the
+    # race is registered, so the cover takes a race that starts now too.
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path / "sf", P3)
+    sf = (tmp_path / "sf" / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert ("  always @(posedge clk_sys) cover_bus_ar_m2_before_m0: cover (bag_live_D_SYS && "
+            "(bag_race_ar_2_0 || (bag_ar2_start && bag_ar0_start && bag_ar2_cont && "
+            "bag_ar0_cont)) && bag_ar2_won);\n") in sf  # fmt: skip
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
+    for path in sorted((tmp_path / "bp" / "formal").glob("*_route_*.sv")):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"always_comb (if \([^\n]*\) )?\w+: (assert|cover) \(", text), path
+    text = (tmp_path / "bp" / "formal" / "bridges_pulp_route_br_per.sv").read_text(encoding="utf-8")
+    assert "  always @(posedge clk_per) if (bag_live_D_SYS && bag_live_D_PER && " in text
+
+
+def test_a_channel_the_ir_never_uses_keeps_its_assertion_and_has_no_cover(tmp_path: Path) -> None:
+    """CI bug (axil_shared_fixed): s1's only region is read-only, so the fabric reference
+    sends it no write. Its AW check then says no write ever arrives, with no cover to reach,
+    and its ZipCPU checker is read-only (as in the protocol job): the covers of a write
+    there were unreachable by design."""
+    out = generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axil_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert " bus_s1_aw_routed: assert (" in text
+    assert "cover_bus_s1_aw_routed" not in text
+    assert "  // bus_s1_aw_routed: no cover, the IR sends s1 no write\n" in text
+    assert "cover_bus_s1_ar_routed: cover (" in text and "cover_bus_s0_aw_routed: cover (" in text
+    job = (tmp_path / "formal" / "axil_shared_fixed_route_bus.sby").read_text(encoding="utf-8")
+    s1 = next(line for line in job.splitlines()
+              if line.startswith("chparam") and line.endswith("_bus_s1"))  # fmt: skip
+    assert " -set F_OPT_READ_ONLY 1 " in s1
+    assert "formal/axil_shared_fixed_route_bus.sby" in out.formal
+
+
+def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
+    """CI: axi_xbar_rules's crossbar job reached step 7 of 16 in 20 minutes with free clocks,
+    which cost two solver steps per edge and the logic that models them. A unit in one domain
+    has no clock ratio to explore: it runs with multiclock off for ROUTE_CYCLES edges, and 2
+    more per halving of a bridge's data width (each narrow transfer is another APB access: an
+    AXI4-Lite to 8- or 16-bit APB bridge's read response came at edge 8). At 12 edges
+    mixed_cdc_chain's crossbar reached only edge 10 in 20 minutes. A bridge across domains
+    keeps free clocks, ROUTE_DEPTH steps and 6 more per halving after the first (measured:
+    mixed_cdc_chain's br_per, no conversion, last cover at step 21; bridges_pulp's br_per, 64 to
+    32 bits, passed with every cover at 24 and timed out at 28; mixed_narrow_apb's br_c8, 64
+    to 8 bits, last cover at step 33)."""
+    assert (ROUTE_CYCLES, ROUTE_DEPTH) == (8, 24)
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
+    formal = tmp_path / "bp" / "formal"
+    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
+    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 24\nmulticlock on\n" in cdc
+    generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
+    mn = tmp_path / "mn" / "formal"
+    for unit, depth, clocks in (("br_c8", 36, "on"), ("br_l8", 12, "off"), ("br_l16", 10, "off"),
+                                ("br_lite", 8, "off")):  # fmt: skip
+        job = (mn / f"mixed_narrow_apb_route_{unit}.sby").read_text(encoding="utf-8")
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock {clocks}\n"
+        assert want in job, unit
+
+
+def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
+    tmp_path: Path,
+) -> None:
+    """Local runs: br_lp (bridges_pulp, AXI4-Lite to APB, PULP's request path a fall-through
+    register) raised PSEL in the cycle it accepted the AR, before the harness had registered
+    the access; br_lite (mixed_narrow_apb, AXI4 to AXI4-Lite, a pass-through) raised the
+    downstream AWVALID while the upstream AW still waited for AWREADY. Both are legal. In one
+    domain the window check takes the upstream request being presented (valid, accepted or
+    not) at its own address; across domains (br_per) nothing passes the CDC before the
+    upstream handshake, so only a registered access counts."""
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    formal = tmp_path / "formal"
+    lp = (formal / "bridges_pulp_route_br_lp.sv").read_text(encoding="utf-8")
+    assert "  wire bag_up_req = (cfg_2_br_lp_axil_awvalid) || (cfg_2_br_lp_axil_arvalid);\n" in lp
+    assert ("  wire [31:0] bag_win_addr = bag_up_req ? ((cfg_2_br_lp_axil_awvalid) ? "
+            "cfg_2_br_lp_axil_awaddr : cfg_2_br_lp_axil_araddr) : bag_up_addr;\n"
+            ) in lp  # fmt: skip
+    assert "br_lp_p_in_window: assert ((bag_busy || bag_up_req) && ((br_lp_2_lp_apb3_paddr ^ " in lp
+    assert "32'(65'(bag_win_addr) + " in lp
+    per = (formal / "bridges_pulp_route_br_per.sv").read_text(encoding="utf-8")
+    assert "br_per_p_in_window: assert (bag_busy && ((br_per_2_per_apb4_paddr ^ " in per
+    assert "bag_up_req" not in per
+
+
+def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
+    """Review weakness: the D70 race on AR is armed only with nothing outstanding, so the
+    count drops once per read, at RLAST, not once per beat (a 4-beat read left it wrapped
+    and the race disarmed for the rest of the trace). AXI4-Lite has one beat per read."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert ("bag_ar0_out <= bag_ar0_out + 8'(bag_ar0_acc) - "
+            "8'(m0_axi_rvalid && m0_axi_rready && m0_axi_rlast);") in text  # fmt: skip
+    assert ("bag_aw0_out <= bag_aw0_out + 8'(bag_aw0_acc) - "
+            "8'(m0_axi_bvalid && m0_axi_bready);") in text  # fmt: skip
+
+
+def test_an_axi4_bus_without_ids_feeds_its_valids_to_the_checker(tmp_path: Path) -> None:
+    """Review bug: on an ID-less AXI4 bus only the ID signals are tied to 0 at the checker.
+    Matching names that end in "id" tied every *valid too, so the checker assumed nothing
+    about the master behind bridges_pulp's dbg_pc_2_xbar and asserted nothing about it."""
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "bridges_pulp_route_xbar.sv").read_text(encoding="utf-8")
+    chk = text.split(" u_chk_dbg_pc_2_xbar (\n", 1)[1].split("  );", 1)[0]
+    for ch in ("aw", "w", "b", "ar", "r"):
+        assert f"      .{ch}valid(dbg_pc_2_xbar_axi_{ch}valid),\n" in chk, ch
+    for sig in ("awid", "bid", "arid", "rid"):
+        assert f"      .{sig}(1'b0)," in chk, sig
+
+
+@pytest.mark.parametrize("ir", CONFIGS, ids=lambda p: p.stem.removesuffix(".ir"))
+def test_every_property_label_is_unique_and_every_assertion_has_its_cover(
+    tmp_path: Path, ir: Path
+) -> None:
+    """In each decode and route harness, labels are unique (a duplicate is an SV error that
+    names the wrong property in a report), and each route assertion has the cover of its
+    condition (cover_<label>), so none holds only because its condition never comes."""
+    out = generate(load(ir), tmp_path, ir.parent)
+    texts = [(tmp_path / f).with_suffix(".sv").read_text(encoding="utf-8")
+             for f in out.formal if "_route_" in f or f.endswith("_decode.sby")]  # fmt: skip
+    for text in texts:
+        for module in text.split("\nmodule ")[1:]:
+            asserts = re.findall(r"(\w+): assert \(", module)
+            covers = re.findall(r"(\w+): cover \(", module)
+            labels = asserts + covers
+            assert len(labels) == len(set(labels)), sorted(labels)
+            if "_unit_" in module.split("(", 1)[0]:
+                # A channel the IR never uses says so instead (no cover can be reached).
+                bare = set(re.findall(r"\n  // (\w+): no cover, the IR sends ", module))
+                assert asserts, module[:60]
+                assert {f"cover_{a}" for a in asserts if a not in bare} <= set(covers), module[:60]
+                assert bare <= set(asserts) and not {f"cover_{a}" for a in bare} & set(covers)
+
+
+def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -> None:
+    """D69 parts 2 and 3, D70: each unit in its own harness and its own job, so no unit's
+    proof waits on another's. A fabric's slave-port check reads the address on the fabric
+    side, before it is fitted to the slave's width (D29); ahb_fixed's fixed priorities give
+    one race property per ordered pair of masters."""
+    spec = load(P2 / "apb4_rules.ir.yaml")
+    generate(spec, tmp_path / "apb", P2)
+    text = (tmp_path / "apb" / "formal" / "apb4_rules_route_apb.sv").read_text(encoding="utf-8")
+    assert "module bag_apb4_rules_unit_apb (" in text
+    assert ("apb_wo0_p_routed: assert (apb_target(0, u_apb_m_paddr[1], wo0_apb4_pwrite, "
+            "wo0_apb4_pprot[1]) == 1);") in text  # fmt: skip
+    spec = load(P2 / "ahb_fixed.ir.yaml")
+    generate(spec, tmp_path / "ahb", P2)
+    text = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
+    labels = re.findall(r"(ahb_a_m\d_before_m\d): assert", text)
+    assert sorted(labels) == ["ahb_a_m0_before_m1", "ahb_a_m2_before_m0", "ahb_a_m2_before_m1"]
+    job = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sby").read_text(encoding="utf-8")
+    assert " --top bag_ahb_fixed_unit_ahb " in job
+    assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
+    # One clock domain: one clock, ROUTE_CYCLES edges.
+    assert ROUTE_CYCLES == 8
+    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\n"
+            "multiclock off\n") in job  # fmt: skip
+    # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert ("xbar_regs_aw_routed: assert (xbar_target(int'(u_xbar_m_awid[0][5:4]), "
+            "u_xbar_m_awaddr[0], 1'b1, regs_axi_awprot[1]) == 0);") in xbar  # fmt: skip
+    # ahb2apb_pt has three units: three jobs, each reading only its own harness.
+    out = generate(load(P2 / "ahb2apb_pt.ir.yaml"), tmp_path / "pt", P2)
+    assert [f for f in out.formal if "_route" in f] == [
+        "formal/demo_ss_route_ahb_bus.sby",
+        "formal/demo_ss_route_aon_apb.sby",
+        "formal/demo_ss_route_br_ahb2aon.sby",
+    ]
+    bridge = (tmp_path / "pt" / "formal" / "demo_ss_route_br_ahb2aon.sv").read_text(
+        encoding="utf-8"
+    )
+    assert "module bag_demo_ss_unit_br_ahb2aon (" in bridge
+    assert "module bag_demo_ss_unit_ahb_bus (" not in bridge
+    # The bridge's window: the downstream address within the upstream word, both windows 0
+    # (one domain: the request being presented counts too).
+    assert ("br_ahb2aon_p_in_window: assert ((bag_busy || bag_up_req) && "
+            "((br_ahb2aon_2_aon_apb_apb4_paddr ^ 32'(65'(bag_win_addr) + "
+            "65'(64'h0000_0000_0000_0000) - 65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);"
+            ) in bridge  # fmt: skip

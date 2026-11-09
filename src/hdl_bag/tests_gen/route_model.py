@@ -68,6 +68,76 @@ def pslverr_tied(spec: Spec, port: str) -> bool:
     return _option(spec, port, "pslverr") in ("tie-0", "tie-default")
 
 
+# One fabric's decision, in system addresses. route() follows them fabric by fabric; the
+# formal decode properties (formal_gen.decode) evaluate them per region as their reference.
+
+
+def aliased(fabric: Any, master: str, addr: int, pins: dict[str, bool]) -> int:
+    """ADDR after MASTER's first enabled alias on FABRIC whose window holds it."""
+    decode = next(d for d in fabric.decode if d.master == master)
+    for a in decode.aliases:
+        on = a.enable == "always" or pins.get(a.enable, False)
+        if on and a.base <= addr < a.base + a.size:
+            return int(a.to + (addr - a.base))
+    return addr
+
+
+def region_at(spec: Spec, fabric: Any, addr: int) -> Any | None:
+    """The Memory_Map region of FABRIC holding ADDR (regions do not overlap), or None."""
+    return next((r for r in spec.memory_map
+                 if r.fabric == fabric.name and r.base <= addr < r.base + r.size), None)  # fmt: skip
+
+
+def denied(fabric: Any, master: str, region: Any, write: bool, nonsec: bool) -> bool:
+    """Whether REGION refuses MASTER's access: RO or WO, secure-only against a non-secure
+    access, or the master's Access_Rules towards the region's slave."""
+    deny = (write and region.access == "RO") or (not write and region.access == "WO")
+    deny |= region.secure and nonsec
+    ar = next((a for a in fabric.access_rules
+               if a.master == master and a.slave == region.slave), None)  # fmt: skip
+    if ar is not None:
+        deny |= ar.access == "none"
+        deny |= (write and ar.access == "RO") or (not write and ar.access == "WO")
+    return deny
+
+
+def fallback(fabric: Any, master: str, region: Any | None) -> str | None:
+    """Where MASTER's miss (REGION None) or denial by REGION goes: its default slave, or
+    None for an error. D32: a denial never reaches the slave that denied it."""
+    decode = next(d for d in fabric.decode if d.master == master)
+    if decode.miss != "default-slave" or decode.default_slave is None:
+        return None
+    if region is not None and region.slave == decode.default_slave:
+        return None
+    return str(decode.default_slave)
+
+
+def window(spec: Spec, fabric: Any) -> int:
+    """The system address FABRIC's address 0 stands for: the window base of the nearest
+    pass-through N bridge on the way to it (a pass-through Y bridge keeps its upstream's),
+    as route() tracks per access. Every master of a fabric sees the same translation
+    (generation refuses a fabric whose masters differ), so the first master port decides."""
+    bridges = {b.name: b for b in spec.bridges}
+    for p in fabric.master_ports:
+        b = bridges.get(p.port)
+        if b is None:
+            return 0
+        if not b.pass_through:
+            return int(b.window_base)
+        return window(spec, next(f for f in spec.fabrics if f.name == b.upstream))
+    return 0
+
+
+def decide(spec: Spec, fabric: Any, master: str, addr: int, write: bool,
+           nonsec: bool) -> str | None:  # fmt: skip
+    """The slave port (slave or bridge name) FABRIC sends MASTER's access at ADDR (already
+    aliased) to, or None for an error."""
+    region = region_at(spec, fabric, addr)
+    if region is not None and not denied(fabric, master, region, write, nonsec):
+        return str(region.slave)
+    return fallback(fabric, master, region)
+
+
 def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
           pins: dict[str, bool]) -> Outcome:  # fmt: skip
     fabrics = {f.name: f for f in spec.fabrics}
@@ -82,33 +152,11 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     offset = 0  # subtracted by pass-through N bridges on the way
     crossed: list[str] = []
     for _ in range(len(spec.fabrics)):
-        decode = next(d for d in fabric.decode if d.master == master)
-        for a in decode.aliases:
-            on = a.enable == "always" or pins.get(a.enable, False)
-            if on and a.base <= addr < a.base + a.size:
-                addr = a.to + (addr - a.base)
-                break
-        target = None
-        region = next((r for r in spec.memory_map
-                       if r.fabric == fabric.name and r.base <= addr < r.base + r.size), None)  # fmt: skip
-        if region is not None:
-            denied = (write and region.access == "RO") or (not write and region.access == "WO")
-            denied |= region.secure and nonsec
-            ar = next((a for a in fabric.access_rules
-                       if a.master == master and a.slave == region.slave), None)  # fmt: skip
-            if ar is not None:
-                denied |= ar.access == "none"
-                denied |= (write and ar.access == "RO") or (not write and ar.access == "WO")
-            target = None if denied else region.slave
+        addr = aliased(fabric, master, addr, pins)
+        target = decide(spec, fabric, master, addr, write, nonsec)
         if target is None:
-            to_default = decode.miss == "default-slave" and decode.default_slave is not None
-            # D32: a denial never reaches the slave that denied it.
-            if to_default and region is not None and region.slave == decode.default_slave:
-                to_default = False
-            if not to_default:
-                return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
-            target = decode.default_slave
-            assert target is not None  # to_default implies a default slave
+            decode = next(d for d in fabric.decode if d.master == master)
+            return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
         if target in bridges:
             b = bridges[target]
             # The nearest pass-through N window sets what the slaves behind it see; a

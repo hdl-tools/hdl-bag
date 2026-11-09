@@ -301,8 +301,11 @@ def test_a_timeout_stops_sby_and_everything_it_started(
             os.kill(child, 0)
         except ProcessLookupError:
             break
-        status = Path(f"/proc/{child}/stat")
-        if status.is_file() and status.read_text().split()[2] == "Z":
+        try:  # the entry vanishes once the child is reaped, maybe between two reads
+            state = Path(f"/proc/{child}/stat").read_text().split()[2]
+        except FileNotFoundError:
+            break
+        if state == "Z":
             break  # a zombie: dead, waiting for its parent (gone) to be reaped
         time.sleep(0.1)
     else:

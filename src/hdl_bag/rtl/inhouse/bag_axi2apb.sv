@@ -326,7 +326,10 @@ module bag_axi2apb #(
       .AddrWidth       (AddrWidth),
       .DataWidth       (DownDataWidth),
       .PipelineRequest (1'b0),
-      .PipelineResponse(1'b0),
+      // A spill register on the responses (D73): PULP answers a write with no strobe set (and
+      // a decode error) at once, without an APB transfer, so with a fall-through response B
+      // would rise in its own AW/W handshake cycle, which AXI forbids (A3.3.1).
+      .PipelineResponse(1'b1),
       .axi_lite_req_t  (dn_req_t),
       .axi_lite_resp_t (dn_resp_t),
       .apb_req_t       (apb_req_t),

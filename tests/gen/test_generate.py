@@ -85,6 +85,21 @@ def test_byte_identical_across_processes(tmp_path: Path) -> None:
     assert trees[0] == trees[1]
 
 
+@pytest.mark.parametrize("config", ["p3/axi_xbar_rules", "p2/ahb_fixed"])
+def test_formal_output_is_byte_identical_across_processes(tmp_path: Path, config: str) -> None:
+    """The formal harnesses under two hash seeds: an AXI4 crossbar (ID-prefixed masters,
+    miss responses) and an AHB-Lite bus with aliases and fixed priorities."""
+    ir = TESTS / "configs" / f"{config}.ir.yaml"
+    trees = []
+    for seed in ("0", "12345"):
+        out = tmp_path / seed
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        subprocess.run([sys.executable, "-m", "hdl_bag.cli", "generate", str(ir), "-o", str(out)],
+                       check=True, env=env, capture_output=True)  # fmt: skip
+        trees.append({k: v for k, v in _tree(out).items() if k.startswith("formal/")})
+    assert trees[0] and trees[0] == trees[1]
+
+
 def test_golden_generates_fully(tmp_path: Path) -> None:
     # Phase 3 PR 6 gave the last templates demo_ss uses (the in-house bridges) RTL.
     out = generate(load(GOLDEN_IR), tmp_path, GOLDEN_IR.parent)

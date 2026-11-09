@@ -11,6 +11,13 @@ Output layout (relative to the output directory)::
     formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
     formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
     formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
+    formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
+                                  a reference from the IR (D69; formal_gen.decode)
+    formal/<project>_decode.sby   its job: a prove task (the check is combinational)
+    formal/<project>_route_<unit>.sv   one in-house fabric or bridge on its own: slave-port
+                                  routing, fixed-priority arbitration, bridge windows
+                                  (D69, D70; formal_gen.units)
+    formal/<project>_route_<unit>.sby  its job: a bmc task and a cover task
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
 sv-interface style), so they see its ports by name and the design needs no formal
@@ -73,14 +80,19 @@ fabric behaves (D8).
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hdl_bag.flows.formal import sby_job
+from hdl_bag.formal_gen.decode import render_decode
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Netlist
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import AXI_FAMILY, PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, signal_width
+
+if TYPE_CHECKING:
+    from hdl_bag.formal_gen.units import Unit
 
 # k-induction depth for the assertions, in solver steps. The quiet property depends on the
 # reset state and the synchronizer's stage count, so a few steps make it inductive (demo_ss
@@ -101,6 +113,8 @@ COVER_DEPTH = 40
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
+# The decode harness is combinational: one step checks every input (D69).
+DECODE_DEPTH = 1
 # The protocol job's engine (D67). With BAG's AXI4 checker, yices needed over 30 minutes per
 # step past step 13 on axi_xbar_rules (stopped at 40 minutes in step 14); bitwuzla checks all
 # 16 steps in about 4 minutes, abc bmc3 in about 2, boolector in 15. Bitwuzla runs under
@@ -465,26 +479,31 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             can = frozenset(active.get(bus.name, set()))
             if not can:
                 continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
-        params: tuple[tuple[str, int], ...]
-        if family == "axil":
-            params = (("C_AXI_DATA_WIDTH", bus.data_width), ("C_AXI_ADDR_WIDTH", bus.addr_width),
-                      ("F_OPT_ASYNC_RESET", 1), ("F_OPT_ASSUME_RESET", 1), ("F_OPT_NO_RESET", 1),
-                      ("F_LGDEPTH", 8), ("F_AXI_MAXWAIT", 0), ("F_AXI_MAXRSTALL", 0),
-                      ("F_AXI_MAXDELAY", 0))  # fmt: skip
-            if bus.is_slave:
-                # A slave no master may write (or read), by the route model: the checker
-                # then asserts the design never does, and drops the cover it can't reach.
-                if can == {"read"}:
-                    params += (("F_OPT_READ_ONLY", 1),)
-                elif can == {"write"}:
-                    params += (("F_OPT_WRITE_ONLY", 1),)
-        else:
-            slverr = "pslverr" in bus.signals and "pslverr" not in bus.ties
-            params = (("AW", bus.addr_width), ("DW", bus.data_width), ("F_OPT_MAXSTALL", 0),
-                      ("F_OPT_SLVERR", int(slverr)), ("F_OPT_ASYNC_RESET", 1))  # fmt: skip
+        params = zipcpu_params(bus, family, can if bus.is_slave else None)
         out.append(Checker(bus.name, vendor, f"bag_{spec.project.name}_{vendor}_{bus.name}",
                            params, can))  # fmt: skip
     return out
+
+
+def zipcpu_params(bus: Bus, family: str,
+                  slave_can: frozenset[str] | None) -> tuple[tuple[str, int], ...]:  # fmt: skip
+    """The parameters of a ZipCPU checker on BUS (FAMILY axil or apb). SLAVE_CAN, for a port
+    towards a slave, is what may reach it: an AXI4-Lite slave no master may write (or read)
+    gets a checker that asserts the design never does, and drops the cover it can't reach."""
+    params: tuple[tuple[str, int], ...]
+    if family == "axil":
+        params = (("C_AXI_DATA_WIDTH", bus.data_width), ("C_AXI_ADDR_WIDTH", bus.addr_width),
+                  ("F_OPT_ASYNC_RESET", 1), ("F_OPT_ASSUME_RESET", 1), ("F_OPT_NO_RESET", 1),
+                  ("F_LGDEPTH", 8), ("F_AXI_MAXWAIT", 0), ("F_AXI_MAXRSTALL", 0),
+                  ("F_AXI_MAXDELAY", 0))  # fmt: skip
+        if slave_can == frozenset({"read"}):
+            params += (("F_OPT_READ_ONLY", 1),)
+        elif slave_can == frozenset({"write"}):
+            params += (("F_OPT_WRITE_ONLY", 1),)
+        return params
+    slverr = "pslverr" in bus.signals and "pslverr" not in bus.ties
+    return (("AW", bus.addr_width), ("DW", bus.data_width), ("F_OPT_MAXSTALL", 0),
+            ("F_OPT_SLVERR", int(slverr)), ("F_OPT_ASYNC_RESET", 1))  # fmt: skip
 
 
 def _covers(spec: Spec, bus: Bus, chk: Checker, port: "_Ports") -> list[str]:
@@ -788,15 +807,68 @@ def render_formal(spec: Spec, netlist: Netlist, top: str, files: list[str], incd
         out += [(f"formal/{name}.sv", protocol),
                 (f"formal/{name}.sby", render_protocol_sby(spec, netlist, top, files, incdirs,
                                                            f"{name}.sv", user_header))]  # fmt: skip
+    decode = render_decode(spec, netlist, hdr)
+    if decode is not None:
+        name = f"{spec.project.name}_decode"
+        out += [(f"formal/{name}.sv", decode),
+                (f"formal/{name}.sby", render_decode_sby(spec, files, incdirs, f"{name}.sv",
+                                                         user_header))]  # fmt: skip
+    from hdl_bag.formal_gen.units import render_route
+
+    for text, unit in render_route(spec, netlist, hdr):
+        name = f"{spec.project.name}_route_{unit.inst.name}"
+        out += [(f"formal/{name}.sv", text),
+                (f"formal/{name}.sby", render_route_sby(spec, unit, files, incdirs, f"{name}.sv",
+                                                        user_header))]  # fmt: skip
     return out
+
+
+def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[str],
+                     props: str, user_header: str | None) -> str:  # fmt: skip
+    """UNIT's route job: ZipCPU's files read by Yosys's own frontend with one parameterised
+    copy per checker instance, then the design, BAG's own checkers and the unit's harness
+    PROPS, whose module is the top."""
+    from hdl_bag.formal_gen.units import route_depth
+
+    zips = unit.zipcpu
+    prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
+    for z in zips:
+        sets = " ".join(f"-set {k} {v}" for k, v in z.params)
+        prelude += [f"copy {z.vendor} {z.module}", f"chparam {sets} {z.module}"]
+    own = sorted(unit.own)
+    copy = [("rtl", "../rtl"), *((f, f) for f in own)]
+    if zips:
+        copy.append(("zipcpu", "vendor/zipcpu"))
+    # A unit in one clock domain has no clock ratio to explore: one clock (free clocks cost
+    # two solver steps an edge and the logic that models them).
+    multi, depth = route_depth(unit)
+    job = sby_job(top=unit.module, files=[*files, *own, props], incdirs=incdirs,
+                  depths={"bmc": depth, "cover": depth},
+                  copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
+                  multiclock=multi, prelude=prelude)  # fmt: skip
+    return f"{_sby_header(spec, user_header)}\n{job}"
+
+
+def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: str,
+                      user_header: str | None) -> str:  # fmt: skip
+    """The decode job: the harness PROPS over the design files, proved outright (it is
+    combinational, so one step covers every input)."""
+    top = f"bag_{spec.project.name}_decode"
+    job = sby_job(top=top, files=[*files, props], incdirs=incdirs, depths={"prove": DECODE_DEPTH},
+                  copy=[("rtl", "../rtl"), (props, props)], engine=ENGINE,
+                  multiclock=False)  # fmt: skip
+    return f"{_sby_header(spec, user_header)}\n{job}"
 
 
 def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:
     """The packaged formal files SPEC's jobs read (package paths): the step registers, and the
     vendored checkers with their LICENSE."""
-    found = sorted({c.vendor for c in checkers(spec, netlist)})
+    from hdl_bag.formal_gen.units import route_needs
+
+    route_own, route_vendors = route_needs(netlist)
+    found = sorted({c.vendor for c in checkers(spec, netlist)} | route_vendors)
     # The licence and the provenance (source and commit) travel with the files.
     extra = [f"{ZIPCPU}/LICENSE", f"{ZIPCPU}/SOURCE.md"] if found else []
     vendored = [f"{ZIPCPU}/{v}.v" for v in found] + extra
-    own = [f"formal/{f}" for f in own_checkers(netlist)]
+    own = [f"formal/{f}" for f in sorted(set(own_checkers(netlist)) | route_own)]
     return [f"formal/{STEP}", *own, *vendored]
