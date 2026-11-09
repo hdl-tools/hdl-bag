@@ -357,6 +357,26 @@ def test_an_axi4_master_port_covers_the_states_its_checker_tracks(tmp_path: Path
             "ddr0_axi_rresp[1]);\n") in text  # fmt: skip
 
 
+def test_each_ahb_port_gets_bags_checker_bound_for_its_side(tmp_path: Path) -> None:
+    """PR 2b review (an AHB binding host test): on a master port (m0) the design is the slave,
+    always selected, and its HREADY is the data phase's HREADYOUT; on a slave port (s0) the
+    design is the master and the slave's own HSEL, HREADY and HREADYOUT are watched. A
+    signal the port lacks takes the spec's value (no HMASTLOCK: 0). Towards a master the
+    design's ERROR is covered too, besides the environment's burst."""
+    text = _protocol(tmp_path, P2 / "ahb_fixed.ir.yaml")
+    m0 = text.split(" u_m0 (\n", 1)[1].split("  );", 1)[0]
+    s0 = text.split(" u_s0 (\n", 1)[1].split("  );", 1)[0]
+    assert "  bag_fahb #(.DesignIsSlave(1), .AddrWidth(32), .DataWidth(32)) u_m0 (\n" in text
+    assert "  bag_fahb #(.DesignIsSlave(0), .AddrWidth(32), .DataWidth(32)) u_s0 (\n" in text
+    assert "      .hsel(1'b1),\n" in m0
+    assert "      .hready(m0_ahb_hready),\n      .hreadyout(m0_ahb_hready),\n" in m0
+    assert "      .hsel(s0_ahb_hsel),\n" in s0 and "      .hmastlock(1'b0),\n" in s0
+    assert "      .hready(s0_ahb_hready),\n      .hreadyout(s0_ahb_hreadyout),\n" in s0
+    labels = set(re.findall(r"(proto_\w+): cover", text))
+    assert {"proto_burst_m0", "proto_error_m0", "proto_error_s0"} <= labels
+    assert "proto_burst_s0" not in labels
+
+
 def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
     """Phase 4: alias pins are quasi-static. Formal assumes the strict form."""
     text = _protocol(tmp_path, P2 / "apb4_min.ir.yaml")

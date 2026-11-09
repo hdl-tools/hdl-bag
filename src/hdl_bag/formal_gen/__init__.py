@@ -738,6 +738,11 @@ def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
     if can:
         covers.append(("wait", "wait"))
         covers.append(("error", "error") if bus.is_slave else ("burst", "seq"))
+    if not bus.is_slave:
+        # The design's own side (PR 2b review): its two-cycle ERROR towards the master, which
+        # any slave or a miss can cause. No burst cover towards a slave: whether a burst
+        # reaches it as SEQ beats depends on the bridges on the way.
+        covers.append(("error", "error"))
     lines += [f"  always_comb proto_{label}_{bus.name}: cover (bag_{bus.name}_{event});"
               for label, event in covers]  # fmt: skip
     if bus.is_slave:
