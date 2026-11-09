@@ -332,6 +332,12 @@ class InstanceContext:
 
 
 def render_instance(scope: Scope, inst: Instance) -> str:
+    return render_instance_ctx(scope, inst)[0]
+
+
+def render_instance_ctx(scope: Scope, inst: Instance) -> tuple[str, InstanceContext]:
+    """INST rendered by its template, and the context, which records what each bus signal
+    was connected to (the formal route harness reads the fabric-side nets from it)."""
     ctx = InstanceContext(scope, inst)
     template = environment(builtin_root()).get_template(f"{inst.template}/instance.sv.j2")
     fab = inst.fabric
@@ -353,7 +359,7 @@ def render_instance(scope: Scope, inst: Instance) -> str:
         user_ports=lambda i: [u for u in scope.spec.user_ports if u.instance == i.name],
     )
     ctx.check_connected(text)
-    return text
+    return text, ctx
 
 
 def _port_decls(scope: Scope, netlist: Netlist) -> list[str]:

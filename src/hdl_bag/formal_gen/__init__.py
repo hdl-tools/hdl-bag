@@ -14,6 +14,10 @@ Output layout (relative to the output directory)::
     formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
                                   a reference from the IR (D69; formal_gen.decode)
     formal/<project>_decode.sby   its job: a prove task (the check is combinational)
+    formal/<project>_route.sv     each in-house fabric and bridge on its own: slave-port
+                                  routing, fixed-priority arbitration, bridge windows
+                                  (D69, D70; formal_gen.units)
+    formal/<project>_route.sby    its job: a bmc task and a cover task
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
 sv-interface style), so they see its ports by name and the design needs no formal
@@ -76,6 +80,7 @@ fabric behaves (D8).
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hdl_bag.flows.formal import sby_job
 from hdl_bag.formal_gen.decode import render_decode
@@ -85,6 +90,9 @@ from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import AXI_FAMILY, PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, signal_width
+
+if TYPE_CHECKING:
+    from hdl_bag.formal_gen.units import Unit
 
 # k-induction depth for the assertions, in solver steps. The quiet property depends on the
 # reset state and the synchronizer's stage count, so a few steps make it inductive (demo_ss
@@ -805,7 +813,39 @@ def render_formal(spec: Spec, netlist: Netlist, top: str, files: list[str], incd
         out += [(f"formal/{name}.sv", decode),
                 (f"formal/{name}.sby", render_decode_sby(spec, files, incdirs, f"{name}.sv",
                                                          user_header))]  # fmt: skip
+    from hdl_bag.formal_gen.units import render_route
+
+    route = render_route(spec, netlist, hdr)
+    if route is not None:
+        name = f"{spec.project.name}_route"
+        text, found = route
+        out += [(f"formal/{name}.sv", text),
+                (f"formal/{name}.sby", render_route_sby(spec, found, files, incdirs, f"{name}.sv",
+                                                        user_header))]  # fmt: skip
     return out
+
+
+def render_route_sby(spec: Spec, found: list["Unit"], files: list[str], incdirs: list[str],
+                     props: str, user_header: str | None) -> str:  # fmt: skip
+    """The route job: ZipCPU's files read by Yosys's own frontend with one parameterised copy
+    per checker instance, then the design, BAG's own checkers and the route harness PROPS."""
+    from hdl_bag.formal_gen.units import ROUTE_DEPTH
+
+    zips = [z for u in found for z in u.zipcpu]
+    prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
+    for z in zips:
+        sets = " ".join(f"-set {k} {v}" for k, v in z.params)
+        prelude += [f"copy {z.vendor} {z.module}", f"chparam {sets} {z.module}"]
+    own = sorted({f for u in found for f in u.own})
+    copy = [("rtl", "../rtl"), *((f, f) for f in own)]
+    if zips:
+        copy.append(("zipcpu", "vendor/zipcpu"))
+    top = f"bag_{spec.project.name}_route"
+    job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs,
+                  depths={"bmc": ROUTE_DEPTH, "cover": ROUTE_DEPTH},
+                  copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
+                  prelude=prelude)  # fmt: skip
+    return f"{_sby_header(spec, user_header)}\n{job}"
 
 
 def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: str,
@@ -822,9 +862,12 @@ def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: s
 def vendored_files(spec: Spec, netlist: Netlist) -> list[str]:
     """The packaged formal files SPEC's jobs read (package paths): the step registers, and the
     vendored checkers with their LICENSE."""
-    found = sorted({c.vendor for c in checkers(spec, netlist)})
+    from hdl_bag.formal_gen.units import route_needs
+
+    route_own, route_vendors = route_needs(netlist)
+    found = sorted({c.vendor for c in checkers(spec, netlist)} | route_vendors)
     # The licence and the provenance (source and commit) travel with the files.
     extra = [f"{ZIPCPU}/LICENSE", f"{ZIPCPU}/SOURCE.md"] if found else []
     vendored = [f"{ZIPCPU}/{v}.v" for v in found] + extra
-    own = [f"formal/{f}" for f in own_checkers(netlist)]
+    own = [f"formal/{f}" for f in sorted(set(own_checkers(netlist)) | route_own)]
     return [f"formal/{STEP}", *own, *vendored]

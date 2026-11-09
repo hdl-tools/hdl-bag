@@ -78,7 +78,7 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("config", "jobs"),
-    [(c, ("decode", "protocol", "reset")) for c in ("ahb_fixed", "ahb2apb_pt", "apb4_min",
+    [(c, ("decode", "protocol", "reset", "route")) for c in ("ahb_fixed", "ahb2apb_pt", "apb4_min",
      "apb4_rules", "axil_shared_one", "axi_shared_one", "ahb_single")],
 )  # fmt: skip
 def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, ...]) -> None:

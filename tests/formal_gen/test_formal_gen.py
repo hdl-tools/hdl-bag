@@ -17,6 +17,7 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
+from hdl_bag.formal_gen.units import ROUTE_DEPTH
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -202,6 +203,7 @@ def test_the_job_reads_the_file_list_then_the_properties(tmp_path: Path) -> None
         "formal/demo_ss_decode.sby",
         "formal/demo_ss_protocol.sby",
         "formal/demo_ss_reset.sby",
+        "formal/demo_ss_route.sby",
     )
     job = (tmp_path / "formal/demo_ss_reset.sby").read_text(encoding="utf-8")
     read = " ".join([*(f"-I {d.as_posix()}" for d in include_dirs(out)), "--top", out.top,
@@ -350,6 +352,7 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
         "formal/apb3_wide_decode.sby",
         "formal/apb3_wide_protocol.sby",
         "formal/apb3_wide_reset.sby",
+        "formal/apb3_wide_route.sby",
     )
     job = (tmp_path / "formal" / "apb3_wide_protocol.sby").read_text(encoding="utf-8")
     for line in [
@@ -388,6 +391,7 @@ def test_an_axi4_only_design_gets_a_protocol_job_without_zipcpu(tmp_path: Path) 
         "formal/axi_xbar_rules_decode.sby",
         "formal/axi_xbar_rules_protocol.sby",
         "formal/axi_xbar_rules_reset.sby",
+        "formal/axi_xbar_rules_route.sby",
     )
     assert (tmp_path / "formal" / "bag_faxi4.sv").is_file()
     assert not (tmp_path / "formal" / "vendor").exists()
@@ -465,3 +469,22 @@ def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: 
     assert "prove: mode prove\nprove: depth 1\nmulticlock off\n" in job
     assert "read_slang --top bag_apb4_rules_decode " in job
     assert "formal/apb4_rules_decode.sby" in out.formal
+
+
+def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -> None:
+    """D69 parts 2 and 3, D70: each unit in its own harness. A fabric's slave-port check
+    reads the address on the fabric side, before it is fitted to the slave's width (D29);
+    ahb_fixed's fixed priorities give one race property per ordered pair of masters."""
+    spec = load(P2 / "apb4_rules.ir.yaml")
+    generate(spec, tmp_path / "apb", P2)
+    text = (tmp_path / "apb" / "formal" / "apb4_rules_route.sv").read_text(encoding="utf-8")
+    assert "module bag_apb4_rules_unit_apb (" in text
+    assert ("apb_wo0_p_routed: assert (apb_target(0, u_apb_m_paddr[1], wo0_apb4_pwrite, "
+            "wo0_apb4_pprot[1]) == 1);") in text  # fmt: skip
+    spec = load(P2 / "ahb_fixed.ir.yaml")
+    generate(spec, tmp_path / "ahb", P2)
+    text = (tmp_path / "ahb" / "formal" / "ahb_fixed_route.sv").read_text(encoding="utf-8")
+    labels = re.findall(r"(ahb_a_m\d_before_m\d): assert", text)
+    assert sorted(labels) == ["ahb_a_m0_before_m1", "ahb_a_m2_before_m0", "ahb_a_m2_before_m1"]
+    job = (tmp_path / "ahb" / "formal" / "ahb_fixed_route.sby").read_text(encoding="utf-8")
+    assert f"bmc: depth {ROUTE_DEPTH}\ncover: mode cover" in job
