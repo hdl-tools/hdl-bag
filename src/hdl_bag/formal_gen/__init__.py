@@ -7,7 +7,9 @@ Output layout (relative to the output directory)::
     formal/<project>_reset.sv     quiet-in-reset property module, bound into the lint top
     formal/<project>_reset.sby    its SymbiYosys job: a prove task and a cover task
     formal/<project>_protocol.sv  port-protocol checkers, bound into the lint top (D60)
-    formal/<project>_protocol.sby its job: a bmc task and a cover task
+    formal/<project>_protocol.sby its job: a bmc task (bitwuzla, D67) and a cover task
+    formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
+    formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
     formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
 
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
@@ -23,7 +25,8 @@ The first property family is quiet-in-reset, the formal form of the generated te
 ``reset_during_traffic_leaves_nothing_behind``: while a domain's reset is held, the design
 asks nothing of the masters and slaves in that domain (no request VALID, PSEL or HTRANS
 towards a slave, no response VALID towards an AXI master, HREADY high towards an AHB-Lite
-master). A domain whose reset asserts synchronously gets the synchronizer's stages first.
+master). A domain whose reset asserts synchronously through bag_rst_sync (sync assertion
+and deassertion) gets the synchronizer's stages first; any other reset acts at once.
 It is proved by k-induction, so it holds in every reachable state, not only to a depth.
 
 The environment, from the AMBA specifications and the reset sequence (D51):
@@ -36,8 +39,8 @@ The environment, from the AMBA specifications and the reset sequence (D51):
   reset group has left reset (D51 step 4: a sync-deassertion reset leaves the domain only
   after the synchronizer's stages);
 - alias-enable pins change only in reset (Phase 4: they are quasi-static);
-- in the protocol job, what the environment drives into an AXI4 port follows the AXI
-  handshake rule (A3.2.1), until PR 2b brings BAG's own AXI4 properties.
+- in the protocol job, what the environment drives into each port follows that port's
+  protocol: the checkers assume it.
 
 Covers keep each assertion honest, as ``checked > 0`` does for a test: for each asserted
 signal, the reset arrives while the signal is active (after the design has been through a
@@ -55,8 +58,15 @@ with its parameters set (``copy`` and ``chparam``), which the slang-read propert
 instantiates. Each checker sees its domain's reset as the design does: asserted from the
 start until the first reset has taken effect, then whenever the reset has passed the
 synchronizer. ZipCPU's bounded-wait checks are off, because a port's latency depends on how
-long the slaves beyond it stall, which nothing bounds. AXI4 and AHB-Lite ports get BAG's
-own properties (PR 2b).
+long the slaves beyond it stall, which nothing bounds.
+
+AXI4 and AHB-Lite ports get BAG's own checkers, written in SystemVerilog and read by slang
+with the design: ``formal/bag_faxi4.sv`` (the public ZipCPU full-AXI4 files are
+non-functional) and ``formal/bag_fahb.sv`` (D54). Each takes a parameter for the side the
+design is on, so one rule is asserted on what the design drives and assumed on what the
+environment drives. The AXI4 checker follows every ID of its port through one bounded table
+of outstanding transactions (D64, 4 entries, D66), so no ID mapping across the fabric is
+needed.
 
 A design with a user-supplied fabric gets no formal, because BAG does not know how that
 fabric behaves (D8).
@@ -579,7 +589,7 @@ def _checker(spec: Spec, bus: Bus, chk: Checker, dom: Domain,
 
 
 def axi4_ports(netlist: Netlist) -> list[Bus]:
-    """The top's AXI4 ports, which BAG's own checker watches (PR 2b)."""
+    """The top's AXI4 ports, which BAG's own checker watches (D64)."""
     return [b for b in netlist.ports if b.external and b.protocol is Protocol.AXI4]
 
 

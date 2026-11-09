@@ -189,6 +189,7 @@ _AXI4 = [("awvalid", 1, True), ("awready", 1, False), ("awid", 2, True), ("awadd
          ("arregion", 4, True), ("rvalid", 1, False), ("rready", 1, True), ("rid", 2, False),
          ("rdata", 32, False), ("rresp", 2, False), ("rlast", 1, False)]  # fmt: skip
 FAXI4 = Path(__file__).parents[2] / "src" / "hdl_bag" / "formal" / "bag_faxi4.sv"
+FAHB = FAXI4.with_name("bag_fahb.sv")
 
 
 def _axi4_props(design_is_slave: bool, check: str) -> str:
@@ -243,12 +244,103 @@ def test_an_axi4_slave_environment_answers_no_id_it_was_not_asked(tmp_path: Path
     assert report.ok, report.format()
 
 
+def test_an_axi4_slave_environment_holds_its_rules_at_every_step(tmp_path: Path) -> None:
+    """The same environment, checked at every solver step rather than at clock edges. A
+    design can pass what the environment drives straight through to another port, whose
+    checker (ZipCPU's AXI4-Lite files) asserts at every step. If bag_faxi4 applied its
+    assumptions only at the next edge, the last step of a trace would be left unconstrained:
+    axi_adapters' bmc failed that way, with a slave's unasked EXOKAY reaching an AXI4-Lite
+    port through the crossbar."""
+    props = _axi4_props(False, "").replace(
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n\n  end\n",
+        "  always_comb if (rst_n && was_out) never_answered_now: assert (!rvalid && !bvalid);\n",
+    )
+    assert "never_answered_now" in props
+    report = _axi4_tiny(tmp_path, False, {"bready": "1'b1", "rready": "1'b1"}, props=props)
+    assert report.ok, report.format()
+
+
+def test_an_axi4_slave_environment_accepts_no_more_than_the_tables_hold(tmp_path: Path) -> None:
+    """The design is a master that keeps opening single-beat reads and writes and never
+    takes a response. A crossbar may legally keep more open on one port than bag_faxi4's
+    tables hold (axi_xbar_pow2: a 5th read to s3), so the environment slave stops accepting
+    once a table is full, as a slave with that acceptance capability may (D66). The design's
+    side of the bound, tracker_has_room_*, then holds."""
+    report = _axi4_tiny(tmp_path, False, {
+        "awvalid": "rst_n", "wvalid": "rst_n", "wlast": "1'b1", "awburst": "2'd1",
+        "arvalid": "rst_n", "arburst": "2'd1",
+    })  # fmt: skip
+    assert report.ok, report.format()
+
+
+def test_an_axi4_slave_environment_gives_exokay_only_to_exclusive_accesses(
+    tmp_path: Path,
+) -> None:
+    """The design is a master that keeps making normal (AxLOCK low) single-beat reads and
+    writes. EXOKAY answers only an exclusive access (A7.2), so the environment slave must
+    never give it here: axi_adapters' bmc failed when a slave's EXOKAY to a normal access
+    passed through the fabric to an AXI4-Lite port, where it is illegal."""
+    props = _axi4_props(False, "").replace(
+        "  always_ff @(posedge clk) if (rst_n && was_out) begin\n\n  end\n",
+        "  always_comb if (rst_n && was_out) begin\n"
+        "    no_exokay_b: assert (!(bvalid && bresp == 2'b01));\n"
+        "    no_exokay_r: assert (!(rvalid && rresp == 2'b01));\n"
+        "  end\n",
+    )
+    assert "no_exokay_r" in props
+    report = _axi4_tiny(tmp_path, False, {
+        "awvalid": "rst_n", "wvalid": "rst_n", "wlast": "1'b1", "awburst": "2'd1",
+        "arvalid": "rst_n", "arburst": "2'd1", "bready": "1'b1", "rready": "1'b1",
+    }, props=props)  # fmt: skip
+    assert report.ok, report.format()
+
+
 def test_an_axi4_slave_design_answering_an_unasked_id_is_caught(tmp_path: Path) -> None:
     """The design is a slave that raises BVALID on ID 3 with no write ever made: the checker
     must fail it, whichever ID that is (D64)."""
     report = _axi4_tiny(tmp_path, True, {"bvalid": "rst_n", "bid": "2'd3"})
     failed = [f.message for f in report.findings if f.rule == "FORMAL-ASSERT"]
     assert any("assertion b_only_for_a_complete_write fails" in m for m in failed), report.format()
+
+
+def test_an_ahb_master_environment_holds_its_rules_at_every_step(tmp_path: Path) -> None:
+    """As for bag_faxi4: the environment master of a design that is an always-ready AHB-Lite
+    slave must keep HSIZE within the bus at every solver step, not only at the edges, or
+    whatever the design passes on combinationally is free in a trace's last step."""
+    (tmp_path / "rtl").mkdir()
+    (tmp_path / "rtl" / "t.sv").write_text(
+        "module t (input logic clk, input logic rst_n, input logic hsel,\n"
+        "          input logic [31:0] haddr, input logic [1:0] htrans, input logic hwrite,\n"
+        "          input logic [2:0] hsize, input logic [2:0] hburst, input logic [3:0] hprot,\n"
+        "          input logic hmastlock, input logic hnonsec, input logic [31:0] hwdata,\n"
+        "          output logic hready, output logic hresp, output logic [31:0] hrdata);\n"
+        "  assign hready = 1'b1;\n  assign hresp = 1'b0;\n  assign hrdata = '0;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "bag_fahb.sv").write_text(FAHB.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "t_props.sv").write_text(
+        "module t_props (input logic clk, input logic rst_n, input logic hsel,\n"
+        "    input logic [31:0] haddr, input logic [1:0] htrans, input logic hwrite,\n"
+        "    input logic [2:0] hsize, input logic [2:0] hburst, input logic [3:0] hprot,\n"
+        "    input logic hmastlock, input logic hnonsec, input logic [31:0] hwdata,\n"
+        "    input logic hready, input logic hresp, input logic [31:0] hrdata);\n"
+        "  logic first = 1'b1, was_out = 1'b0;\n"
+        "  always_ff @(posedge clk) begin first <= 1'b0; was_out <= rst_n; end\n"
+        "  always_comb if (first) assume (!rst_n);\n"
+        "  bag_fahb #(.DesignIsSlave(1)) u_chk (.clk_i(clk), .rst_ni(rst_n), .hsel, .haddr,\n"
+        "      .htrans, .hwrite, .hsize, .hburst, .hprot, .hmastlock, .hnonsec, .hwdata,\n"
+        "      .hready, .hreadyout(hready), .hresp, .hrdata, .write_done_o(), .read_done_o(),\n"
+        "      .wait_o(), .error_o(), .seq_o());\n"
+        "  always_comb if (rst_n && was_out && hsel && htrans[1])\n"
+        "    size_within_the_bus_now: assert (hsize <= 3'd2);\n"
+        "endmodule\n"
+        "bind t t_props u_props (.*);\n",
+        encoding="utf-8",
+    )
+    report = prove([Path("rtl/t.sv")], "t", tmp_path, properties=[Path("bag_fahb.sv"),
+                   Path("t_props.sv")], depth=8, mode="bmc")  # fmt: skip
+    assert report.ok, report.format()
 
 
 def _ahb_mutant(tmp_path: Path, old: str, new: str) -> list[tuple[str, str]]:

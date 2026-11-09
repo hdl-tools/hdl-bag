@@ -205,8 +205,11 @@ module bag_fahb #(
   wire ok_idle_okay = !(live && dp_sel && !dp_xfer) || (hreadyout && !hresp);
 
   // ---------------------------------------------------------------- assert or assume
+  // The design's rules are asserted at each edge, the environment's assumed at every solver
+  // step (as in bag_faxi4): what the design passes on combinationally is then legal in a
+  // trace's last step too.
   if (DesignIsSlave) begin : gen_design_is_slave
-    always_ff @(posedge clk_i) begin
+    always_comb begin
       if (rst_ni) begin
         assume (ok_hold);
         assume (ok_wdata);
@@ -214,6 +217,10 @@ module bag_fahb #(
         assume (ok_burst);
         assume (ok_burst_ends);
         assume (ok_idle_wait);
+      end
+    end
+    always_ff @(posedge clk_i) begin
+      if (rst_ni) begin
         error_second_cycle: assert (ok_err_second);
         error_takes_two_cycles: assert (ok_err_first);
         idle_gets_zero_wait_okay: assert (ok_idle_okay);
@@ -229,6 +236,10 @@ module bag_fahb #(
         size_fits_and_aligned: assert (ok_size);
         seq_follows_its_burst: assert (ok_burst);
         hreadyout_reaches_hready: assert (ok_routed);
+      end
+    end
+    always_comb begin
+      if (rst_ni) begin
         assume (ok_err_second);
         assume (ok_err_first);
         assume (ok_idle_okay);

@@ -18,12 +18,15 @@
 // far, are kept in two tables of the port's own IDs. A response must match the oldest open
 // entry of its ID, so the environment slave can answer only what it was asked, and the
 // design only what it was asked, on every ID in every trace. Each table holds
-// MaxOutstanding entries over all IDs: the environment is assumed to stay within that; the
-// design is asserted to (a run that needs more fails tracker_has_room_*, never passes
-// silently). 4 by default (D66): 8 nearly tripled the protocol bmc's run time on
-// axi_xbar_rules (profiled at depth 12), while 4 costs almost nothing. A 16-step bounded
-// check has at most 8 clock edges, so a port could open 5 or 6; per-class formal (Phase 5
-// PR 4) revisits the bound.
+// MaxOutstanding entries over all IDs, and the environment keeps within that: an
+// environment master opens no more (tracker_has_room_* assumed), and an environment slave
+// holds AWREADY, WREADY or ARREADY low while the table they would fill is full, as a slave
+// of that acceptance capability may. On the design's side tracker_has_room_* is still
+// asserted, so a gap in that cap fails rather than passing silently. A crossbar may
+// legally keep more open on one port than the tables hold (axi_xbar_pow2: 5 reads to one
+// slave); those states go unexplored. 4 by default (D66): 8 nearly tripled the protocol
+// bmc's run time on axi_xbar_rules (profiled at depth 12), while 4 costs almost nothing.
+// Per-class formal (Phase 5 PR 4) revisits the bound.
 //
 // The checks:
 //   handshake  VALID and its payload hold from VALID until READY, on every channel (A3.2.1)
@@ -34,7 +37,8 @@
 //   wlast      WLAST on the AWLEN-th beat of each write, in AW order (A3.4.1, A3.3.1)
 //   responses  a write response only for a write whose address and last data beat have
 //              both been accepted; read data only for an outstanding read of that ID, RLAST
-//              on its ARLEN-th beat, reads of one ID in order (A5.3)
+//              on its ARLEN-th beat, reads of one ID in order (A5.3); EXOKAY only for an
+//              exclusive access (A7.2)
 
 `default_nettype none
 
@@ -183,7 +187,7 @@ module bag_faxi4 #(
   // write; a write response is due only for a completed write.
   wire aw_hs = awvalid && awready, w_hs = wvalid && wready;
 
-  localparam int unsigned Ew = IdWidth + 8;
+  localparam int unsigned Ew = 1 + IdWidth + 8;  // {AWLOCK, AWID, AWLEN}
   logic [Ew-1:0] q [MaxOutstanding];
   logic [Cw-1:0] n = '0;
   logic aw_ahead = 1'b0;
@@ -203,13 +207,13 @@ module bag_faxi4 #(
   wire pop_aw = w_done && aw_ahead && n != '0;  // data finishes the oldest waiting address
   wire pop_w = aw_hs && !aw_ahead && n != '0;  // an address finishes the oldest data burst
   wire pair = aw_hs && w_done && n == '0;  // both arrive together, nothing waiting
-  wire [IdWidth-1:0] done_id = pop_aw ? q[0][Ew-1:8] : awid;
+  wire [IdWidth-1:0] done_id = pop_aw ? q[0][Ew-2:8] : awid;
+  wire done_lock = pop_aw ? q[0][Ew-1] : awlock;
   wire completes = pop_aw || pop_w || pair;
   // What gets stored: the address (if it does not complete a write) or the data burst.
   wire push_aw = aw_hs && !pop_w && !pair;
   wire push_w = w_done && !pop_aw && !pair;
-  // The tracker's capacity: assumed on the environment; on the design's side a run that
-  // needs more is reported as such (tracker_full), never passed silently.
+  // A store into a full FIFO: the tracker's capacity (see the header).
   wire overflow = (push_aw || push_w) && !(pop_aw || pop_w) && n == Cw'(MaxOutstanding);
 
   always_ff @(posedge clk_i) begin
@@ -224,14 +228,14 @@ module bag_faxi4 #(
         for (int unsigned i = 0; i + 1 < MaxOutstanding; i++) begin
           q[i] <= q[i+1];
         end
-        if (push_aw && n > CwOne) q[n[Cw-2:0]-1] <= {awid, awlen};
-        else if (push_aw) q[0] <= {awid, awlen};
-        if (push_w && n > CwOne) q[n[Cw-2:0]-1] <= {IdWidth'(0), w_beats};
-        else if (push_w) q[0] <= {IdWidth'(0), w_beats};
+        if (push_aw && n > CwOne) q[n[Cw-2:0]-1] <= {awlock, awid, awlen};
+        else if (push_aw) q[0] <= {awlock, awid, awlen};
+        if (push_w && n > CwOne) q[n[Cw-2:0]-1] <= {1'b0, IdWidth'(0), w_beats};
+        else if (push_w) q[0] <= {1'b0, IdWidth'(0), w_beats};
         n <= n - 1'b1 + Cw'(push_aw || push_w);
         if (n == CwOne && (push_aw || push_w)) aw_ahead <= push_aw;
       end else if ((push_aw || push_w) && !overflow) begin
-        q[n[Cw-2:0]] <= push_aw ? {awid, awlen} : {IdWidth'(0), w_beats};
+        q[n[Cw-2:0]] <= push_aw ? {awlock, awid, awlen} : {1'b0, IdWidth'(0), w_beats};
         n <= n + 1'b1;
         aw_ahead <= push_aw;
       end
@@ -244,8 +248,9 @@ module bag_faxi4 #(
   localparam int unsigned Iw = $clog2(MaxOutstanding);
   wire b_hs = bvalid && bready, ar_hs = arvalid && arready, r_hs = rvalid && rready;
 
-  // Completed writes owed a response: their IDs.
+  // Completed writes owed a response: their IDs, and whether each was exclusive.
   logic [IdWidth-1:0] bq [MaxOutstanding];
+  logic bq_lock [MaxOutstanding];
   logic [Cw-1:0] bn = '0;
   logic b_found;
   logic [Iw-1:0] b_at;
@@ -262,8 +267,9 @@ module bag_faxi4 #(
   wire b_pop = b_hs && b_found;
   wire b_overflow = completes && !b_pop && bn == Cw'(MaxOutstanding);
 
-  // Outstanding reads: ID, ARLEN, and beats so far.
+  // Outstanding reads: ID, ARLEN, beats so far, and whether each is exclusive.
   logic [IdWidth-1:0] rq_id [MaxOutstanding];
+  logic rq_lock [MaxOutstanding];
   logic [7:0] rq_len [MaxOutstanding];
   logic [7:0] rq_beats [MaxOutstanding];
   logic [Cw-1:0] rn = '0;
@@ -286,6 +292,10 @@ module bag_faxi4 #(
   wire ok_r_open = !(live && rvalid) || r_found;
   wire ok_rlast = !(live && r_hs && r_found)
                   || (rlast == (rq_beats[r_at] == rq_len[r_at]) && rq_beats[r_at] <= rq_len[r_at]);
+  // EXOKAY answers only an exclusive access (A7.2); an exclusive access may also get OKAY.
+  localparam logic [1:0] ExOkay = 2'b01;
+  wire ok_b_exokay = !(live && bvalid && b_found && bresp == ExOkay) || bq_lock[b_at];
+  wire ok_r_exokay = !(live && rvalid && r_found && rresp == ExOkay) || rq_lock[r_at];
 
   always_ff @(posedge clk_i) begin
     if (!rst_ni) begin
@@ -295,12 +305,19 @@ module bag_faxi4 #(
       // Write responses: drop the answered entry, append a completed write.
       if (b_pop) begin
         for (int unsigned i = 0; i + 1 < MaxOutstanding; i++) begin
-          if (Iw'(i) >= b_at) bq[i] <= bq[i+1];
+          if (Iw'(i) >= b_at) begin
+            bq[i] <= bq[i+1];
+            bq_lock[i] <= bq_lock[i+1];
+          end
         end
-        if (completes) bq[Iw'(bn - CwOne)] <= done_id;
+        if (completes) begin
+          bq[Iw'(bn - CwOne)] <= done_id;
+          bq_lock[Iw'(bn - CwOne)] <= done_lock;
+        end
         bn <= bn - CwOne + Cw'(completes);
       end else if (completes && !b_overflow) begin
         bq[Iw'(bn)] <= done_id;
+        bq_lock[Iw'(bn)] <= done_lock;
         bn <= bn + CwOne;
       end
       // Reads: count a beat, drop a finished read, append an accepted one.
@@ -309,18 +326,21 @@ module bag_faxi4 #(
         for (int unsigned i = 0; i + 1 < MaxOutstanding; i++) begin
           if (Iw'(i) >= r_at) begin
             rq_id[i] <= rq_id[i+1];
+            rq_lock[i] <= rq_lock[i+1];
             rq_len[i] <= rq_len[i+1];
             rq_beats[i] <= rq_beats[i+1];
           end
         end
         if (ar_hs) begin
           rq_id[Iw'(rn - CwOne)] <= arid;
+          rq_lock[Iw'(rn - CwOne)] <= arlock;
           rq_len[Iw'(rn - CwOne)] <= arlen;
           rq_beats[Iw'(rn - CwOne)] <= 8'd0;
         end
         rn <= rn - CwOne + Cw'(ar_hs);
       end else if (ar_hs && !r_overflow) begin
         rq_id[Iw'(rn)] <= arid;
+        rq_lock[Iw'(rn)] <= arlock;
         rq_len[Iw'(rn)] <= arlen;
         rq_beats[Iw'(rn)] <= 8'd0;
         rn <= rn + CwOne;
@@ -331,12 +351,25 @@ module bag_faxi4 #(
   // The tracker's bound, as a rule on whoever opens transactions.
   wire ok_w_room = !(live && (overflow || b_overflow));
   wire ok_r_room = !(live && r_overflow);
+  // An environment slave accepts nothing a full table would have to store: no address or
+  // data while completed writes fill the response table; no address while addresses wait in
+  // a full FIFO, no data while data bursts do; no read while the read table is full. With
+  // these, ok_w_room and ok_r_room hold whatever the design opens.
+  localparam logic [Cw-1:0] Full = Cw'(MaxOutstanding);
+  wire ok_slave_cap = !(bn == Full && (awready || wready))
+                      && !(n == Full && aw_ahead && awready)
+                      && !(n == Full && !aw_ahead && wready)
+                      && !(rn == Full && arready);
 
   // ---------------------------------------------------------------- assert or assume
+  // The design's rules are asserted at each edge. The environment's are assumed at every
+  // solver step: the values an edge samples are then legal too, and so is what the design
+  // passes on combinationally to a port whose checker asserts at every step (ZipCPU's
+  // AXI4-Lite files). Assumed only at edges, the last step of a trace was left free.
   if (DesignIsSlave) begin : gen_design_is_slave
     // The environment is the master: its requests are assumed, the design's responses
     // asserted.
-    always_ff @(posedge clk_i) begin
+    always_comb begin
       if (rst_ni) begin
         assume (ok_aw_hold);
         assume (ok_w_hold);
@@ -347,11 +380,17 @@ module bag_faxi4 #(
         assume (ok_w_early);
         assume (ok_w_room);
         assume (ok_r_room);
+      end
+    end
+    always_ff @(posedge clk_i) begin
+      if (rst_ni) begin
         b_hold: assert (ok_b_hold);
         r_hold: assert (ok_r_hold);
         b_only_for_a_complete_write: assert (ok_b_open);
         r_only_for_an_open_read: assert (ok_r_open);
         rlast_on_the_last_beat: assert (ok_rlast);
+        b_exokay_only_if_exclusive: assert (ok_b_exokay);
+        r_exokay_only_if_exclusive: assert (ok_r_exokay);
       end
     end
   end else begin : gen_design_is_master
@@ -368,11 +407,18 @@ module bag_faxi4 #(
         wlast_matches_its_address: assert (ok_w_early);
         tracker_has_room_for_writes: assert (ok_w_room);
         tracker_has_room_for_reads: assert (ok_r_room);
+      end
+    end
+    always_comb begin
+      if (rst_ni) begin
+        assume (ok_slave_cap);
         assume (ok_b_hold);
         assume (ok_r_hold);
         assume (ok_b_open);
         assume (ok_r_open);
         assume (ok_rlast);
+        assume (ok_b_exokay);
+        assume (ok_r_exokay);
       end
     end
   end
