@@ -9,9 +9,9 @@ must fail one of its assertions, whose reference comes from the IR, not from the
 - the route jobs (formal/<project>_route_<unit>.sv, one per fabric or bridge) for the fixed
   priorities (D70), the bridges' address offsets (D69 part 3), and a sample of the decode
   table bugs as they show at a fabric's slave ports (D69 part 2): the mutated units' jobs.
-A catch counts only as a counterexample to an assertion of the expected kind in the job's
-harness: every finding must be one, so a timeout, a tool error or an unreached cover never
-passes for a catch. The control is the same job, or every route job, on the unmutated
+A catch counts only with a counterexample to an assertion of the expected kind in the job's
+harness, and nothing else but unreached covers, so a timeout, a tool error or a cover alone
+never passes for a catch. The control is the same job, or every route job, on the unmutated
 config, which must pass, covers included.
 """
 
@@ -101,13 +101,16 @@ _ASSERTION = re.compile(r": assertion (\S+) fails ")
 
 
 def _caught(failed: list[Finding], spec: Spec, job: str, labels: tuple[str, ...]) -> None:
-    """FAILED is not empty, every finding is a counterexample to an assertion of a harness of
-    JOB (decode, or route: any unit's), and one of those assertions is named for one of
-    LABELS."""
-    assert failed, f"survived the {job} job"
+    """FAILED holds a counterexample to an assertion of a harness of JOB (decode, or route:
+    any unit's) named for one of LABELS, and nothing but such counterexamples and unreached
+    covers (a mutant may starve a cover too: reversed priorities never let the pair's race
+    end the other way). A timeout or a tool error never passes for a catch, nor a cover
+    alone."""
     harness = f"formal/{spec.project.name}_{job}"
-    assert all(f.rule == "FORMAL-ASSERT" and f.file.startswith(harness) for f in failed), failed
-    names = [m[1] for f in failed if (m := _ASSERTION.search(f.message))]
+    asserts = [f for f in failed if f.rule == "FORMAL-ASSERT"]
+    assert all(f.file.startswith(harness) for f in asserts), failed
+    assert all(f.rule in ("FORMAL-ASSERT", "FORMAL-COVER") for f in failed), failed
+    names = [m[1] for f in asserts if (m := _ASSERTION.search(f.message))]
     assert any(label in n for n in names for label in labels), (labels, failed)
 
 

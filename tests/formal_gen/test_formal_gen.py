@@ -499,6 +499,48 @@ def test_the_decode_reference_aliases_and_answers_misses_as_the_ir_says(tmp_path
         ) in text
 
 
+def test_route_properties_are_sampled_at_the_clock_edge(tmp_path: Path) -> None:
+    """CI bug (axil_shared_fixed): the checkers constrain the environment at clock edges
+    only, so between edges a free clock lets a waiting master's address take any value and
+    return by the next edge. A request counts where its slave samples it, at the edge, so
+    every route property and its cover is clocked: an always_comb check failed on such a
+    between-edge address the shared bus passed through. Bridge windows are sampled at the
+    downstream clock (bridges_pulp's br_per crosses to D_PER)."""
+    generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path / "asf", P3)
+    text = (tmp_path / "asf" / "formal" / "axil_shared_fixed_route_bus.sv").read_text(
+        encoding="utf-8"
+    )
+    assert ("  always @(posedge clk_sys) if (bag_live_D_SYS && s0_axil_awvalid) "
+            "bus_s0_aw_routed: assert (") in text  # fmt: skip
+    assert ("  always @(posedge clk_sys) cover_bus_s0_aw_routed: "
+            "cover (bag_live_D_SYS && s0_axil_awvalid);\n") in text  # fmt: skip
+    assert "  always @(posedge clk_sys) if (bag_live_D_SYS && (bag_race_aw_" in text
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
+    for path in sorted((tmp_path / "bp" / "formal").glob("*_route_*.sv")):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"always_comb (if \([^\n]*\) )?\w+: (assert|cover) \(", text), path
+    text = (tmp_path / "bp" / "formal" / "bridges_pulp_route_br_per.sv").read_text(encoding="utf-8")
+    assert "  always @(posedge clk_per) if (bag_live_D_SYS && bag_live_D_PER && " in text
+
+
+def test_a_channel_the_ir_never_uses_keeps_its_assertion_and_has_no_cover(tmp_path: Path) -> None:
+    """CI bug (axil_shared_fixed): s1's only region is read-only, so the fabric reference
+    sends it no write. Its AW check then says no write ever arrives, with no cover to reach,
+    and its ZipCPU checker is read-only (as in the protocol job): the covers of a write
+    there were unreachable by design."""
+    out = generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axil_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    assert " bus_s1_aw_routed: assert (" in text
+    assert "cover_bus_s1_aw_routed" not in text
+    assert "  // bus_s1_aw_routed: no cover, the IR sends s1 no write\n" in text
+    assert "cover_bus_s1_ar_routed: cover (" in text and "cover_bus_s0_aw_routed: cover (" in text
+    job = (tmp_path / "formal" / "axil_shared_fixed_route_bus.sby").read_text(encoding="utf-8")
+    s1 = next(line for line in job.splitlines()
+              if line.startswith("chparam") and line.endswith("_bus_s1"))  # fmt: skip
+    assert " -set F_OPT_READ_ONLY 1 " in s1
+    assert "formal/axil_shared_fixed_route_bus.sby" in out.formal
+
+
 def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
     """Review weakness: the D70 race on AR is armed only with nothing outstanding, so the
     count drops once per read, at RLAST, not once per beat (a 4-beat read left it wrapped
@@ -541,7 +583,11 @@ def test_every_property_label_is_unique_and_every_assertion_has_its_cover(
             labels = asserts + covers
             assert len(labels) == len(set(labels)), sorted(labels)
             if "_unit_" in module.split("(", 1)[0]:
-                assert asserts and {f"cover_{a}" for a in asserts} <= set(covers), module[:60]
+                # A channel the IR never uses says so instead (no cover can be reached).
+                bare = set(re.findall(r"\n  // (\w+): no cover, the IR sends ", module))
+                assert asserts, module[:60]
+                assert {f"cover_{a}" for a in asserts if a not in bare} <= set(covers), module[:60]
+                assert bare <= set(asserts) and not {f"cover_{a}" for a in bare} & set(covers)
 
 
 def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -> None:

@@ -26,7 +26,7 @@ harness port), an environment and the properties:
 
 from dataclasses import dataclass
 
-from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, reference
+from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
@@ -210,7 +210,9 @@ class _Harness:
             family = "axil" if p is Protocol.AXI4_LITE else "apb"
             vendor = _CHECKER[(family, not a.unit_is_slave)]
             module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
-            self.zipcpu.append(ZipChecker(vendor, module, zipcpu_params(bus, family, None)))
+            self.zipcpu.append(
+                ZipChecker(vendor, module, zipcpu_params(bus, family, self.slave_can(a)))
+            )
             if family == "axil":
                 conns = [("i_clk", clk), ("i_axi_reset_n", f"!bag_in_reset_{d}")]
                 conns += [(f"i_axi_{s}", self.v(bus, s)) for s in _AXIL]
@@ -230,6 +232,14 @@ class _Harness:
         lines = [head, *(f"      .{c}({x})," for c, x in conns)]
         lines[-1] = lines[-1].rstrip(",")
         self.body += [*lines, "  );"]
+
+    def slave_can(self, a: Attach) -> frozenset[str] | None:
+        """On a fabric's slave port, what the fabric reference sends there (as the protocol
+        job's checkers have it); None elsewhere (the environment may send anything)."""
+        fab = self.inst.fabric
+        if fab is None or a.unit_is_slave:
+            return None
+        return port_accesses(self.spec, fab)[self.inst.slaves.index(a.bus)]
 
     # ------------------------------------------------------------------ requests
     def requests(self, bus: Bus) -> list[tuple[str, str, str, str, str | None]]:
@@ -281,6 +291,7 @@ class _Harness:
         nm = len(fab.master_ports)
         # The netlist's slots are by Port index, as the reference numbers masters and slaves.
         assert len(self.inst.masters) == nm and len(self.inst.slaves) == len(fab.slave_ports)
+        can = port_accesses(self.spec, fab)
         for k, bus in enumerate(self.inst.slaves):
             for ch, valid, _, write, ns in self.requests(bus):
                 addr = self.fabric_side(bus, k, {"aw": "awaddr", "ar": "araddr", "a": "haddr",
@@ -298,9 +309,19 @@ class _Harness:
                 legal = " || ".join(f"{name}_target({m}, {addr}, {write}, {n}) == {k}"
                                     for m in masters for n in nonsecs)  # fmt: skip
                 label = f"{name}_{bus.name}_{ch}_routed"
-                self.body.append(f"  always_comb if (bag_live_{d} && {valid}) {label}: "
-                                 f"assert ({legal});")  # fmt: skip
-                self.body.append(f"  always_comb cover_{label}: cover (bag_live_{d} && {valid});")
+                # Sampled at the edge, as the slave samples it: between edges a free clock lets
+                # an input the checkers constrain only at edges take any value.
+                clk = self.domains()[bus.domain]
+                self.body.append(f"  always @(posedge {clk}) if (bag_live_{d} && {valid}) "
+                                 f"{label}: assert ({legal});")  # fmt: skip
+                # A channel the reference never uses: the check says nothing arrives there,
+                # and no cover can be reached.
+                kind = {"aw": "write", "ar": "read"}.get(ch)
+                if kind is not None and kind not in can[k]:
+                    self.body.append(f"  // {label}: no cover, the IR sends {bus.name} no {kind}")
+                    continue
+                self.body.append(f"  always @(posedge {clk}) cover_{label}: "
+                                 f"cover (bag_live_{d} && {valid});")  # fmt: skip
 
     def arbitration(self) -> None:
         """D70: of two masters that start at the same edge, the one with the lower priority
@@ -391,9 +412,9 @@ class _Harness:
                         "not yet in",
                         f"  always_ff @(posedge {clk}) {race} <= bag_live_{d} && "
                         f"({race} || {both}) && !{a}_won;",
-                        f"  always_comb if (bag_live_{d} && ({race} || {both})) "
+                        f"  always @(posedge {clk}) if (bag_live_{d} && ({race} || {both})) "
                         f"{name}_{ch}_{mi}_before_{mj}: assert (!({b}_won && !{a}_won));",
-                        f"  always_comb cover_{name}_{ch}_{mi}_before_{mj}: "
+                        f"  always @(posedge {clk}) cover_{name}_{ch}_{mi}_before_{mj}: "
                         f"cover (bag_live_{d} && {race} && {a}_won);",
                     ]
 
@@ -408,7 +429,7 @@ class _Harness:
             window(self.spec, fabrics[br.downstream]),
         )
         du, dd = up.domain, dn.domain
-        cu = self.domains()[du]
+        cu, cd = self.domains()[du], self.domains()[dd]
         v = self.v
         beat = max(up.data_width, dn.data_width) // 8
         p = up.protocol
@@ -466,9 +487,10 @@ class _Harness:
         for ch, valid, addr, _, _ in self.requests(dn):
             label = f"{br.name}_{ch}_in_window"
             self.body += [
-                f"  always_comb if (bag_live_{du} && bag_live_{dd} && {valid}) {label}: "
-                f"assert (bag_busy && (({addr} ^ {exp}) & {mask}) == '0);",
-                f"  always_comb cover_{label}: cover (bag_live_{du} && bag_live_{dd} && {valid});",
+                f"  always @(posedge {cd}) if (bag_live_{du} && bag_live_{dd} && {valid}) "
+                f"{label}: assert (bag_busy && (({addr} ^ {exp}) & {mask}) == '0);",
+                f"  always @(posedge {cd}) cover_{label}: "
+                f"cover (bag_live_{du} && bag_live_{dd} && {valid});",
             ]
 
 

@@ -65,6 +65,22 @@ def _target(fabric: Fabric, master: str, region: Any | None, write: bool, nonsec
     return len(slaves) if to is None else slaves[to]
 
 
+def port_accesses(spec: Spec, fabric: Fabric) -> list[frozenset[str]]:
+    """Per slave port of FABRIC (by Port index), the accesses ("read", "write") the reference
+    sends there for some master, address and secure bit: a master may send any address, so
+    every region and a miss are tried."""
+    regions: list[Any] = [r for r in spec.memory_map if r.fabric == fabric.name]
+    out: list[set[str]] = [set() for _ in fabric.slave_ports]
+    for master in masters_of(fabric):
+        for region in [*regions, None]:
+            for write in (False, True):
+                for nonsec in (False, True):
+                    k = _target(fabric, master, region, write, nonsec)
+                    if k < len(out):
+                        out[k].add("write" if write else "read")
+    return [frozenset(s) for s in out]
+
+
 def _case(fabric: Fabric, master: str, region: Any | None) -> str:
     """The target for each read/write and secure bit, as a case on {write, nonsec}."""
     rows = [f"2'b{int(w)}{int(n)}: return {_target(fabric, master, region, w, n)};"
