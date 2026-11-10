@@ -12,10 +12,14 @@ harness port), an environment and the properties:
   the environment drives follows the bus's protocol, assumed by the same checkers the
   protocol job uses (bag_faxi4, bag_fahb, ZipCPU's AXI4-Lite and APB files), which assert
   what the unit drives;
-- a fabric's slave ports (D69 part 2): every request that appears there is one the
-  reference (formal_gen.decode) sends to that port, for the master that sent it (AXI4:
-  the ID prefix names it; AXI4-Lite and AHB-Lite: some master of the fabric; APB: its one
-  master). A miss or a denial reaches no slave port;
+- a fabric's slave ports (D69 part 2, D71): every request that appears there is one a
+  master made and the reference (formal_gen.decode) sends to that port, exactly: a
+  scoreboard per master holds its accepted requests as the reference has them (aliased
+  address, write, non-secure bit, slave port), and each slave-port request must match its
+  master's oldest entry for that port (AXI4: the ID prefix names the master; ID-less
+  fabrics with several masters: the one entry that matches, D78). A miss or a denial
+  reaches no slave port, and a master gets a response only for a request a slave took or
+  the reference answers itself (_delivered);
 - fixed-priority arbitration (D70): when two masters of a shared bus or AHB-Lite bus
   start a request at the same edge, both bound for a slave, the one with the lower
   Topology priority value is accepted first;
@@ -30,7 +34,7 @@ from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
-from hdl_bag.ir.model import Spec
+from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
@@ -49,6 +53,12 @@ ROUTE_DEPTH_PER_HALVING = 6
 # mixed_cdc_chain's reached only edge 10 in 20 minutes.
 ROUTE_CYCLES = 8
 ROUTE_CYCLES_PER_HALVING = 2
+# Scoreboard entries per master and request channel (D71): an AXI4 master keeps at most 4
+# transactions open (bag_faxi4's tables, D66), and the environment keeps the others within
+# the same bound; an AHB-Lite master has one address phase beyond its data phase; the APB
+# mux passes its one master's setup phase on in the same cycle.
+SCOREBOARD = {Protocol.AXI4: 4, Protocol.AXI4_LITE: 4, Protocol.AHB_LITE: 2, Protocol.APB3: 1,
+              Protocol.APB4: 1}  # fmt: skip
 BRIDGES = ("bag_ahb2apb", "bag_ahb2axi", "bag_apb2ahb", "bag_apb2axi", "bag_axi2ahb",
            "bag_axi2apb", "bag_axi2axil")  # fmt: skip
 
@@ -91,6 +101,18 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     if len(unit.clocks) == 1:
         return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
     return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+
+
+def id_prefixes(fab: Fabric) -> list[int]:
+    """The ID prefix each master of AXI4 fabric FAB (by Port index) carries at its slave
+    ports: its index, except on a fixed-priority shared bus, whose mux takes the masters in
+    priority order (bag_axi_shared_bus's rank: how many masters have a lower Priority value)
+    and so prefixes that rank. Taken from the IR's priorities, not the package's."""
+    order = masters_of(fab)
+    if fab.topology != "shared-bus" or fab.arbitration != "fixed-priority":
+        return list(range(len(order)))
+    prio = {p.port: p.priority or 0 for p in fab.master_ports}
+    return [sum(prio[k] < prio[m] for k in order) for m in order]
 
 
 def units(netlist: Netlist) -> list[Instance]:
@@ -207,6 +229,7 @@ class _Harness:
             ids = ("awid", "bid", "arid", "rid")
             conns += [(s, "1'b0" if s in ids and not bus.id_width else self.v(bus, s))
                       for s in sigs]  # fmt: skip
+            conns += [(f"{e}_o", "") for e in ("multi_write", "w_first", "same_id", "full")]
             head = (f"  bag_faxi4 #(.DesignIsSlave({int(a.unit_is_slave)}), "
                     f".AddrWidth({bus.addr_width}), .DataWidth({bus.data_width}), "
                     f".IdWidth({idw})) u_chk_{bus.name} (")  # fmt: skip
@@ -305,46 +328,274 @@ class _Harness:
         return f"{net}[{k}]"
 
     # ------------------------------------------------------------------ properties
+    def master_nonsec(self, bus: Bus, ch: str) -> str:
+        """The non-secure bit the fabric sees with a request of master BUS on channel CH: the
+        port's, its tie, or the spec's default (0) when the bus does not carry it."""
+        sig = {"aw": "awprot", "ar": "arprot", "a": "hnonsec", "p": "pprot"}[ch]
+        tie = bus.ties.get(sig)
+        if sig in bus.signals and tie is None:
+            return self.v(bus, sig) if ch == "a" else f"{self.v(bus, sig)}[1]"
+        bit = 0 if tie is None else 1 if tie == -1 else tie & 1 if ch == "a" else (tie >> 1) & 1
+        return f"1'b{bit}"
+
+    def master_request(self, bus: Bus, ch: str) -> tuple[str, str, str, str, str]:
+        """Master BUS's request on CH: (presented, passable, accepted, address, write).
+        Presented is the environment's alone (VALID, HTRANS, the setup phase), so an
+        assumption on it never constrains the fabric. Passable is what a fabric may already
+        pass on to a slave: an AXI request presented and not yet accepted, but an AHB-Lite
+        address phase only once accepted (HREADY high) and an APB setup phase at once."""
+        v = self.v
+        if ch in ("aw", "ar"):
+            valid = v(bus, f"{ch}valid")
+            return (valid, valid, f"({valid} && {v(bus, ch + 'ready')})", v(bus, f"{ch}addr"),
+                    "1'b1" if ch == "aw" else "1'b0")  # fmt: skip
+        if ch == "a":
+            sel = f"{v(bus, 'hsel')} && " if "hsel" in bus.signals else ""
+            shown = f"({sel}{v(bus, 'htrans')}[1])"
+            acc = f"({sel}{v(bus, 'htrans')}[1] && {v(bus, 'hready')})"
+            return shown, acc, acc, v(bus, "haddr"), v(bus, "hwrite")
+        setup = f"({v(bus, 'psel')} && !{v(bus, 'penable')})"
+        return setup, setup, setup, v(bus, "paddr"), v(bus, "pwrite")
+
     def fabric_edge(self) -> None:
-        """D69 part 2: every request at a slave port is one the reference sends there."""
+        """D69 part 2 and D71: every request at a slave port is one a master sent there.
+
+        Each master's accepted requests wait in a scoreboard (one per master and request
+        channel, in order, at most SCOREBOARD entries) as the reference has them: the address
+        after the master's aliases, read or write, the non-secure bit, and the slave port the
+        reference sends it to. A miss or a denial is never entered, so it reaches no slave.
+        A request at slave port k must equal its master's oldest entry for k (address, write
+        and non-secure bit exactly; order holds per master and slave, not across slaves),
+        or, with none, the request the master presents now (an AXI fabric may pass a request
+        on before its own handshake; an AHB-Lite address phase counts once accepted). The
+        slave's handshake takes the entry. The master is the
+        ID's top bits on an AXI4 fabric with several masters, the one master on APB or with
+        one master; on an ID-less fabric with several masters, the master whose entry
+        matches: the environment never has two masters' requests to one slave with the same
+        address, write and non-secure bit open at once (D78), so at most one does.
+
+        The environment keeps each master within its scoreboard (an assumption on what it
+        presents). On AHB-Lite that bound is the fabric's to keep instead (_buffered): a
+        master presents its next address phase whatever the fabric has taken, and only the
+        fabric's HREADY lets it in, so an assumption there would prune the fabric."""
         fab = self.inst.fabric
         assert fab is not None
         name, d = fab.name, fab.domain
         self.body += reference(self.spec, fab, name)
-        nm = len(fab.master_ports)
+        nm, ns = len(fab.master_ports), len(fab.slave_ports)
         # The netlist's slots are by Port index, as the reference numbers masters and slaves.
-        assert len(self.inst.masters) == nm and len(self.inst.slaves) == len(fab.slave_ports)
+        assert len(self.inst.masters) == nm and len(self.inst.slaves) == ns
         can = port_accesses(self.spec, fab)
+        clk = self.domains()[d]
+        aw = fab.addr_width
+        tw = max(ns.bit_length(), 1)
+        q = SCOREBOARD[Protocol(fab.protocol)]
+        cw = (q + 1).bit_length()  # counts 0 to q, with a bit to spare
+        chans = {"aw": ("aw", "ar"), "a": ("a",), "p": ("p",)}
+        proto = {Protocol.AXI4: "aw", Protocol.AXI4_LITE: "aw", Protocol.AHB_LITE: "a"}
+        channels = chans[proto.get(Protocol(fab.protocol), "p")]
+        ids = fab.id_width
+        by_id = Protocol(fab.protocol) is Protocol.AXI4 and nm > 1 and ids is not None
+        # The scoreboards' state and what each master presents now.
+        for ch in channels:
+            for m, bus in enumerate(self.inst.masters):
+                sb = f"sb_{ch}{m}"
+                shown, req, acc, addr, write = self.master_request(bus, ch)
+                self.body += [
+                    f"  // {sb}: {masters_of(fab)[m]}'s "
+                    f"{ch.upper()} requests, accepted and not yet at a slave (D71)",
+                    f"  logic [{q - 1}:0][{aw - 1}:0] {sb}_addr = '0;",
+                    f"  logic [{q - 1}:0] {sb}_wr = '0, {sb}_ns = '0;",
+                    f"  logic [{q - 1}:0][{tw - 1}:0] {sb}_tgt = '0;",
+                    f"  logic [{cw - 1}:0] {sb}_n = '0;",
+                    f"  logic {sb}_early = 1'b0;  // taken by a slave before its own handshake",
+                    f"  wire {sb}_acc = {acc};",
+                    f"  wire [{aw - 1}:0] {sb}_a = {name}_aliased({m}, {aw}'({addr}));",
+                    f"  wire {sb}_w = {write};",
+                    f"  wire {sb}_s = {self.master_nonsec(bus, ch)};",
+                    f"  wire [{tw - 1}:0] {sb}_t = {tw}'({name}_target({m}, {sb}_a, {sb}_w, "
+                    f"{sb}_s));",
+                    f"  wire {sb}_p = {req} && !{sb}_early && {sb}_t != {tw}'({ns});  "
+                    "// presented now, bound for a slave",
+                    f"  wire {sb}_ask = {shown} && {sb}_t != {tw}'({ns});  "
+                    "// the master asks for a slave (the environment's alone)",
+                ]
+                if ch != "a":
+                    self.body.append(f"  always_comb if ({sb}_n == {cw}'({q})) assume "
+                                     f"(!({shown}));  // the environment keeps within the "
+                                     "scoreboard")  # fmt: skip
+                    continue
+                label = f"{name}_{bus.name}_a_buffered"
+                self.body += [
+                    f"  always @(posedge {clk}) if (bag_live_{d} && {acc}) {label}: "
+                    f"assert ({sb}_n != {cw}'({q}));  // the fabric takes no more",
+                    f"  always @(posedge {clk}) cover_{label}: cover (bag_live_{d} && {acc});",
+                ]
+        # Each slave port: the master entry its request must match, and the match it takes.
+        takes: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
         for k, bus in enumerate(self.inst.slaves):
-            for ch, valid, _, write, ns in self.requests(bus):
+            for ch, valid, _, write, nsb in self.requests(bus):
                 addr = self.fabric_side(bus, k, {"aw": "awaddr", "ar": "araddr", "a": "haddr",
                                                  "p": "paddr"}[ch])  # fmt: skip
-                masters: list[str]
-                ids = fab.id_width
-                if bus.protocol is Protocol.AXI4 and nm > 1 and ids:
+                hs = f"{valid} && {self.v(bus, ch + 'ready')}" if ch in ("aw", "ar") else valid
+                which: dict[int, str] = {m: "1'b1" for m in range(nm)}
+                if by_id and ids is not None:
                     idv = self.fabric_side(bus, k, f"{ch}id")
-                    masters = [f"int'({idv}[{ids.slave_side - 1}:{ids.master_side}])"]
-                elif bus.protocol in (Protocol.APB3, Protocol.APB4) and nm == 1:
-                    masters = ["0"]
-                else:
-                    masters = [str(m) for m in range(nm)]
-                nonsecs = [ns] if ns is not None else ["1'b0", "1'b1"]
-                legal = " || ".join(f"{name}_target({m}, {addr}, {write}, {n}) == {k}"
-                                    for m in masters for n in nonsecs)  # fmt: skip
+                    top = f"int'({idv}[{ids.slave_side - 1}:{ids.master_side}])"
+                    which = {m: f"({top} == {r})" for m, r in enumerate(id_prefixes(fab))}
+                slave = _Slave(f"{aw}'({addr})", write if ch in ("a", "p") else None, nsb)
+                matches = []
+                for m in range(nm):
+                    sb = f"sb_{ch}{m}"
+                    hd = f"{sb}_hd{k}"
+
+                    head = _same(f"{sb}_addr[{hd}]", f"{sb}_wr[{hd}]", f"{sb}_ns[{hd}]", slave)
+                    now = _same(f"{sb}_a", f"{sb}_w", f"{sb}_s", slave)
+                    self.body += [
+                        f"  logic {hd}_has;  // {sb}'s oldest entry for slave port {k}",
+                        f"  logic [{cw - 1}:0] {hd};",
+                        "  always_comb begin",
+                        f"    {hd}_has = 1'b0;",
+                        f"    {hd} = '0;",
+                        f"    for (int j = {q - 1}; j >= 0; j--)",
+                        f"      if ({cw}'(j) < {sb}_n && {sb}_tgt[j] == {tw}'({k})) begin "
+                        f"{hd}_has = 1'b1; {hd} = {cw}'(j); end",
+                        "  end",
+                        f"  wire {sb}_m{k} = {which[m]} && ({hd}_has ? "
+                        f"({head}) : ({sb}_p && {sb}_t == {tw}'({k}) && {now}));",
+                        f"  wire {sb}_take{k} = ({hs}) && {sb}_m{k};",
+                    ]
+                    matches.append(f"{sb}_m{k}")
+                    takes.setdefault((ch, m), []).append((k, f"{sb}_take{k}", f"{hd}_has"))
                 label = f"{name}_{bus.name}_{ch}_routed"
                 # Sampled at the edge, as the slave samples it: between edges a free clock lets
                 # an input the checkers constrain only at edges take any value.
-                clk = self.domains()[bus.domain]
-                self.body.append(f"  always @(posedge {clk}) if (bag_live_{d} && {valid}) "
-                                 f"{label}: assert ({legal});")  # fmt: skip
+                bclk = self.domains()[bus.domain]
+                self.body.append(f"  always @(posedge {bclk}) if (bag_live_{d} && {valid}) "
+                                 f"{label}: assert ({' || '.join(matches)});")  # fmt: skip
                 # A channel the reference never uses: the check says nothing arrives there,
                 # and no cover can be reached.
                 kind = {"aw": "write", "ar": "read"}.get(ch)
                 if kind is not None and kind not in can[k]:
                     self.body.append(f"  // {label}: no cover, the IR sends {bus.name} no {kind}")
                     continue
-                self.body.append(f"  always @(posedge {clk}) cover_{label}: "
+                self.body.append(f"  always @(posedge {bclk}) cover_{label}: "
                                  f"cover (bag_live_{d} && {valid});")  # fmt: skip
+        # Each scoreboard: the entries slaves took leave, then the request accepted now joins
+        # (unless a slave took it already, or it is a miss or a denial).
+        for (ch, m), tk in takes.items():
+            sb = f"sb_{ch}{m}"
+            gone = " || ".join(f"({t} && {h} && sb_{ch}{m}_hd{k} == {cw}'(j))" for k, t, h in tk)
+            took = " || ".join(f"({t} && !{h})" for k, t, h in tk)
+            self.body += [
+                f"  always_ff @(posedge {clk}) begin",
+                f"    if (!bag_live_{d}) begin {sb}_n <= '0; {sb}_early <= 1'b0; end",
+                f"    else begin : {sb}_next",
+                f"      logic [{q - 1}:0][{aw - 1}:0] a;",
+                f"      logic [{q - 1}:0] w, s;",
+                f"      logic [{q - 1}:0][{tw - 1}:0] t;",
+                f"      logic [{cw - 1}:0] c;",
+                "      logic took;",
+                "      a = '0; w = '0; s = '0; t = '0; c = '0;",
+                f"      took = {took};",
+                f"      for (int j = 0; j < {q}; j++)",
+                f"        if ({cw}'(j) < {sb}_n && !({gone})) begin",
+                f"          a[c] = {sb}_addr[j]; w[c] = {sb}_wr[j]; s[c] = {sb}_ns[j]; "
+                f"t[c] = {sb}_tgt[j]; c = c + 1'b1;",
+                "        end",
+                f"      if ({sb}_acc && !{sb}_early && !took && {sb}_t != {tw}'({ns})) begin",
+                f"        a[c] = {sb}_a; w[c] = {sb}_w; s[c] = {sb}_s; t[c] = {sb}_t; "
+                "c = c + 1'b1;",
+                "      end",
+                f"      {sb}_addr <= a; {sb}_wr <= w; {sb}_ns <= s; {sb}_tgt <= t; {sb}_n <= c;",
+                f"      {sb}_early <= {sb}_early ? !{sb}_acc : (took && !{sb}_acc);",
+                "    end",
+                "  end",
+            ]
+        self.delivered(takes, tw, ns)
+        if by_id or nm == 1:
+            return
+        # D78: no two masters' requests to one slave with the same address, write and
+        # non-secure bit are open at once, so a slave-port request matches one master.
+        for ch in channels:
+            for m2 in range(nm):
+                for m in range(nm):
+                    if m == m2:
+                        continue
+                    a, b = f"sb_{ch}{m}", f"sb_{ch}{m2}"
+                    eq = (f"{a}_tgt[j] == {b}_t && {a}_addr[j] == {b}_a && {a}_wr[j] == {b}_w && "
+                          f"{a}_ns[j] == {b}_s")  # fmt: skip
+                    now = (f"{a}_ask && {a}_t == {b}_t && {a}_a == {b}_a && {a}_w == {b}_w && "
+                           f"{a}_s == {b}_s")  # fmt: skip
+                    clash = f"sb_{ch}_clash_{m}_{m2}"
+                    first = now if m < m2 else "1'b0"  # each pair presented together once
+                    self.body += [
+                        f"  logic {clash};",
+                        "  always_comb begin",
+                        f"    {clash} = {first};",
+                        f"    for (int j = 0; j < {q}; j++)",
+                        f"      if ({cw}'(j) < {a}_n && {eq}) {clash} = 1'b1;",
+                        "  end",
+                        f"  always_comb if ({b}_ask) assume (!{clash});",
+                    ]
+            # The assumption leaves contention: two masters ask for one slave at once.
+            a, b = f"sb_{ch}0", f"sb_{ch}1"
+            both = f"{a}_ask && {b}_ask && {a}_t == {b}_t"
+            self.body.append(f"  always @(posedge {clk}) cover_{name}_{ch}_contended: cover "
+                             f"(bag_live_{d} && {both});")  # fmt: skip
+
+    def master_response(self, bus: Bus, ch: str, pre: str) -> tuple[list[str], str]:
+        """(declarations, event): a response to master BUS on CH's requests completes (AXI:
+        the B handshake, or the R handshake of a read's last beat; AHB-Lite: a data phase
+        ends; APB: the access phase ends). PRE names the harness's own nets."""
+        v = self.v
+        if ch == "aw":
+            return [], f"({v(bus, 'bvalid')} && {v(bus, 'bready')})"
+        if ch == "ar":
+            last = f" && {v(bus, 'rlast')}" if "rlast" in bus.signals else ""
+            return [], f"({v(bus, 'rvalid')} && {v(bus, 'rready')}{last})"
+        if ch == "a":
+            fab = self.inst.fabric
+            assert fab is not None
+            clk, d, hready = self.domains()[fab.domain], fab.domain, v(bus, "hready")
+            return [
+                f"  logic {pre}_dp = 1'b0;  // a data phase is open",
+                f"  always_ff @(posedge {clk}) {pre}_dp <= bag_live_{d} && ({pre}_acc || "
+                f"({pre}_dp && !{hready}));",
+            ], f"({pre}_dp && {hready})"
+        return [], f"({v(bus, 'psel')} && {v(bus, 'penable')} && {v(bus, 'pready')})"
+
+    def delivered(self, takes: dict[tuple[str, int], list[tuple[int, str, str]]], tw: int,
+                  ns: int) -> None:  # fmt: skip
+        """D71: a master gets a response only for a request that reached a slave or that the
+        reference answers itself (a miss or a denial). Each master and channel counts its
+        requests taken by a slave and its misses, less its responses; a response with none
+        counted means the fabric answered a request it should have passed on, which no
+        slave-port check can see. No response comes in the cycle its own request is taken
+        (a data phase follows its address phase, an AXI response its handshake), so only
+        what was counted at earlier edges pays for it. A request dropped with no response
+        at all is a liveness bug, outside a bounded safety check."""
+        fab = self.inst.fabric
+        assert fab is not None
+        d = fab.domain
+        clk = self.domains()[d]
+        for (ch, m), tk in takes.items():
+            bus = self.inst.masters[m]
+            sb = f"sb_{ch}{m}"
+            decls, resp = self.master_response(bus, ch, sb)
+            gained = " + ".join([*(f"8'({t})" for _, t, _ in tk),
+                                 f"8'({sb}_acc && {sb}_t == {tw}'({ns}))"])  # fmt: skip
+            label = f"{fab.name}_{bus.name}_{ch}_delivered"
+            self.body += [
+                *decls,
+                f"  logic [7:0] {sb}_due = '0;  // requests taken or missed, less responses",
+                f"  wire [7:0] {sb}_gain = {gained};",
+                f"  always_ff @(posedge {clk}) if (!bag_live_{d}) {sb}_due <= '0; "
+                f"else {sb}_due <= {sb}_due + {sb}_gain - 8'({resp});",
+                f"  always @(posedge {clk}) if (bag_live_{d} && {resp}) "
+                f"{label}: assert ({sb}_due != '0);",
+                f"  always @(posedge {clk}) cover_{label}: cover (bag_live_{d} && {resp});",
+            ]
 
     def arbitration(self) -> None:
         """D70: of two masters that start at the same edge, the one with the lower priority
@@ -538,6 +789,26 @@ class _Harness:
                 f"  always @(posedge {cd}) cover_{label}: "
                 f"cover (bag_live_{du} && bag_live_{dd} && {valid});",
             ]
+
+
+@dataclass(frozen=True)
+class _Slave:
+    """A request at a fabric slave port, as a scoreboard entry is compared with it: the
+    address, and the write and non-secure bits where the channel and bus carry them."""
+
+    addr: str
+    write: str | None
+    nonsec: str | None
+
+
+def _same(addr: str, write: str, nonsec: str, slave: _Slave) -> str:
+    """An entry (ADDR, WRITE, NONSEC) equals the request at SLAVE."""
+    terms = [f"{addr} == {slave.addr}"]
+    if slave.write is not None:
+        terms.append(f"{write} == {slave.write}")
+    if slave.nonsec is not None:
+        terms.append(f"{nonsec} == {slave.nonsec}")
+    return " && ".join(terms)
 
 
 def _decls(ports: list[tuple[str, int, bool]]) -> str:

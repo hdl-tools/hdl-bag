@@ -634,9 +634,12 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
 
     params = (f"DesignIsSlave({int(not bus.is_slave)}), AddrWidth({bus.addr_width}), "
               f"DataWidth({bus.data_width}), IdWidth({idw})")  # fmt: skip
-    lines = [f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} ("]
+    events = ("multi_write", "w_first", "same_id", "full")
+    lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
+    lines.append(f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} (")
     conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}")]
     conns += [(f".{s}", v(s)) for s in _FAXI4]
+    conns += [(f".{e}_o", f"bag_{bus.name}_{e}") for e in events]
     lines += [f"      {c}({x})," for c, x in conns]
     lines[-1] = lines[-1].rstrip(",")
     lines.append("  );")
@@ -661,8 +664,36 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
     if bus.is_slave and "write" in can:
         covers.append((f"proto_b_error_{bus.name}",
                        f"{v('bvalid')} && {v('bready')} && {v('bresp')}[1]"))  # fmt: skip
+    if bus.is_slave and "read" in can:
+        covers.append((f"proto_r_error_{bus.name}",
+                       f"{v('rvalid')} && {v('rready')} && {v('rresp')}[1]"))  # fmt: skip
+    if not bus.is_slave:
+        # What the environment master can always do, so the checker's tracking is explored:
+        # a multi-beat write, data before its address, two reads of one ID open together,
+        # and a full table. No EXOKAY cover: it needs an AXI4 slave the exclusive reaches with
+        # AxLOCK intact (AXI4-Lite and bag_axi2ahb drop it), which the port alone does not
+        # tell; test_an_axi4_slave_environment_may_give_exokay_to_an_exclusive_access keeps
+        # the EXOKAY rules from holding vacuously.
+        covers += [(f"proto_{e}_{bus.name}", f"bag_{bus.name}_{e}") for e in events]
     lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
+    if bus.is_slave:
+        lines += _only_what_reaches(bus, dom, can, write=f"{v('awvalid')} || {v('wvalid')}",
+                                    read=v("arvalid"))  # fmt: skip
     return lines
+
+
+def _only_what_reaches(bus: Bus, dom: Domain, can: set[str], write: str, read: str) -> list[str]:
+    """On slave port BUS, the design sends no write (WRITE: its request is active) or read
+    (READ) the route model never sends there (CAN): the policy ZipCPU's AXI4-Lite checker has
+    with F_OPT_READ_ONLY and F_OPT_WRITE_ONLY, and on a slave nothing reaches, neither."""
+    out = []
+    for kind, active in (("write", write), ("read", read)):
+        if kind not in can:
+            label = f"proto_no_{kind}_{bus.name}"
+            out += [f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
+                    f"{label}: assert (!({active}));",
+                    f"  // {label}: no cover, the IR sends {bus.name} no {kind}"]  # fmt: skip
+    return out
 
 
 def ahb_ports(netlist: Netlist) -> list[Bus]:
@@ -709,8 +740,17 @@ def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
     if can:
         covers.append(("wait", "wait"))
         covers.append(("error", "error") if bus.is_slave else ("burst", "seq"))
+    if not bus.is_slave:
+        # The design's own side (PR 2b review): its two-cycle ERROR towards the master, which
+        # any slave or a miss can cause. No burst cover towards a slave: whether a burst
+        # reaches it as SEQ beats depends on the bridges on the way.
+        covers.append(("error", "error"))
     lines += [f"  always_comb proto_{label}_{bus.name}: cover (bag_{bus.name}_{event});"
               for label, event in covers]  # fmt: skip
+    if bus.is_slave:
+        req = f"{v('hsel')} && {v('htrans')}[1]"
+        lines += _only_what_reaches(bus, dom, can, write=f"{req} && {v('hwrite')}",
+                                    read=f"{req} && !{v('hwrite')}")  # fmt: skip
     return lines
 
 

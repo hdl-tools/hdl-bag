@@ -151,7 +151,8 @@ module bag_axi_shared_bus #(
   localparam int unsigned SelWidth = (NoSlaves > 1) ? $clog2(NoSlaves) : 1;
   localparam int unsigned ReqAddrWidth = SelWidth + AddrWidth;
 
-  // The slave side carries the master index above the master-side ID.
+  // The slave side carries the master's mux input above the master-side ID: its index,
+  // or with FixedPrio its priority rank (rank(), below).
   if (IdWidthSlv != IdWidthMst + ((NoMasters > 1) ? unsigned'($clog2(NoMasters)) : 0))
   begin : gen_bad_id_width
     $fatal(1, "IdWidthSlv must be IdWidthMst + clog2(NoMasters)");

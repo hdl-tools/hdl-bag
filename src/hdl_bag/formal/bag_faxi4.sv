@@ -34,11 +34,12 @@
 //              16 from an address aligned to the size; FIXED at most 16 beats; INCR never
 //              crosses 4 KB (A3.4.1); exclusive: power-of-two total of at most 128 bytes,
 //              at most 16 beats, aligned to the total (A7.2.4)
-//   wlast      WLAST on the AWLEN-th beat of each write, in AW order (A3.4.1, A3.3.1)
+//   wlast      WLAST on the AWLEN-th beat of each write, in AW order, and by the 256th
+//              beat in any case (A3.4.1, A3.3.1)
 //   responses  a write response only for a write whose address and last data beat have
-//              both been accepted; read data only for an outstanding read of that ID, RLAST
-//              on its ARLEN-th beat, reads of one ID in order (A5.3); EXOKAY only for an
-//              exclusive access (A7.2)
+//              both been accepted, and read data only for an outstanding read of that ID,
+//              both from the first edge out of reset; RLAST on its ARLEN-th beat, reads of
+//              one ID in order (A5.3); EXOKAY only for an exclusive access (A7.2)
 
 `default_nettype none
 
@@ -94,7 +95,15 @@ module bag_faxi4 #(
     input wire [IdWidth-1:0]       rid,
     input wire [DataWidth-1:0]     rdata,
     input wire [1:0]               rresp,
-    input wire                     rlast
+    input wire                     rlast,
+    // Events, for the generated job's covers: a write burst of more than one beat ends; a
+    // data beat is accepted before its burst's address; a read is accepted while another
+    // read of its ID stays open; a response table (completed writes or open reads, not the
+    // write FIFO) is full.
+    output wire                    multi_write_o,
+    output wire                    w_first_o,
+    output wire                    same_id_o,
+    output wire                    full_o
 );
 
   localparam int unsigned MaxSize = $clog2(DataWidth / 8);
@@ -211,6 +220,10 @@ module bag_faxi4 #(
   wire [7:0]  burst_len = (aw_ahead && n != '0) ? q[0][7:0] : awlen;
   wire ok_wlast = !(live && w_hs && len_known)
                   || (wlast == (w_beats == burst_len) && w_beats <= burst_len);
+  // A burst has at most 256 beats (AxLEN is 8 bits, A3.4.1): its 256th beat is its last,
+  // whether or not its address has come, so w_beats never wraps. On the beat presented, so
+  // the assumption binds the master's WLAST, not the slave's WREADY.
+  wire ok_w_256 = !(live && wvalid && w_beats == 8'd255) || wlast;
   // An address arriving after its data: the oldest finished burst had awlen + 1 beats.
   wire ok_w_early = !(live && aw_hs && !aw_ahead && n != '0) || awlen == q[0][7:0];
   // An address arriving with nothing waiting while a data burst is under way is that burst's:
@@ -303,8 +316,10 @@ module bag_faxi4 #(
   wire r_pop = r_hs && rlast && r_found;
   wire r_overflow = ar_hs && !r_pop && rn == Cw'(MaxOutstanding);
 
-  wire ok_b_open = !(live && bvalid) || b_found;
-  wire ok_r_open = !(live && rvalid) || r_found;
+  // From the first edge out of reset: the tables are empty then, so no response is owed
+  // (the other rules compare with the edge before, so they start one edge later).
+  wire ok_b_open = !(rst_ni && bvalid) || b_found;
+  wire ok_r_open = !(rst_ni && rvalid) || r_found;
   wire ok_rlast = !(live && r_hs && r_found)
                   || (rlast == (rq_beats[r_at] == rq_len[r_at]) && rq_beats[r_at] <= rq_len[r_at]);
   // EXOKAY answers only an exclusive access (A7.2); an exclusive access may also get OKAY.
@@ -376,6 +391,19 @@ module bag_faxi4 #(
                       && !(n == Full && !aw_ahead && wready)
                       && !(rn == Full && arready);
 
+  // ---------------------------------------------------------------- events
+  logic id_open;  // a read of ARID's ID is open and does not end at this edge
+  always_comb begin
+    id_open = 1'b0;
+    for (int i = 0; i < int'(MaxOutstanding); i++) begin
+      if (Cw'(i) < rn && rq_id[i] == arid && !(r_pop && Iw'(i) == r_at)) id_open = 1'b1;
+    end
+  end
+  assign multi_write_o = live && w_done && w_beats != '0;
+  assign w_first_o = live && w_hs && !len_known;
+  assign same_id_o = live && ar_hs && id_open;
+  assign full_o = live && (rn == Full || bn == Full);
+
   // ---------------------------------------------------------------- assert or assume
   // The design's rules are asserted at each edge. The environment's are assumed at every
   // solver step: the values an edge samples are then legal too, and so is what the design
@@ -392,6 +420,7 @@ module bag_faxi4 #(
         assume (ok_aw_burst);
         assume (ok_ar_burst);
         assume (ok_wlast);
+        assume (ok_w_256);
         assume (ok_w_early);
         assume (ok_w_partial);
         assume (ok_w_room);
@@ -420,6 +449,7 @@ module bag_faxi4 #(
         aw_burst_legal: assert (ok_aw_burst);
         ar_burst_legal: assert (ok_ar_burst);
         wlast_on_the_last_beat: assert (ok_wlast);
+        wlast_by_the_256th_beat: assert (ok_w_256);
         wlast_matches_its_address: assert (ok_w_early);
         address_takes_its_early_data: assert (ok_w_partial);
         tracker_has_room_for_writes: assert (ok_w_room);

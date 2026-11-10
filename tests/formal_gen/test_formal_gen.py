@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import hdl_bag
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
@@ -17,10 +18,11 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
-from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH
+from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
+from hdl_bag.protocols import Protocol
 from hdl_bag.templates import builtin_registry
 
 TESTS = Path(__file__).parents[1]
@@ -342,6 +344,110 @@ def test_each_axi4_port_gets_bags_checker_on_the_right_side(tmp_path: Path) -> N
     assert "track" not in text and "bag_pend_" not in text
 
 
+def test_an_axi4_master_port_covers_the_states_its_checker_tracks(tmp_path: Path) -> None:
+    """PR 2b review (richer AXI4 covers): towards a master the environment can always make a
+    multi-beat write, send data before its address, open two reads of one ID and fill a
+    table, so the checker's FIFO and tables are explored, not only single beats. Towards a
+    slave, an R error where reads reach, as a B error where writes do."""
+    text = _protocol(tmp_path, GOLDEN)
+    assert "      .full_o(bag_cpu0_full)\n  );\n" in text
+    for e in ("multi_write", "w_first", "same_id", "full"):
+        assert f"  always_comb proto_{e}_cpu0: cover (bag_cpu0_{e});\n" in text, e
+        assert f"proto_{e}_ddr0" not in text, e
+    assert ("  always_comb proto_r_error_ddr0: cover (ddr0_axi_rvalid && ddr0_axi_rready && "
+            "ddr0_axi_rresp[1]);\n") in text  # fmt: skip
+
+
+def test_each_ahb_port_gets_bags_checker_bound_for_its_side(tmp_path: Path) -> None:
+    """PR 2b review (an AHB binding host test): on a master port (m0) the design is the slave,
+    always selected, and its HREADY is the data phase's HREADYOUT; on a slave port (s0) the
+    design is the master and the slave's own HSEL, HREADY and HREADYOUT are watched. A
+    signal the port lacks takes the spec's value (no HMASTLOCK: 0). Towards a master the
+    design's ERROR is covered too, besides the environment's burst."""
+    text = _protocol(tmp_path, P2 / "ahb_fixed.ir.yaml")
+    m0 = text.split(" u_m0 (\n", 1)[1].split("  );", 1)[0]
+    s0 = text.split(" u_s0 (\n", 1)[1].split("  );", 1)[0]
+    assert "  bag_fahb #(.DesignIsSlave(1), .AddrWidth(32), .DataWidth(32)) u_m0 (\n" in text
+    assert "  bag_fahb #(.DesignIsSlave(0), .AddrWidth(32), .DataWidth(32)) u_s0 (\n" in text
+    assert "      .hsel(1'b1),\n" in m0
+    assert "      .hready(m0_ahb_hready),\n      .hreadyout(m0_ahb_hready),\n" in m0
+    assert "      .hsel(s0_ahb_hsel),\n" in s0 and "      .hmastlock(1'b0),\n" in s0
+    assert "      .hready(s0_ahb_hready),\n      .hreadyout(s0_ahb_hreadyout),\n" in s0
+    labels = set(re.findall(r"(proto_\w+): cover", text))
+    assert {"proto_burst_m0", "proto_error_m0", "proto_error_s0"} <= labels
+    assert "proto_burst_s0" not in labels
+
+
+def test_a_fixed_priority_shared_bus_names_its_masters_by_rank(tmp_path: Path) -> None:
+    """CI bug (axi_shared_fixed, bus_s0_aw_routed on the unmutated design): the AXI4 shared bus
+    puts its masters on the mux in priority order when the priority is fixed, so the ID prefix
+    at a slave is a master's rank (masters with a lower Priority value), not its index. m0, m1
+    and m2 have priorities 2, 1 and 0. PR 3's region-level check passed with either, as these
+    masters decode alike; the scoreboard compared with the wrong master's requests."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    for m, rank in ((0, 2), (1, 1), (2, 0)):
+        assert f"  wire sb_aw{m}_m0 = (int'(u_bus_m_awid[0][4:3]) == {rank}) && " in text, m
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert "  wire sb_aw2_m0 = (int'(u_xbar_m_awid[0][5:4]) == 2) && " in xbar  # a crossbar: index
+    # Rank, not the priority value: with priorities 5, 9, 1 the ranks are 1, 2, 0. A
+    # round-robin shared bus keeps the index (verification review 3).
+    fab = next(f for f in load(P3 / "axi_shared_fixed.ir.yaml").fabrics if f.name == "bus")
+    ports = [p.model_copy(update={"priority": v})
+             for p, v in zip(sorted(fab.master_ports, key=lambda p: p.index), (5, 9, 1),
+                             strict=True)]  # fmt: skip
+    assert id_prefixes(fab.model_copy(update={"master_ports": ports})) == [1, 2, 0]
+    rr = next(f for f in load(P3 / "axi_shared_rr.ir.yaml").fabrics if f.topology == "shared-bus")
+    assert rr.arbitration != "fixed-priority"
+    assert id_prefixes(rr) == list(range(len(rr.master_ports)))
+    assert "  wire sb_ar0_m0 = (int'(u_bus_m_arid[0][4:3]) == 2) && " in text
+
+
+def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
+    """The checks BRANCH (gen_design_is_slave or _master) of a checker assumes and asserts,
+    each found under the always block it belongs to: assumes at every solver step
+    (always_comb), asserts at the clock edge (always_ff)."""
+    part = text.split(f": {branch}\n", 1)[1].split("\n  end", 1)[0]
+    assumed, asserted, block = set(), set(), ""
+    for line in part.splitlines():
+        if m := re.match(r"\s*(always_comb|always_ff|always)\b", line):
+            block = m[1]
+        if m := re.search(r"\bassume \((\w+)\);", line):
+            assert block == "always_comb", line
+            assumed.add(m[1])
+        if m := re.search(r"\bassert \((\w+)\);", line):
+            assert block == "always_ff", line
+            asserted.add(m[1])
+    # Every assume and assert of the branch was parsed: one on an expression, not a named
+    # rule, would otherwise go unseen on both sides.
+    assert part.count("assume (") == len(assumed) and part.count("assert (") == len(asserted)
+    return assumed, asserted
+
+
+@pytest.mark.parametrize(("checker", "env_only", "design_only"), [
+    ("bag_faxi4.sv", {"ok_slave_cap"}, set()),
+    ("bag_fahb.sv", {"ok_burst_ends", "ok_idle_wait"}, {"ok_routed"}),
+])  # fmt: skip
+def test_every_environment_rule_is_assumed_at_every_step(
+    checker: str, env_only: set[str], design_only: set[str]
+) -> None:
+    """PR 2b review (every-step tests for the remaining environment rules): the two EDA tests
+    show one rule each holding at every solver step; this pins it for all of them. Each rule
+    asserted on the design on one side is assumed on the environment on the other, in an
+    always_comb block, so what the design passes on combinationally is legal at a trace's
+    last step too. The exceptions are one-sided by the spec: a slave environment's
+    acceptance cap (D66), an AHB-Lite master's fixed-burst ends and waiting IDLE (assumed
+    only), and the interconnect's HREADYOUT routing (asserted only)."""
+    text = (Path(hdl_bag.__file__).parent / "formal" / checker).read_text(encoding="utf-8")
+    env_master, design_slave = _rules(text, "gen_design_is_slave")
+    env_slave, design_master = _rules(text, "gen_design_is_master")
+    assert env_master and env_slave and design_master and design_slave  # the split found them
+    assert env_master - env_only == design_master - design_only
+    assert env_slave - env_only == design_slave - design_only
+    assert env_only <= env_master | env_slave and design_only <= design_master | design_slave
+
+
 def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
     """Phase 4: alias pins are quasi-static. Formal assumes the strict form."""
     text = _protocol(tmp_path, P2 / "apb4_min.ir.yaml")
@@ -447,6 +553,42 @@ def test_a_slave_nothing_can_reach_gets_no_checker(monkeypatch: pytest.MonkeyPat
                                    for s in spec.slaves})  # fmt: skip
     ports = {c.port for c in checkers(spec, build_netlist(spec))}
     assert "clkrst0" not in ports and "pmu0" in ports
+
+
+def test_an_axi4_or_ahb_slave_gets_only_the_accesses_the_ir_sends_it(tmp_path: Path) -> None:
+    """PR 2b review (the unreachable-slave policy): BAG's AXI4 and AHB-Lite checkers check a
+    slave port whatever the route model says, as ZipCPU's do with F_OPT_READ_ONLY: the
+    design never sends a read-only slave a write (axi_shared_fixed's s1, bridges_inhouse_cdc's
+    rom), sampled at the clock edge out of reset."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path / "sf", P3)
+    sf = (tmp_path / "sf" / "formal" / "axi_shared_fixed_protocol.sv").read_text(encoding="utf-8")
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_write_s1: assert (!(s1_axi_awvalid || s1_axi_wvalid));\n") in sf  # fmt: skip
+    assert "proto_no_read_s1" not in sf and "proto_no_write_s0" not in sf
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path / "bc", P3)
+    bc = (tmp_path / "bc" / "formal" / "bridges_inhouse_cdc_protocol.sv").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"\) proto_no_write_rom: assert \(!\(rom_ahb_hsel && rom_ahb_htrans\[1\] "
+                     r"&& rom_ahb_hwrite\)\);\n", bc)  # fmt: skip
+    # Each such assertion says why it has no cover (verification review 5).
+    assert "  // proto_no_write_s1: no cover, the IR sends s1 no write\n" in sf
+    assert "  // proto_no_write_rom: no cover, the IR sends rom no write\n" in bc
+
+
+def test_an_axi4_slave_nothing_reaches_gets_neither_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slave the route model sends nothing (ACC-UNREACHABLE-SLAVE) keeps BAG's checker,
+    unlike a ZipCPU port: the design is asserted to send it no write and no read."""
+    spec = load(GOLDEN)
+    monkeypatch.setattr("hdl_bag.formal_gen._active",
+                        lambda _: {s.name: ({"read", "write"} if s.name != "ddr0" else set())
+                                   for s in spec.slaves})  # fmt: skip
+    text = _protocol(tmp_path, GOLDEN)
+    assert " u_ddr0 (\n" in text
+    assert "proto_no_write_ddr0: assert (!(ddr0_axi_awvalid || ddr0_axi_wvalid));\n" in text
+    assert "proto_no_read_ddr0: assert (!(ddr0_axi_arvalid));\n" in text
 
 
 def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
@@ -657,8 +799,9 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     generate(spec, tmp_path / "apb", P2)
     text = (tmp_path / "apb" / "formal" / "apb4_rules_route_apb.sv").read_text(encoding="utf-8")
     assert "module bag_apb4_rules_unit_apb (" in text
-    assert ("apb_wo0_p_routed: assert (apb_target(0, u_apb_m_paddr[1], wo0_apb4_pwrite, "
-            "wo0_apb4_pprot[1]) == 1);") in text  # fmt: skip
+    assert "apb_wo0_p_routed: assert (sb_p0_m1);" in text
+    assert ("  wire sb_p0_m1 = 1'b1 && (sb_p0_hd1_has ? (sb_p0_addr[sb_p0_hd1] == "
+            "32'(u_apb_m_paddr[1]) && ") in text  # fmt: skip
     spec = load(P2 / "ahb_fixed.ir.yaml")
     generate(spec, tmp_path / "ahb", P2)
     text = (tmp_path / "ahb" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
@@ -674,8 +817,8 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
     xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
-    assert ("xbar_regs_aw_routed: assert (xbar_target(int'(u_xbar_m_awid[0][5:4]), "
-            "u_xbar_m_awaddr[0], 1'b1, regs_axi_awprot[1]) == 0);") in xbar  # fmt: skip
+    assert "xbar_regs_aw_routed: assert (sb_aw0_m0 || sb_aw1_m0 || sb_aw2_m0);" in xbar
+    assert "  wire sb_aw1_m0 = (int'(u_xbar_m_awid[0][5:4]) == 1) && (sb_aw1_hd0_has ? " in xbar
     # ahb2apb_pt has three units: three jobs, each reading only its own harness.
     out = generate(load(P2 / "ahb2apb_pt.ir.yaml"), tmp_path / "pt", P2)
     assert [f for f in out.formal if "_route" in f] == [
@@ -694,3 +837,63 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
             "((br_ahb2aon_2_aon_apb_apb4_paddr ^ 32'(65'(bag_win_addr) + "
             "65'(64'h0000_0000_0000_0000) - 65'(64'h0000_0000_0000_0000))) & ~32'(3)) == '0);"
             ) in bridge  # fmt: skip
+
+
+def test_a_slave_port_request_must_match_its_masters_oldest_entry(tmp_path: Path) -> None:
+    """D71: each master's accepted requests wait in a scoreboard as the reference has them
+    (the address after the master's aliases, write, non-secure bit, the slave port), and a
+    request at slave port k must equal its master's oldest entry for k, or the request the
+    master presents now; the slave's handshake takes it. A miss or a denial (the reference's
+    target is the slave count) is never entered. On an AXI4 crossbar the ID names the
+    master; on an ID-less fabric with several masters the environment keeps two masters'
+    identical requests to one slave from being open at once (D78), so one entry matches."""
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert "  wire [31:0] sb_aw0_a = xbar_aliased(0, 32'(dma_axi_awaddr));\n" in xbar
+    assert "  wire sb_aw0_acc = (dma_axi_awvalid && dma_axi_awready);\n" in xbar
+    assert ("  wire sb_aw0_p = dma_axi_awvalid && !sb_aw0_early && sb_aw0_t != 2'(3);  "
+            "// presented now, bound for a slave\n") in xbar  # fmt: skip
+    assert "      if (sb_aw0_acc && !sb_aw0_early && !took && sb_aw0_t != 2'(3)) begin\n" in xbar
+    assert ("  wire sb_aw0_take0 = (regs_axi_awvalid && regs_axi_awready) && sb_aw0_m0;\n"
+            ) in xbar  # fmt: skip
+    assert "  logic [3:0][31:0] sb_aw0_addr = '0;\n" in xbar  # 4 entries for AXI4
+    assert "clash" not in xbar
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path / "af", P2)
+    ahb = (tmp_path / "af" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
+    assert SCOREBOARD[Protocol.AHB_LITE] == 2
+    assert "  logic [1:0][31:0] sb_a0_addr = '0;\n" in ahb
+    assert "  always_comb if (sb_a1_ask) assume (!sb_a_clash_0_1);\n" in ahb
+    assert "  always_comb if (sb_a0_ask) assume (!sb_a_clash_1_0);\n" in ahb
+    # Two requests presented together are compared once; queued entries both ways.
+    assert "    sb_a_clash_0_1 = sb_a0_ask && sb_a0_t == sb_a1_t && " in ahb
+    assert "    sb_a_clash_1_0 = 1'b0;\n" in ahb
+    # The assumption leaves two masters asking for one slave at once (formal review 3).
+    assert ("  always @(posedge clk_h) cover_ahb_a_contended: cover (bag_live_D_H && sb_a0_ask && "
+            "sb_a1_ask && sb_a0_t == sb_a1_t);\n") in ahb  # fmt: skip
+    # The ID-less AXI4-Lite shared bus gets D78 too, on both channels (verification review 7).
+    generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path / "asf", P3)
+    lite = (tmp_path / "asf" / "formal" / "axil_shared_fixed_route_bus.sv").read_text(
+        encoding="utf-8"
+    )
+    for ch in ("aw", "ar"):
+        assert f"  always_comb if (sb_{ch}1_ask) assume (!sb_{ch}_clash_0_1);\n" in lite, ch
+        assert f"cover_bus_{ch}_contended: cover (" in lite, ch
+
+
+def test_no_scoreboard_assumption_constrains_the_fabric(tmp_path: Path) -> None:
+    """RTL and formal review: on AHB-Lite a master's address phase is accepted by the fabric's
+    HREADY, so the scoreboard's cap and D78 assumptions, written on the accepted phase, could
+    be met by holding HREADY low: a fabric that took a third address phase was pruned, not
+    failed. The assumptions now read only what the environment drives (HTRANS, VALID, the
+    setup phase), and on AHB-Lite the cap is the fabric's, asserted (_buffered)."""
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path, P2)
+    text = (tmp_path / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
+    sb = [line for line in text.splitlines() if "assume (" in line and "sb_" in line]
+    assert sb and all("hready" not in line for line in sb), sb
+    assert "  wire sb_a0_ask = (m0_ahb_htrans[1]) && sb_a0_t != 2'(3);  " in text
+    assert ("  always @(posedge clk_h) if (bag_live_D_H && (m0_ahb_htrans[1] && m0_ahb_hready)) "
+            "ahb_m0_a_buffered: assert (sb_a0_n != 2'(2));  // the fabric takes no more\n"
+            ) in text  # fmt: skip
+    assert "assume (!((m0_ahb_htrans[1]" not in text
+    # A response never pays for the request taken in its own cycle (formal review 1).
+    assert "ahb_m0_a_delivered: assert (sb_a0_due != '0);\n" in text
