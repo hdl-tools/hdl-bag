@@ -210,15 +210,19 @@ def _deep(config: str, unit: str) -> bool:
     return route_depth(render_unit(spec, inst))[1] > ROUTE_DEPTH
 
 
-DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)}
+# D76: route jobs measured in CI near or past the 1200 s limit of the full runs.
+SLOW_CONTROLS = {("p3/bridges_pulp", "br_per")}
+DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)} | SLOW_CONTROLS
 DEEP_TIMEOUT_S = 3600
 
 
-def test_only_the_deepest_route_jobs_wait_for_the_nightly() -> None:
+def test_only_the_deepest_and_slowest_route_jobs_wait_for_the_nightly() -> None:
     """D74: mixed_narrow_apb's br_c8 (AXI4-Lite 64 to APB 8 bits, across domains) needs 36
-    steps; its bmc reached step 27 in CI's 1200 s. Only such jobs carry the deep mark, which
-    the PR and main full runs skip and the nightly runs."""
-    assert {("p3/mixed_narrow_apb", "br_c8")} == DEEP_CONTROLS
+    steps; its bmc reached step 27 in CI's 1200 s. D76: bridges_pulp's br_per took 781 s to
+    over 1200 s across four full CI runs. Only such jobs carry the deep mark, which the PR and
+    main full runs skip and the nightly runs."""
+    assert set(ROUTE_CONTROL_CASES) >= SLOW_CONTROLS
+    assert {("p3/mixed_narrow_apb", "br_c8"), ("p3/bridges_pulp", "br_per")} == DEEP_CONTROLS
 
 
 @pytest.mark.eda
