@@ -556,7 +556,25 @@ def test_an_axi4_or_ahb_slave_gets_only_the_accesses_the_ir_sends_it(tmp_path: P
         encoding="utf-8"
     )
     assert re.search(r"\) proto_no_write_rom: assert \(!\(rom_ahb_hsel && rom_ahb_htrans\[1\] "
-                     r"&& rom_ahb_hwrite\)\);\n", bc), bc[:0]  # fmt: skip
+                     r"&& rom_ahb_hwrite\)\);\n", bc)  # fmt: skip
+    # Each such assertion says why it has no cover (verification review 5).
+    assert "  // proto_no_write_s1: no cover, the IR sends s1 no write\n" in sf
+    assert "  // proto_no_write_rom: no cover, the IR sends rom no write\n" in bc
+
+
+def test_an_axi4_slave_nothing_reaches_gets_neither_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slave the route model sends nothing (ACC-UNREACHABLE-SLAVE) keeps BAG's checker,
+    unlike a ZipCPU port: the design is asserted to send it no write and no read."""
+    spec = load(GOLDEN)
+    monkeypatch.setattr("hdl_bag.formal_gen._active",
+                        lambda _: {s.name: ({"read", "write"} if s.name != "ddr0" else set())
+                                   for s in spec.slaves})  # fmt: skip
+    text = _protocol(tmp_path, GOLDEN)
+    assert " u_ddr0 (\n" in text
+    assert "proto_no_write_ddr0: assert (!(ddr0_axi_awvalid || ddr0_axi_wvalid));\n" in text
+    assert "proto_no_read_ddr0: assert (!(ddr0_axi_arvalid));\n" in text
 
 
 def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:

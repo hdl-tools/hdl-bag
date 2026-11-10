@@ -689,8 +689,10 @@ def _only_what_reaches(bus: Bus, dom: Domain, can: set[str], write: str, read: s
     out = []
     for kind, active in (("write", write), ("read", read)):
         if kind not in can:
-            out.append(f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
-                       f"proto_no_{kind}_{bus.name}: assert (!({active}));")  # fmt: skip
+            label = f"proto_no_{kind}_{bus.name}"
+            out += [f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
+                    f"{label}: assert (!({active}));",
+                    f"  // {label}: no cover, the IR sends {bus.name} no {kind}"]  # fmt: skip
     return out
 
 

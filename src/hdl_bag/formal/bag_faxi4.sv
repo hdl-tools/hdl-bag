@@ -97,8 +97,9 @@ module bag_faxi4 #(
     input wire [1:0]               rresp,
     input wire                     rlast,
     // Events, for the generated job's covers: a write burst of more than one beat ends; a
-    // data beat arrives before its address; a read is accepted while a read of its ID is
-    // open; a response table is full.
+    // data beat is accepted before its burst's address; a read is accepted while another
+    // read of its ID stays open; a response table (completed writes or open reads, not the
+    // write FIFO) is full.
     output wire                    multi_write_o,
     output wire                    w_first_o,
     output wire                    same_id_o,
@@ -220,8 +221,9 @@ module bag_faxi4 #(
   wire ok_wlast = !(live && w_hs && len_known)
                   || (wlast == (w_beats == burst_len) && w_beats <= burst_len);
   // A burst has at most 256 beats (AxLEN is 8 bits, A3.4.1): its 256th beat is its last,
-  // whether or not its address has come, so w_beats never wraps.
-  wire ok_w_256 = !(live && w_hs && w_beats == 8'd255) || wlast;
+  // whether or not its address has come, so w_beats never wraps. On the beat presented, so
+  // the assumption binds the master's WLAST, not the slave's WREADY.
+  wire ok_w_256 = !(live && wvalid && w_beats == 8'd255) || wlast;
   // An address arriving after its data: the oldest finished burst had awlen + 1 beats.
   wire ok_w_early = !(live && aw_hs && !aw_ahead && n != '0) || awlen == q[0][7:0];
   // An address arriving with nothing waiting while a data burst is under way is that burst's:
@@ -390,11 +392,11 @@ module bag_faxi4 #(
                       && !(rn == Full && arready);
 
   // ---------------------------------------------------------------- events
-  logic id_open;  // a read of ARID's ID is open
+  logic id_open;  // a read of ARID's ID is open and does not end at this edge
   always_comb begin
     id_open = 1'b0;
     for (int i = 0; i < int'(MaxOutstanding); i++) begin
-      if (Cw'(i) < rn && rq_id[i] == arid) id_open = 1'b1;
+      if (Cw'(i) < rn && rq_id[i] == arid && !(r_pop && Iw'(i) == r_at)) id_open = 1'b1;
     end
   end
   assign multi_write_o = live && w_done && w_beats != '0;
