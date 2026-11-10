@@ -229,6 +229,7 @@ class _Harness:
             ids = ("awid", "bid", "arid", "rid")
             conns += [(s, "1'b0" if s in ids and not bus.id_width else self.v(bus, s))
                       for s in sigs]  # fmt: skip
+            conns += [(f"{e}_o", "") for e in ("multi_write", "w_first", "same_id", "full")]
             head = (f"  bag_faxi4 #(.DesignIsSlave({int(a.unit_is_slave)}), "
                     f".AddrWidth({bus.addr_width}), .DataWidth({bus.data_width}), "
                     f".IdWidth({idw})) u_chk_{bus.name} (")  # fmt: skip
@@ -337,20 +338,24 @@ class _Harness:
         bit = 0 if tie is None else 1 if tie == -1 else tie & 1 if ch == "a" else (tie >> 1) & 1
         return f"1'b{bit}"
 
-    def master_request(self, bus: Bus, ch: str) -> tuple[str, str, str, str]:
-        """Master BUS's request on CH: (presented, accepted, address, write). An AHB-Lite
-        address phase and an APB setup phase are accepted when presented."""
+    def master_request(self, bus: Bus, ch: str) -> tuple[str, str, str, str, str]:
+        """Master BUS's request on CH: (presented, passable, accepted, address, write).
+        Presented is the environment's alone (VALID, HTRANS, the setup phase), so an
+        assumption on it never constrains the fabric. Passable is what a fabric may already
+        pass on to a slave: an AXI request presented and not yet accepted, but an AHB-Lite
+        address phase only once accepted (HREADY high) and an APB setup phase at once."""
         v = self.v
         if ch in ("aw", "ar"):
             valid = v(bus, f"{ch}valid")
-            return (valid, f"({valid} && {v(bus, ch + 'ready')})", v(bus, f"{ch}addr"),
+            return (valid, valid, f"({valid} && {v(bus, ch + 'ready')})", v(bus, f"{ch}addr"),
                     "1'b1" if ch == "aw" else "1'b0")  # fmt: skip
         if ch == "a":
             sel = f"{v(bus, 'hsel')} && " if "hsel" in bus.signals else ""
+            shown = f"({sel}{v(bus, 'htrans')}[1])"
             acc = f"({sel}{v(bus, 'htrans')}[1] && {v(bus, 'hready')})"
-            return acc, acc, v(bus, "haddr"), v(bus, "hwrite")
+            return shown, acc, acc, v(bus, "haddr"), v(bus, "hwrite")
         setup = f"({v(bus, 'psel')} && !{v(bus, 'penable')})"
-        return setup, setup, v(bus, "paddr"), v(bus, "pwrite")
+        return setup, setup, setup, v(bus, "paddr"), v(bus, "pwrite")
 
     def fabric_edge(self) -> None:
         """D69 part 2 and D71: every request at a slave port is one a master sent there.
@@ -361,12 +366,18 @@ class _Harness:
         reference sends it to. A miss or a denial is never entered, so it reaches no slave.
         A request at slave port k must equal its master's oldest entry for k (address, write
         and non-secure bit exactly; order holds per master and slave, not across slaves),
-        or, with none, the request the master presents now (a fabric may pass a request on
-        before its own handshake). The slave's handshake takes the entry. The master is the
+        or, with none, the request the master presents now (an AXI fabric may pass a request
+        on before its own handshake; an AHB-Lite address phase counts once accepted). The
+        slave's handshake takes the entry. The master is the
         ID's top bits on an AXI4 fabric with several masters, the one master on APB or with
         one master; on an ID-less fabric with several masters, the master whose entry
         matches: the environment never has two masters' requests to one slave with the same
-        address, write and non-secure bit open at once (D78), so at most one does."""
+        address, write and non-secure bit open at once (D78), so at most one does.
+
+        The environment keeps each master within its scoreboard (an assumption on what it
+        presents). On AHB-Lite that bound is the fabric's to keep instead (_buffered): a
+        master presents its next address phase whatever the fabric has taken, and only the
+        fabric's HREADY lets it in, so an assumption there would prune the fabric."""
         fab = self.inst.fabric
         assert fab is not None
         name, d = fab.name, fab.domain
@@ -379,7 +390,7 @@ class _Harness:
         aw = fab.addr_width
         tw = max(ns.bit_length(), 1)
         q = SCOREBOARD[Protocol(fab.protocol)]
-        cw = q.bit_length()
+        cw = (q + 1).bit_length()  # counts 0 to q, with a bit to spare
         chans = {"aw": ("aw", "ar"), "a": ("a",), "p": ("p",)}
         proto = {Protocol.AXI4: "aw", Protocol.AXI4_LITE: "aw", Protocol.AHB_LITE: "a"}
         channels = chans[proto.get(Protocol(fab.protocol), "p")]
@@ -389,7 +400,7 @@ class _Harness:
         for ch in channels:
             for m, bus in enumerate(self.inst.masters):
                 sb = f"sb_{ch}{m}"
-                req, acc, addr, write = self.master_request(bus, ch)
+                shown, req, acc, addr, write = self.master_request(bus, ch)
                 self.body += [
                     f"  // {sb}: {masters_of(fab)[m]}'s "
                     f"{ch.upper()} requests, accepted and not yet at a slave (D71)",
@@ -406,8 +417,19 @@ class _Harness:
                     f"{sb}_s));",
                     f"  wire {sb}_p = {req} && !{sb}_early && {sb}_t != {tw}'({ns});  "
                     "// presented now, bound for a slave",
-                    f"  always_comb if ({sb}_n == {cw}'({q})) assume (!({req}));  "
-                    "// the environment keeps within the scoreboard",
+                    f"  wire {sb}_ask = {shown} && {sb}_t != {tw}'({ns});  "
+                    "// the master asks for a slave (the environment's alone)",
+                ]
+                if ch != "a":
+                    self.body.append(f"  always_comb if ({sb}_n == {cw}'({q})) assume "
+                                     f"(!({shown}));  // the environment keeps within the "
+                                     "scoreboard")  # fmt: skip
+                    continue
+                label = f"{name}_{bus.name}_a_buffered"
+                self.body += [
+                    f"  always @(posedge {clk}) if (bag_live_{d} && {acc}) {label}: "
+                    f"assert ({sb}_n != {cw}'({q}));  // the fabric takes no more",
+                    f"  always @(posedge {clk}) cover_{label}: cover (bag_live_{d} && {acc});",
                 ]
         # Each slave port: the master entry its request must match, and the match it takes.
         takes: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
@@ -503,7 +525,7 @@ class _Harness:
                     a, b = f"sb_{ch}{m}", f"sb_{ch}{m2}"
                     eq = (f"{a}_tgt[j] == {b}_t && {a}_addr[j] == {b}_a && {a}_wr[j] == {b}_w && "
                           f"{a}_ns[j] == {b}_s")  # fmt: skip
-                    now = (f"{a}_p && {a}_t == {b}_t && {a}_a == {b}_a && {a}_w == {b}_w && "
+                    now = (f"{a}_ask && {a}_t == {b}_t && {a}_a == {b}_a && {a}_w == {b}_w && "
                            f"{a}_s == {b}_s")  # fmt: skip
                     clash = f"sb_{ch}_clash_{m}_{m2}"
                     first = now if m < m2 else "1'b0"  # each pair presented together once
@@ -514,8 +536,13 @@ class _Harness:
                         f"    for (int j = 0; j < {q}; j++)",
                         f"      if ({cw}'(j) < {a}_n && {eq}) {clash} = 1'b1;",
                         "  end",
-                        f"  always_comb if ({b}_p) assume (!{clash});",
+                        f"  always_comb if ({b}_ask) assume (!{clash});",
                     ]
+            # The assumption leaves contention: two masters ask for one slave at once.
+            a, b = f"sb_{ch}0", f"sb_{ch}1"
+            both = f"{a}_ask && {b}_ask && {a}_t == {b}_t"
+            self.body.append(f"  always @(posedge {clk}) cover_{name}_{ch}_contended: cover "
+                             f"(bag_live_{d} && {both});")  # fmt: skip
 
     def master_response(self, bus: Bus, ch: str, pre: str) -> tuple[list[str], str]:
         """(declarations, event): a response to master BUS on CH's requests completes (AXI:
@@ -543,8 +570,11 @@ class _Harness:
         """D71: a master gets a response only for a request that reached a slave or that the
         reference answers itself (a miss or a denial). Each master and channel counts its
         requests taken by a slave and its misses, less its responses; a response with none
-        counted means the fabric answered a request it should have passed on (or dropped
-        one), which no slave-port check can see."""
+        counted means the fabric answered a request it should have passed on, which no
+        slave-port check can see. No response comes in the cycle its own request is taken
+        (a data phase follows its address phase, an AXI response its handshake), so only
+        what was counted at earlier edges pays for it. A request dropped with no response
+        at all is a liveness bug, outside a bounded safety check."""
         fab = self.inst.fabric
         assert fab is not None
         d = fab.domain
@@ -563,7 +593,7 @@ class _Harness:
                 f"  always_ff @(posedge {clk}) if (!bag_live_{d}) {sb}_due <= '0; "
                 f"else {sb}_due <= {sb}_due + {sb}_gain - 8'({resp});",
                 f"  always @(posedge {clk}) if (bag_live_{d} && {resp}) "
-                f"{label}: assert ({sb}_due != '0 || {sb}_gain != '0);",
+                f"{label}: assert ({sb}_due != '0);",
                 f"  always @(posedge {clk}) cover_{label}: cover (bag_live_{d} && {resp});",
             ]
 

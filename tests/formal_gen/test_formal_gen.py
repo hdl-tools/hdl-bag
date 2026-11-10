@@ -830,8 +830,38 @@ def test_a_slave_port_request_must_match_its_masters_oldest_entry(tmp_path: Path
     ahb = (tmp_path / "af" / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
     assert SCOREBOARD[Protocol.AHB_LITE] == 2
     assert "  logic [1:0][31:0] sb_a0_addr = '0;\n" in ahb
-    assert "  always_comb if (sb_a1_p) assume (!sb_a_clash_0_1);\n" in ahb
-    assert "  always_comb if (sb_a0_p) assume (!sb_a_clash_1_0);\n" in ahb
+    assert "  always_comb if (sb_a1_ask) assume (!sb_a_clash_0_1);\n" in ahb
+    assert "  always_comb if (sb_a0_ask) assume (!sb_a_clash_1_0);\n" in ahb
     # Two requests presented together are compared once; queued entries both ways.
-    assert "    sb_a_clash_0_1 = sb_a0_p && sb_a0_t == sb_a1_t && " in ahb
+    assert "    sb_a_clash_0_1 = sb_a0_ask && sb_a0_t == sb_a1_t && " in ahb
     assert "    sb_a_clash_1_0 = 1'b0;\n" in ahb
+    # The assumption leaves two masters asking for one slave at once (formal review 3).
+    assert ("  always @(posedge clk_h) cover_ahb_a_contended: cover (bag_live_D_H && sb_a0_ask && "
+            "sb_a1_ask && sb_a0_t == sb_a1_t);\n") in ahb  # fmt: skip
+    # The ID-less AXI4-Lite shared bus gets D78 too, on both channels (verification review 7).
+    generate(load(P3 / "axil_shared_fixed.ir.yaml"), tmp_path / "asf", P3)
+    lite = (tmp_path / "asf" / "formal" / "axil_shared_fixed_route_bus.sv").read_text(
+        encoding="utf-8"
+    )
+    for ch in ("aw", "ar"):
+        assert f"  always_comb if (sb_{ch}1_ask) assume (!sb_{ch}_clash_0_1);\n" in lite, ch
+        assert f"cover_bus_{ch}_contended: cover (" in lite, ch
+
+
+def test_no_scoreboard_assumption_constrains_the_fabric(tmp_path: Path) -> None:
+    """RTL and formal review: on AHB-Lite a master's address phase is accepted by the fabric's
+    HREADY, so the scoreboard's cap and D78 assumptions, written on the accepted phase, could
+    be met by holding HREADY low: a fabric that took a third address phase was pruned, not
+    failed. The assumptions now read only what the environment drives (HTRANS, VALID, the
+    setup phase), and on AHB-Lite the cap is the fabric's, asserted (_buffered)."""
+    generate(load(P2 / "ahb_fixed.ir.yaml"), tmp_path, P2)
+    text = (tmp_path / "formal" / "ahb_fixed_route_ahb.sv").read_text(encoding="utf-8")
+    sb = [line for line in text.splitlines() if "assume (" in line and "sb_" in line]
+    assert sb and all("hready" not in line for line in sb), sb
+    assert "  wire sb_a0_ask = (m0_ahb_htrans[1]) && sb_a0_t != 2'(3);  " in text
+    assert ("  always @(posedge clk_h) if (bag_live_D_H && (m0_ahb_htrans[1] && m0_ahb_hready)) "
+            "ahb_m0_a_buffered: assert (sb_a0_n != 2'(2));  // the fabric takes no more\n"
+            ) in text  # fmt: skip
+    assert "assume (!((m0_ahb_htrans[1]" not in text
+    # A response never pays for the request taken in its own cycle (formal review 1).
+    assert "ahb_m0_a_delivered: assert (sb_a0_due != '0);\n" in text
