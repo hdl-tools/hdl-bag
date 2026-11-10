@@ -34,7 +34,7 @@ from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
-from hdl_bag.ir.model import Spec
+from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
@@ -101,6 +101,18 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     if len(unit.clocks) == 1:
         return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
     return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+
+
+def id_prefixes(fab: Fabric) -> list[int]:
+    """The ID prefix each master of AXI4 fabric FAB (by Port index) carries at its slave
+    ports: its index, except on a fixed-priority shared bus, whose mux takes the masters in
+    priority order (bag_axi_shared_bus's rank: how many masters have a lower Priority value)
+    and so prefixes that rank. Taken from the IR's priorities, not the package's."""
+    order = masters_of(fab)
+    if fab.topology != "shared-bus" or fab.arbitration != "fixed-priority":
+        return list(range(len(order)))
+    prio = {p.port: p.priority or 0 for p in fab.master_ports}
+    return [sum(prio[k] < prio[m] for k in order) for m in order]
 
 
 def units(netlist: Netlist) -> list[Instance]:
@@ -408,7 +420,7 @@ class _Harness:
                 if by_id and ids is not None:
                     idv = self.fabric_side(bus, k, f"{ch}id")
                     top = f"int'({idv}[{ids.slave_side - 1}:{ids.master_side}])"
-                    which = {m: f"({top} == {m})" for m in range(nm)}
+                    which = {m: f"({top} == {r})" for m, r in enumerate(id_prefixes(fab))}
                 slave = _Slave(f"{aw}'({addr})", write if ch in ("a", "p") else None, nsb)
                 matches = []
                 for m in range(nm):

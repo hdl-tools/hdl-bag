@@ -72,7 +72,7 @@ SCOREBOARD_RTL = [
         "HNONSEC forced to secure towards the slaves"), AF, "ahb"),
     ("axi_master_index", RtlMutation("bag_axi_xbar.sv", (
         (".MstIdx    (m),", ".MstIdx    ((m + 1) % NoMasters),"),),
-        "each master's guard decodes as the next master"), AXR, "xbar"),
+        "each master's guard decodes as the next master"), XR, "xbar"),
 ]  # fmt: skip
 SCOREBOARD_IDS = [f"{n}-{c.split('/')[1]}" for n, _, c, _ in SCOREBOARD_RTL]
 
@@ -271,7 +271,7 @@ def test_the_route_job_catches_the_misroute(tmp_path: Path, mutation: str, confi
     generate(spec, tmp_path, (CONFIGS / config).parent)
     _mutate_package(tmp_path, spec, mutation, fabric, last)
     _caught(_route_failed(tmp_path, spec, _route_units(spec, prefix=fabric)), spec, "route",
-            ("_routed",))  # fmt: skip
+            ("_routed", "_delivered"))  # fmt: skip
 
 
 @pytest.mark.eda

@@ -378,6 +378,21 @@ def test_each_ahb_port_gets_bags_checker_bound_for_its_side(tmp_path: Path) -> N
     assert "proto_burst_s0" not in labels
 
 
+def test_a_fixed_priority_shared_bus_names_its_masters_by_rank(tmp_path: Path) -> None:
+    """CI bug (axi_shared_fixed, bus_s0_aw_routed on the unmutated design): the AXI4 shared bus
+    puts its masters on the mux in priority order when the priority is fixed, so the ID prefix
+    at a slave is a master's rank (masters with a lower Priority value), not its index. m0, m1
+    and m2 have priorities 2, 1 and 0. PR 3's region-level check passed with either, as these
+    masters decode alike; the scoreboard compared with the wrong master's requests."""
+    generate(load(P3 / "axi_shared_fixed.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "axi_shared_fixed_route_bus.sv").read_text(encoding="utf-8")
+    for m, rank in ((0, 2), (1, 1), (2, 0)):
+        assert f"  wire sb_aw{m}_m0 = (int'(u_bus_m_awid[0][4:3]) == {rank}) && " in text, m
+    generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
+    xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert "  wire sb_aw2_m0 = (int'(u_xbar_m_awid[0][5:4]) == 2) && " in xbar  # a crossbar: index
+
+
 def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
     """The checks BRANCH (gen_design_is_slave or _master) of a checker assumes and asserts,
     each found under the always block it belongs to: assumes at every solver step
