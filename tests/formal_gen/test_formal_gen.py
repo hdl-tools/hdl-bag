@@ -18,7 +18,7 @@ from hdl_bag.formal_gen import (
     checkers,
     props_module,
 )
-from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD
+from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -391,6 +391,17 @@ def test_a_fixed_priority_shared_bus_names_its_masters_by_rank(tmp_path: Path) -
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
     xbar = (tmp_path / "xr" / "formal" / "axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
     assert "  wire sb_aw2_m0 = (int'(u_xbar_m_awid[0][5:4]) == 2) && " in xbar  # a crossbar: index
+    # Rank, not the priority value: with priorities 5, 9, 1 the ranks are 1, 2, 0. A
+    # round-robin shared bus keeps the index (verification review 3).
+    fab = next(f for f in load(P3 / "axi_shared_fixed.ir.yaml").fabrics if f.name == "bus")
+    ports = [p.model_copy(update={"priority": v})
+             for p, v in zip(sorted(fab.master_ports, key=lambda p: p.index), (5, 9, 1),
+                             strict=True)]  # fmt: skip
+    assert id_prefixes(fab.model_copy(update={"master_ports": ports})) == [1, 2, 0]
+    rr = next(f for f in load(P3 / "axi_shared_rr.ir.yaml").fabrics if f.topology == "shared-bus")
+    assert rr.arbitration != "fixed-priority"
+    assert id_prefixes(rr) == list(range(len(rr.master_ports)))
+    assert "  wire sb_ar0_m0 = (int'(u_bus_m_arid[0][4:3]) == 2) && " in text
 
 
 def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
@@ -400,7 +411,7 @@ def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
     part = text.split(f": {branch}\n", 1)[1].split("\n  end", 1)[0]
     assumed, asserted, block = set(), set(), ""
     for line in part.splitlines():
-        if m := re.match(r"\s*(always_comb|always_ff)\b", line):
+        if m := re.match(r"\s*(always_comb|always_ff|always)\b", line):
             block = m[1]
         if m := re.search(r"\bassume \((\w+)\);", line):
             assert block == "always_comb", line
@@ -408,6 +419,9 @@ def _rules(text: str, branch: str) -> tuple[set[str], set[str]]:
         if m := re.search(r"\bassert \((\w+)\);", line):
             assert block == "always_ff", line
             asserted.add(m[1])
+    # Every assume and assert of the branch was parsed: one on an expression, not a named
+    # rule, would otherwise go unseen on both sides.
+    assert part.count("assume (") == len(assumed) and part.count("assert (") == len(asserted)
     return assumed, asserted
 
 

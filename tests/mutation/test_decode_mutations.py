@@ -45,6 +45,11 @@ MISROUTE = [("swapped_port_index", XR, "Xbar", F), ("swapped_port_index", AXR, "
             ("decode_long", AF, "Ahb", F)]  # fmt: skip
 # In MISROUTE's own order, so each case carries its own ID.
 MISROUTE_IDS = [dict(zip(TARGETS, IDS, strict=True))[t] for t in MISROUTE]
+# What each misroute must fail: the slave-port check, except on the crossbars, where CI (run
+# 42710792909) showed the guard answering a request the reference sends to a slave, which
+# only the delivery check sees (D71).
+ROUTED, EITHER = ("_routed",), ("_routed", "_delivered")
+MISROUTE_LABELS = {XR: EITHER, AXR: EITHER}
 DECODE_RTL = [t for t in RTL_TARGETS if t[1].file == "bag_addr_decode.sv"]
 DECODE_RTL_IDS = [i for t, i in zip(RTL_TARGETS, RTL_IDS, strict=True) if t in DECODE_RTL]
 # The bridge offset mutants, each on a config with a pass-through N bridge of its file. Phase 4
@@ -64,17 +69,29 @@ OUT_OF_SCOPE = {"axi2apb_pprot", "axi2apb_pstrb", "axi2apb_pslverr", "axil2apb_p
 # D71: the wiring between a fabric's masters and its decoder, which only the master-side
 # scoreboard sees: a region-level check takes any master and the address as it arrives. Each
 # is caught by the scoreboard (_routed) or the delivery check (_delivered) of the unit.
+# Each names what it must fail: a secure bit forced at the slave is a request no master
+# made (_routed); the others may also show as a request answered instead of passed on
+# (_delivered). The shared buses get no master-index mutant: their masters decode alike,
+# so a guard with another master's index behaves the same.
 SCOREBOARD_RTL = [
     ("ahb_alias_off", RtlMutation("bag_ahb_lite_bus.sv", (
-        (".alias_en_i(alias_en_i),", ".alias_en_i('0),"),), "alias enables cut"), AF, "ahb"),
+        (".alias_en_i(alias_en_i),", ".alias_en_i('0),"),), "alias enables cut"), AF, "ahb",
+     EITHER),
     ("ahb_secure_forced", RtlMutation("bag_ahb_lite_bus.sv", (
         ("assign m_hnonsec_o[s] = bus_hnonsec;", "assign m_hnonsec_o[s] = 1'b0;"),),
-        "HNONSEC forced to secure towards the slaves"), AF, "ahb"),
+        "HNONSEC forced to secure towards the slaves"), AF, "ahb", ROUTED),
+    # An ID-less fabric, where D78 must not hide a wrong master.
+    ("ahb_master_index", RtlMutation("bag_ahb_lite_bus.sv", (
+        (".mst_i     (grant),", ".mst_i     ({grant[NoMasters-2:0], grant[NoMasters-1]}),"),),
+        "the decoder takes each granted master as the next one"), AF, "ahb", EITHER),
     ("axi_master_index", RtlMutation("bag_axi_xbar.sv", (
         (".MstIdx    (m),", ".MstIdx    ((m + 1) % NoMasters),"),),
-        "each master's guard decodes as the next master"), XR, "xbar"),
+        "each master's guard decodes as the next master"), XR, "xbar", EITHER),
+    ("axil_master_index", RtlMutation("bag_axil_xbar.sv", (
+        (".MstIdx    (m),", ".MstIdx    ((m + 1) % NoMasters),"),),
+        "each master's guard decodes as the next master"), AXR, "xbar", EITHER),
 ]  # fmt: skip
-SCOREBOARD_IDS = [f"{n}-{c.split('/')[1]}" for n, _, c, _ in SCOREBOARD_RTL]
+SCOREBOARD_IDS = [f"{n}-{c.split('/')[1]}" for n, _, c, _, _ in SCOREBOARD_RTL]
 
 # The decode assertions (formal_gen.decode) each table bug must fail: an AXI4 or AXI4-Lite
 # master with no default slave is answered from MissResp, which only the miss-response
@@ -163,7 +180,7 @@ def test_every_package_mutation_fails_a_formal_property() -> None:
         assert _route_units(_spec(config), prefix=fabric), (config, fabric)
     for name, mut, config in ROUTE_RTL:
         assert _route_units(_spec(config), source=mut.file), (name, config)
-    for name, mut, config, unit in SCOREBOARD_RTL:
+    for name, mut, config, unit, _ in SCOREBOARD_RTL:
         assert unit in _route_units(_spec(config)), (name, config)
         assert config in ROUTE_CONTROL_CONFIGS, name  # the unmutated job runs as the control
         mut.apply((RTL / mut.file).read_text(encoding="utf-8"))  # each edit applies once
@@ -265,13 +282,14 @@ def test_the_route_job_catches_the_priority_inversion(tmp_path: Path, mutation: 
 def test_the_route_job_catches_the_misroute(tmp_path: Path, mutation: str, config: str,
                                             fabric: str, last: bool) -> None:  # fmt: skip
     """D69 part 2: a decode table bug sends a request to a slave port the IR does not, which
-    the fabric's slave-port assertions see (crossbar, shared bus with ID-prefixed masters,
-    APB mux, AHB-Lite bus)."""
+    the fabric's slave-port assertions see (shared bus with ID-prefixed masters, APB mux,
+    AHB-Lite bus); on a crossbar the guard may instead answer it as a miss, which the
+    delivery check sees (MISROUTE_LABELS)."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
     _mutate_package(tmp_path, spec, mutation, fabric, last)
     _caught(_route_failed(tmp_path, spec, _route_units(spec, prefix=fabric)), spec, "route",
-            ("_routed", "_delivered"))  # fmt: skip
+            MISROUTE_LABELS.get(config, ROUTED))  # fmt: skip
 
 
 @pytest.mark.eda
@@ -288,13 +306,15 @@ def test_the_route_job_catches_the_bridge_offset(tmp_path: Path, name: str, mut:
 
 
 @pytest.mark.eda
-@pytest.mark.parametrize(("name", "mut", "config", "unit"), SCOREBOARD_RTL, ids=SCOREBOARD_IDS)
+@pytest.mark.parametrize(("name", "mut", "config", "unit", "labels"), SCOREBOARD_RTL,
+                         ids=SCOREBOARD_IDS)  # fmt: skip
 def test_the_route_job_catches_the_master_wiring(tmp_path: Path, name: str, mut: RtlMutation,
-                                                 config: str, unit: str) -> None:  # fmt: skip
+                                                 config: str, unit: str,
+                                                 labels: tuple[str, ...]) -> None:  # fmt: skip
     """D71: a fabric that decodes a request with the wrong master's tables, without the
     master's aliases, or passes it on with the wrong secure bit sends the slave a request
     its master never made, or answers one it should have passed on."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
     _mutate_rtl(tmp_path, mut)
-    _caught(_failed(tmp_path, spec, f"route_{unit}"), spec, "route", ("_routed", "_delivered"))
+    _caught(_failed(tmp_path, spec, f"route_{unit}"), spec, "route", labels)
