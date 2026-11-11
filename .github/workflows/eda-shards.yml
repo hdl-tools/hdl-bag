@@ -25,6 +25,14 @@ on:
         description: How many parallel jobs (the nightly's formal corpus needs more, D76)
         type: number
         default: 4
+      workers:
+        description: Tests at once per job (pytest-xdist -n); fewer leave each solver a core
+        type: string
+        default: auto
+      deep-timeout:
+        description: The SBY time limit of a deep formal test, in seconds (D76)
+        type: number
+        default: 3600
 
 permissions:
   contents: read
@@ -62,6 +70,7 @@ jobs:
       CCACHE_MAXSIZE: 2G
       CCACHE_NOHASHDIR: "true"
       EDA_MARKS: ${{ inputs.marks }}
+      BAG_DEEP_TIMEOUT_S: ${{ inputs.deep-timeout }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -75,7 +84,7 @@ jobs:
       - run: ccache --zero-stats
       - run: >-
           CCACHE_BASEDIR="$PWD"
-          uv run pytest -m "$EDA_MARKS" -n auto --splits ${{ inputs.shards }} --group ${{ matrix.group }}
+          uv run pytest -m "$EDA_MARKS" -n ${{ inputs.workers }} --splits ${{ inputs.shards }} --group ${{ matrix.group }}
           --durations-path tests/eda_durations.json --splitting-algorithm least_duration
           --durations=0 --durations-min=0
       - run: ccache --show-stats

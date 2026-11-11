@@ -15,6 +15,7 @@ rest run in every full run with TIMEOUT_S.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,8 @@ NODE = "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds"
 # D76: about 5 minutes. Full runs give a task TIMEOUT_S, four times that.
 DEEP_S = 300
 TIMEOUT_S = 1200
-DEEP_TIMEOUT_S = 3600
+# CI may allow more to measure a deep test's cost (pr.yml suite=deep).
+DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "3600"))
 
 
 def _path(config: str) -> Path:

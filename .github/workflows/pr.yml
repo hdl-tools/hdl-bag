@@ -14,7 +14,7 @@ on:
       suite:
         description: EDA tests to run
         type: choice
-        options: [full, smoke, nightly]
+        options: [full, smoke, nightly, deep]
         default: full
 
 permissions:
@@ -101,7 +101,9 @@ jobs:
     # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
     # label is added). The full list runs on every push to main and on demand, without the
     # deep tests (D74); the nightly runs everything (the formal corpus's deep tasks too, D76),
-    # on more shards with longer limits. Dispatching suite=nightly runs that set on a branch.
+    # on more shards with longer limits. Dispatching suite=nightly runs that set on a branch;
+    # suite=deep runs only the deep tests, two at a time per job with a 3 h limit each, to
+    # measure what they cost without solvers competing for cores.
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: >-
@@ -109,10 +111,13 @@ jobs:
               && !contains(github.event.pull_request.labels.*.name, 'full-eda'))
              || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
             && 'eda and smoke'
+            || ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 'eda and deep')
             || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 'eda' || 'eda and not deep') }}
-      timeout-minutes: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 150 || 30 }}
-      shards: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 12 || 4 }}
-      save-cache: ${{ !(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) }}
+      timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 300 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 150 || 30) }}
+      shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 12 || 4) }}
+      workers: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && '2' || 'auto' }}
+      deep-timeout: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 10800 || 3600 }}
+      save-cache: ${{ !((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) }}
     permissions:
       contents: read
       packages: read

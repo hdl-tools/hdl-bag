@@ -15,6 +15,7 @@ never passes for a catch. The control is the same job, or every route job, on th
 config, which must pass, covers included.
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -216,7 +217,8 @@ def _deep(config: str, unit: str) -> bool:
 # D76: route jobs measured in CI near or past the 1200 s limit of the full runs.
 SLOW_CONTROLS = {("p3/bridges_pulp", "br_per")}
 DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)} | SLOW_CONTROLS
-DEEP_TIMEOUT_S = 3600
+# CI may allow more to measure a deep test's cost (pr.yml suite=deep).
+DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "3600"))
 
 
 def test_only_the_deepest_and_slowest_route_jobs_wait_for_the_nightly() -> None:
