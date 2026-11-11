@@ -193,9 +193,9 @@ def job_tasks(job: Path) -> list[str]:
     return tasks or [job.stem]
 
 
-def bounded_notes(job: Path) -> list[str]:
-    """For each bmc task of a job file, a note that it is a bounded check, not a proof: a pass
-    says no assertion fails within that many solver steps, nothing beyond."""
+def bounded_notes(job: Path, *, task: str | None = None) -> list[str]:
+    """For each bmc task of a job file (or TASK alone), a note that it is a bounded check, not
+    a proof: a pass says no assertion fails within that many solver steps, nothing beyond."""
     options: dict[str, dict[str, str]] = {}
     section = None
     for raw in job.read_text(encoding="utf-8").splitlines():
@@ -203,15 +203,17 @@ def bounded_notes(job: Path) -> list[str]:
         if line.startswith("["):
             section = line
         elif section == "[options]" and line and not line.startswith("#"):
-            task, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
+            owner, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
             key, _, value = rest.strip().partition(" ")
-            options.setdefault(task.strip(), {})[key] = value.strip()
+            options.setdefault(owner.strip(), {})[key] = value.strip()
     out = []
-    for task, opts in sorted(options.items()):
+    for name_, opts in sorted(options.items()):
+        if task is not None and name_ != task:
+            continue
         mode = opts.get("mode", options.get("", {}).get("mode"))
         depth = opts.get("depth", options.get("", {}).get("depth", "?"))
         if mode == "bmc":
-            name = f"{job.stem}_{task}" if task else job.stem
+            name = f"{job.stem}_{name_}" if name_ else job.stem
             out.append(f"{name}: bounded check to depth {depth} (bmc), not a proof")
     return out
 
@@ -226,12 +228,19 @@ def _kill_group(proc: subprocess.Popen[str]) -> None:
         killpg(proc.pid, getattr(signal, "SIGKILL", 9))  # SIGKILL is POSIX-only
 
 
-def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
-    """Run the SymbiYosys JOB (a .sby file) in its own directory; ROOT is what finding paths
-    are relative to. Each task's work directory is replaced (``sby -f``). Raises ValueError
-    if JOB does not exist."""
+def run_sby(job: Path, root: Path, *, timeout: float | None = None,
+            task: str | None = None) -> Report:  # fmt: skip
+    """Run the SymbiYosys JOB (a .sby file) in its own directory, or only its TASK; ROOT is
+    what finding paths are relative to. Each task's work directory is replaced (``sby -f``).
+    Raises ValueError if JOB does not exist or has no such task."""
     if not job.is_file():
         raise ValueError(f"{job}: no such SymbiYosys job (run bag generate again)")
+    expected = job_tasks(job)
+    if task is not None:
+        names = [t.removeprefix(f"{job.stem}_") for t in expected]
+        if task not in names:
+            raise ValueError(f"{job}: no task {task} (it has {', '.join(names)})")
+        expected = [f"{job.stem}_{task}"]
     backend = SymbiYosys()
     exe = shutil.which(backend.executable)
     if exe is None:
@@ -244,7 +253,8 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
     # SBY's own timeout option crashes in v0.69, so the time limit is enforced here. SBY
     # starts Yosys and the solvers as children, so the whole process group is stopped: on a
     # timeout, and on anything else that ends the wait (Ctrl-C included).
-    with subprocess.Popen([exe, "-f", job.name], cwd=job.parent, stdout=subprocess.PIPE,
+    args = [exe, "-f", job.name, *([task] if task else [])]
+    with subprocess.Popen(args, cwd=job.parent, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                           errors="replace", start_new_session=True) as proc:  # fmt: skip
         try:
@@ -260,7 +270,8 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
             steps = _STEP.findall(partial or "")
             reached = f", reached step {steps[-1]}" if steps else ""
             late = Finding(backend.name, "", 0, "FORMAL-TIMEOUT", "error",
-                           f"{job.stem}: no verdict within {timeout:g} s{reached} "
+                           f"{expected[0] if task else job.stem}: no verdict within "
+                           f"{timeout:g} s{reached} "
                            "(allow more with --timeout)")  # fmt: skip
             return Report("formal", (late,), (backend.name,), notes=notes)
     job_dir = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
@@ -270,12 +281,12 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
         if m and (full := _FULL.match(m["msg"])) and (job.parent / full["path"]).is_file():
             summaries[m["job"]] = (job.parent / full["path"]).read_text(encoding="utf-8")
     findings = backend.parse(output, job_sources(job, root), "" if job_dir == "." else job_dir,
-                             summaries=summaries, expected=job_tasks(job))  # fmt: skip
+                             summaries=summaries, expected=expected)  # fmt: skip
     if proc.returncode != 0 and not findings:
         tail = output.strip().splitlines()[-1:] or ["no output"]
         message = f"{job.stem}: exit status {proc.returncode}: {tail[0]}"
         findings.append(Finding(backend.name, "", 0, "TOOL-FAILED", "error", message))
-    notes = (*notes, *bounded_notes(job))
+    notes = (*notes, *bounded_notes(job, task=task))
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from smoke import SMOKE, matches
+from smoke import _LINT, _ROUTE, SMOKE, matches
 
 REPO = Path(__file__).parents[1]
 # Compute seconds from tests/eda_durations.json. The cold CI run of #43 took 6:52 on its
@@ -38,8 +38,11 @@ def test_every_smoke_pattern_selects_an_eda_test() -> None:
     assert [p for p in SMOKE if not any(matches(t, p) for t in eda)] == []
     smoke = _collect("eda and smoke")
     assert 0 < len(smoke) < len(eda)
-    # The golden config is in it whole: both port styles and every route-simulation part.
-    golden = [t for t in eda if "golden/demo_ss" in t and ("lint" in t or "route" in t)]
+    # The golden config's lint and simulation are in it whole: both port styles and every
+    # route-simulation part. (Its formal corpus tasks are not: the nightly runs them, D76.)
+    golden = [
+        t for t in eda if t.startswith((f"{_LINT}[golden/demo_ss", f"{_ROUTE}[golden/demo_ss"))
+    ]
     assert golden and set(golden) <= set(smoke)
 
 

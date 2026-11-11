@@ -14,7 +14,7 @@ on:
       suite:
         description: EDA tests to run
         type: choice
-        options: [full, smoke]
+        options: [full, smoke, nightly]
         default: full
 
 permissions:
@@ -100,7 +100,8 @@ jobs:
     # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold
     # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
     # label is added). The full list runs on every push to main and on demand, without the
-    # deep tests (D74); the nightly runs everything, with longer shard limits.
+    # deep tests (D74); the nightly runs everything (the formal corpus's deep tasks too, D76),
+    # on more shards with longer limits. Dispatching suite=nightly runs that set on a branch.
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: >-
@@ -108,9 +109,10 @@ jobs:
               && !contains(github.event.pull_request.labels.*.name, 'full-eda'))
              || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
             && 'eda and smoke'
-            || (github.event_name == 'schedule' && 'eda' || 'eda and not deep') }}
-      timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 30 }}
-      save-cache: ${{ github.event_name != 'schedule' }}
+            || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 'eda' || 'eda and not deep') }}
+      timeout-minutes: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 150 || 30 }}
+      shards: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 12 || 4 }}
+      save-cache: ${{ !(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) }}
     permissions:
       contents: read
       packages: read

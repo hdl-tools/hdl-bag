@@ -186,8 +186,11 @@ def test_every_package_mutation_fails_a_formal_property() -> None:
         mut.apply((RTL / mut.file).read_text(encoding="utf-8"))  # each edit applies once
 
 
+DECODE_CONTROL_CONFIGS = sorted({t[1] for t in TARGETS} | {c for _, _, c in DECODE_RTL})
+
+
 @pytest.mark.eda
-@pytest.mark.parametrize("config", sorted({t[1] for t in TARGETS} | {c for _, _, c in DECODE_RTL}))
+@pytest.mark.parametrize("config", DECODE_CONTROL_CONFIGS)
 def test_the_decode_job_holds_unmutated(tmp_path: Path, config: str) -> None:
     """The control: on each config the mutants use, the unmutated decode job passes."""
     spec = _spec(config)

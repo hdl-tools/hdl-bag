@@ -312,6 +312,34 @@ def test_a_timeout_stops_sby_and_everything_it_started(
         pytest.fail(f"sby's child {child} is still running after the timeout")
 
 
+@posix
+def test_one_task_of_a_job_runs_on_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The formal corpus runs each task of a job as a test of its own (D76), so SBY is asked
+    for that task only, and only its verdict is expected."""
+    args = tmp_path / "args"
+    job = _fake_sby(tmp_path, monkeypatch, f'echo "$@" > {args}\n'
+                    "echo 'SBY 10:00:01 [x_cover] DONE (PASS, rc=0)'\n")  # fmt: skip
+    report = run_sby(job, tmp_path, task="cover")
+    assert report.ok, report.format()
+    assert args.read_text(encoding="utf-8") == "-f x.sby cover\n"
+
+
+def test_a_task_the_job_lacks_is_a_clear_error(tmp_path: Path) -> None:
+    job = tmp_path / "x.sby"
+    job.write_text(_TASKS, encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        run_sby(job, tmp_path, task="bmc")
+    assert str(exc.value) == f"{job}: no task bmc (it has prove, cover)"
+
+
+def test_a_bmc_task_on_its_own_gets_only_its_note(tmp_path: Path) -> None:
+    job = tmp_path / "x.sby"
+    job.write_text("[tasks]\nbmc\ncover\n\n[options]\nbmc: mode bmc\nbmc: depth 16\n"
+                   "cover: mode cover\ncover: depth 16\n\n[files]\n", encoding="utf-8")  # fmt: skip
+    assert bounded_notes(job, task="cover") == []
+    assert bounded_notes(job, task="bmc") == ["x_bmc: bounded check to depth 16 (bmc), not a proof"]
+
+
 # ---------------------------------------------------------------- CLI
 def test_bag_formal_without_jobs_explains_why(tmp_path: Path) -> None:
     (tmp_path / "bag_outputs.json").write_text(

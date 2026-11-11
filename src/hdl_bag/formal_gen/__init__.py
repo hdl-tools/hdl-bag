@@ -701,6 +701,27 @@ def ahb_ports(netlist: Netlist) -> list[Bus]:
     return [b for b in netlist.ports if b.external and b.protocol is Protocol.AHB_LITE]
 
 
+def formal_jobs(spec: Spec, netlist: Netlist) -> list[tuple[str, tuple[str, ...]]]:
+    """The SymbiYosys jobs generate writes for SPEC (each name after ``<project>_``) with their
+    tasks, sorted by name, without rendering them: the formal corpus lists its tests from
+    this (D76). None for a user-supplied fabric (D8) or with formal not generated."""
+    from hdl_bag.formal_gen.decode import decoded_fabrics
+    from hdl_bag.formal_gen.units import units
+    from hdl_bag.templates import builtin_registry
+
+    registry = builtin_registry()
+    opaque = any((m := registry.get(i.template)) and m.opaque for i in netlist.instances)
+    if not spec.project.outputs.formal or opaque:
+        return []
+    out: list[tuple[str, tuple[str, ...]]] = [("reset", ("prove", "cover"))]
+    if checkers(spec, netlist) or axi4_ports(netlist) or ahb_ports(netlist):
+        out.append(("protocol", ("bmc", "cover")))
+    if decoded_fabrics(netlist):
+        out.append(("decode", ("prove",)))
+    out += [(f"route_{i.name}", ("bmc", "cover")) for i in units(netlist)]
+    return sorted(out)
+
+
 def own_checkers(netlist: Netlist) -> list[str]:
     """BAG's own checker files (in formal/) the protocol job reads."""
     return [f for f, ports in ((FAXI4, axi4_ports(netlist)), (FAHB, ahb_ports(netlist))) if ports]

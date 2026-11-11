@@ -1,7 +1,7 @@
 name: eda-shards
 
-# Lint flow and simulation tests against the pinned EDA tools: four parallel jobs balanced by
-# tests/eda_durations.json (pytest-split; refresh it with scripts/eda_durations.py), each spread
+# Lint flow, simulation and formal tests against the pinned EDA tools: parallel jobs (four
+# unless the caller asks for more) balanced by tests/eda_durations.json (pytest-split; refresh it with scripts/eda_durations.py), each spread
 # over the runner's cores with pytest-xdist (every test has its own out/ directory). Called by
 # pr.yml (the smoke subset on pull requests, the full list on main and nightly) and by
 # full-eda.yml (the full list on a pull request labelled full-eda).
@@ -21,18 +21,32 @@ on:
         description: Each shard's time limit (the nightly's deep tests need more, D74)
         type: number
         default: 30
+      shards:
+        description: How many parallel jobs (the nightly's formal corpus needs more, D76)
+        type: number
+        default: 4
 
 permissions:
   contents: read
 
 jobs:
+  groups:
+    # The matrix needs a list: 1 to the shard count.
+    runs-on: ubuntu-24.04
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - id: list
+        run: echo "list=[$(seq -s , 1 ${{ inputs.shards }})]" >> "$GITHUB_OUTPUT"
+
   shard:
+    needs: groups
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: ${{ fromJSON(needs.groups.outputs.list) }}
     container:
       image: ghcr.io/hdl-tools/hdl-bag-tools:main
       credentials:
@@ -61,7 +75,7 @@ jobs:
       - run: ccache --zero-stats
       - run: >-
           CCACHE_BASEDIR="$PWD"
-          uv run pytest -m "$EDA_MARKS" -n auto --splits 4 --group ${{ matrix.group }}
+          uv run pytest -m "$EDA_MARKS" -n auto --splits ${{ inputs.shards }} --group ${{ matrix.group }}
           --durations-path tests/eda_durations.json --splitting-algorithm least_duration
           --durations=0 --durations-min=0
       - run: ccache --show-stats

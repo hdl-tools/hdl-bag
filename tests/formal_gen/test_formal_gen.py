@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import hdl_bag
+from hdl_bag.flows.formal import job_tasks
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
@@ -16,6 +17,7 @@ from hdl_bag.formal_gen import (
     ahb_ports,
     axi4_ports,
     checkers,
+    formal_jobs,
     props_module,
 )
 from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
@@ -168,6 +170,21 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     # Step registers come from formal/bag_step.v: under yosys-slang a register on a net
     # marked (* gclk *) is clocked by a free net, not the solver's step (PR 1's bug).
     assert "gclk" not in text and "always_ff @(posedge bag_step)" not in text
+
+
+@pytest.mark.parametrize("config", CONFIGS, ids=lambda c: c.stem)
+def test_formal_jobs_names_every_generated_job_and_its_tasks(tmp_path: Path,
+                                                             config: Path) -> None:  # fmt: skip
+    """The formal corpus (D76) lists its tests from formal_jobs, without generating: it must
+    name exactly the jobs generate writes, each with its tasks. A user-supplied fabric gets
+    none (D8)."""
+    spec = load(config)
+    out = generate(spec, tmp_path, config.parent)
+    found = {Path(rel).stem.removeprefix(f"{spec.project.name}_"):
+             tuple(t.removeprefix(f"{Path(rel).stem}_") for t in job_tasks(tmp_path / rel))
+             for rel in out.formal}  # fmt: skip
+    assert dict(formal_jobs(spec, build_netlist(spec))) == found
+    assert bool(found) is not _opaque(config)
 
 
 @pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)

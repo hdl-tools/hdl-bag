@@ -76,17 +76,20 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
     assert [(f.rule, f.line) for f in report.findings] == [("FORMAL-COVER", 6)]
 
 
-@pytest.mark.parametrize(
-    ("config", "jobs"),
-    [("ahb_fixed", ("decode", "protocol", "reset", "route_ahb")),
-     ("ahb2apb_pt", ("decode", "protocol", "reset", "route_ahb_bus", "route_aon_apb",
-                     "route_br_ahb2aon")),
-     ("apb4_min", ("decode", "protocol", "reset", "route_apb")),
-     ("apb4_rules", ("decode", "protocol", "reset", "route_apb")),
-     ("axil_shared_one", ("decode", "protocol", "reset", "route_bus")),
-     ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
-     ("ahb_single", ("decode", "protocol", "reset", "route_ahb"))],
-)  # fmt: skip
+# Configs whose every job runs here, as one test; the formal corpus (D76) leaves them out.
+GENERATED_JOBS = [
+    ("ahb_fixed", ("decode", "protocol", "reset", "route_ahb")),
+    ("ahb2apb_pt", ("decode", "protocol", "reset", "route_ahb_bus", "route_aon_apb",
+                    "route_br_ahb2aon")),
+    ("apb4_min", ("decode", "protocol", "reset", "route_apb")),
+    ("apb4_rules", ("decode", "protocol", "reset", "route_apb")),
+    ("axil_shared_one", ("decode", "protocol", "reset", "route_bus")),
+    ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
+    ("ahb_single", ("decode", "protocol", "reset", "route_ahb")),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("config", "jobs"), GENERATED_JOBS)
 def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, ...]) -> None:
     """ahb_fixed asserts its reset synchronously and deasserts it asynchronously, so it has
     no synchronizer and its reset acts at once; ahb2apb_pt has a bridge with state on both

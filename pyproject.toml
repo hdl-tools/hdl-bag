@@ -66,7 +66,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-mypy_path = "src:tests/rtl:tests/configs"
+mypy_path = "src:tests/rtl:tests/configs:tests/mutation:tests/flows"
 
 [[tool.mypy.overrides]]
 # cocotbext-axi ships no type information.
