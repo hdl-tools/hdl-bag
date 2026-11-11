@@ -758,6 +758,34 @@ def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
     assert "bag_up_req" not in per
 
 
+def test_a_bridge_route_job_sees_only_the_addresses_its_upstream_fabric_sends_it(
+    tmp_path: Path,
+) -> None:
+    """Formal corpus run 43047322627: bridges_inhouse_cdc's br_aon (AHB-Lite, 24-bit address,
+    to AXI4, 32-bit) failed br_aon_aw_in_window for upstream address 0x07_5000, which the ahb
+    fabric never sends it (br_aon's region is 0x4010_0000 to 0x4010_FFFF, the fabric's
+    address 0 being 0x4000_0000). The bridge subtracts its offset at 24 bits and the route
+    model's translation wraps at 32, so they differ only outside the window. The environment
+    presents only addresses in the bridge's regions on its upstream fabric; a bridge that is a
+    default slave there would take misses at any address and gets no such assumption."""
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "bridges_inhouse_cdc_route_br_aon.sv").read_text(encoding="utf-8")
+    assert ("  always_comb if (ahb_2_br_aon_ahb_hsel && ahb_2_br_aon_ahb_htrans[1]) assume "
+            "((ahb_2_br_aon_ahb_haddr >= 24'h10_0000 && ahb_2_br_aon_ahb_haddr <= 24'h10_FFFF));\n"
+            ) in text  # fmt: skip
+    spec = load(P3 / "bridges_inhouse_cdc.ir.yaml")
+    fab = next(f for f in spec.fabrics if f.name == "ahb")
+    decode = tuple(d.model_copy(update={"default_slave": "br_aon"}) for d in fab.decode)
+    fabrics = tuple(
+        f.model_copy(update={"decode": decode}) if f is fab else f for f in spec.fabrics
+    )
+    generate(spec.model_copy(update={"fabrics": fabrics}), tmp_path / "ds", P3)
+    text = (tmp_path / "ds" / "formal" / "bridges_inhouse_cdc_route_br_aon.sv").read_text(
+        encoding="utf-8")  # fmt: skip
+    assert "assume ((ahb_2_br_aon_ahb_haddr >=" not in text
+    assert "br_aon_aw_in_window: assert" in text
+
+
 def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:
     """Review weakness: the D70 race on AR is armed only with nothing outstanding, so the
     count drops once per read, at RLAST, not once per beat (a 4-beat read left it wrapped

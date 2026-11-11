@@ -757,6 +757,25 @@ class _Harness:
             self.body.append(f"  always_comb if (bag_busy && !bag_up_pend) assume (!{start});")
         elif p is Protocol.AHB_LITE:
             self.body.append(f"  always_comb if (bag_busy) assume (!{v(up, 'htrans')}[1]);")
+        # The upstream fabric sends the bridge only addresses in its regions there (formal
+        # corpus: a 24-bit upstream and the route model's 32-bit translation differ outside
+        # them), unless the bridge is a default slave, which takes misses anywhere.
+        upfab = fabrics[br.upstream]
+        if not any(d.default_slave == br.name for d in upfab.decode):
+            spans = [(r.base - w_up, r.base + r.size - 1 - w_up) for r in self.spec.memory_map
+                     if r.fabric == br.upstream and r.slave == br.name]  # fmt: skip
+            assert spans and all(0 <= lo <= hi < 1 << uw for lo, hi in spans), (br.name, spans)
+            if p in (Protocol.AXI4, Protocol.AXI4_LITE):
+                shown = [(v(up, "awvalid"), v(up, "awaddr")), (v(up, "arvalid"), v(up, "araddr"))]
+            elif p is Protocol.AHB_LITE:
+                hsel = v(up, "hsel") if "hsel" in up.signals else "1'b1"
+                shown = [(f"{hsel} && {v(up, 'htrans')}[1]", v(up, "haddr"))]
+            else:
+                shown = [(v(up, "psel"), v(up, "paddr"))]
+            for c, a in shown:
+                inside = " || ".join(f"({a} >= {lit(uw, lo)} && {a} <= {lit(uw, hi)})"
+                                     for lo, hi in spans)  # fmt: skip
+                self.body.append(f"  always_comb if ({c}) assume ({inside});")
         dw = dn.addr_width
         open_, win = "bag_busy", "bag_up_addr"
         if du == dd:
