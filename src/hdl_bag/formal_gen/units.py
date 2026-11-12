@@ -53,6 +53,10 @@ ROUTE_DEPTH_PER_HALVING = 6
 # mixed_cdc_chain's reached only edge 10 in 20 minutes.
 ROUTE_CYCLES = 8
 ROUTE_CYCLES_PER_HALVING = 2
+# A bridge with a FIFO holds the request and the response an edge each: mixed_lite_shared's
+# br_ahb (AXI4-Lite to AHB-Lite, same width, FIFO depth 2) reached its upstream B handshake at
+# step 9 (nightly 43207958073 left it unreached at 8).
+ROUTE_CYCLES_PER_FIFO = 2
 # Scoreboard entries per master and request channel (D71): an AXI4 master keeps at most 4
 # transactions open (bag_faxi4's tables, D66), and the environment keeps the others within
 # the same bound; an AHB-Lite master has one address phase beyond its data phase; the APB
@@ -99,7 +103,9 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     ratio = up.data_width // down.data_width if up is not None and down is not None else 1
     halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
     if len(unit.clocks) == 1:
-        return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
+        fifo = unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0
+        return False, (ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
+                       + ROUTE_CYCLES_PER_FIFO * fifo)  # fmt: skip
     return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
 
 

@@ -21,7 +21,13 @@ from hdl_bag.formal_gen import (
     props_module,
 )
 from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
-from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
+from hdl_bag.formal_gen.units import (
+    ROUTE_CYCLES,
+    ROUTE_CYCLES_PER_FIFO,
+    ROUTE_DEPTH,
+    SCOREBOARD,
+    id_prefixes,
+)
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -756,6 +762,20 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
                                 ("br_lite", 8, "off")):  # fmt: skip
         job = (mn / f"mixed_narrow_apb_route_{unit}.sby").read_text(encoding="utf-8")
         want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock {clocks}\n"
+        assert want in job, unit
+
+
+def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_two_more_edges(tmp_path: Path) -> None:
+    """Nightly 43207958073: mixed_lite_shared's br_ahb (AXI4-Lite to AHB-Lite, same width,
+    FIFO depth 2) left its upstream B handshake unreached in 8 edges; at 16 it came at step 9.
+    The bridge's FIFO holds the request and the response an edge each, so a single-domain
+    bridge with a FIFO gets ROUTE_CYCLES_PER_FIFO more edges. br_per, without one, keeps 8."""
+    assert ROUTE_CYCLES_PER_FIFO == 2
+    generate(load(P3 / "mixed_lite_shared.ir.yaml"), tmp_path / "ls", P3)
+    formal = tmp_path / "ls" / "formal"
+    for unit, depth in (("br_ahb", 10), ("br_per", 8)):
+        job = (formal / f"mixed_lite_shared_route_{unit}.sby").read_text(encoding="utf-8")
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
         assert want in job, unit
 
 
