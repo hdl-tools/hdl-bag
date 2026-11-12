@@ -3,6 +3,7 @@
 """The formal flow against SymbiYosys (eda): prove() on tiny properties, the generated
 quiet-in-reset jobs on real designs, a reset bug they must catch, and the time limit."""
 
+import dataclasses
 import re
 from pathlib import Path
 from typing import Literal
@@ -87,6 +88,9 @@ GENERATED_JOBS = [
     ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
     ("ahb_single", ("decode", "protocol", "reset", "route_ahb")),
 ]  # fmt: skip
+# Jobs of those configs the formal corpus runs instead, task by task, placed by measured time
+# (D83: axi_shared_one's protocol job, on one clock for 16 edges since 76a2fd8, passed 600 s).
+IN_CORPUS = {("axi_shared_one", "protocol")}
 
 
 @pytest.mark.parametrize(("config", "jobs"), GENERATED_JOBS)
@@ -95,16 +99,18 @@ def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, .
     no synchronizer and its reset acts at once; ahb2apb_pt has a bridge with state on both
     sides; apb4_min has two reset groups and an alias pin; apb4_rules has a sync-assertion
     reset on APB ports, with read-only, write-only and secure slaves; axil_shared_one has
-    AXI4-Lite ports; axi_shared_one has AXI4 ports (bag_faxi4); ahb_single is the AHB-Lite
-    mutants' base. Every cover is reached (the protocol job's at its bmc depth), so no
-    assertion holds vacuously; the AXI4-Lite and APB ports pass ZipCPU's protocol checkers
-    (D60), the AXI4 and AHB-Lite ports BAG's own."""
+    AXI4-Lite ports; axi_shared_one has AXI4 ports (bag_faxi4; its protocol job runs in the
+    formal corpus, IN_CORPUS); ahb_single is the AHB-Lite mutants' base. Every cover is
+    reached, so no assertion holds vacuously; the AXI4-Lite and APB ports pass ZipCPU's
+    protocol checkers (D60), the AXI4 and AHB-Lite ports BAG's own."""
     where = P3 if config.startswith(("axil", "axi_")) else P2
     spec = load(where / f"{config}.ir.yaml")
     out = generate(spec, tmp_path, where)
-    report = run_formal(out, timeout=600)
-    assert report.ok, report.format()
     assert out.formal == tuple(f"formal/{spec.project.name}_{j}.sby" for j in jobs)
+    here = tuple(f"formal/{spec.project.name}_{j}.sby" for j in jobs
+                 if (config, j) not in IN_CORPUS)  # fmt: skip
+    report = run_formal(dataclasses.replace(out, formal=here), timeout=600)
+    assert report.ok, report.format()
 
 
 def test_a_bridge_with_no_reset_is_caught(tmp_path: Path) -> None:

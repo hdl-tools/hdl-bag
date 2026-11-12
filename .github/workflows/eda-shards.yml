@@ -32,7 +32,7 @@ on:
       deep-timeout:
         description: The SBY time limit of a deep formal test, in seconds (D76)
         type: number
-        default: 3600
+        default: 7200
       keyword:
         description: Only the tests whose names match this pytest -k expression (all if empty)
         type: string

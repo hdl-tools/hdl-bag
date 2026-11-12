@@ -617,6 +617,68 @@ def test_an_axi4_slave_nothing_reaches_gets_neither_access(
     assert "proto_no_read_ddr0: assert (!(ddr0_axi_arvalid));\n" in text
 
 
+def test_a_master_behind_an_aw_spill_never_gets_its_data_taken_first(tmp_path: Path) -> None:
+    """D81, nightly 43207958073: proto_w_first was unreached on 7 AXI4 masters wired straight
+    into a bag_axi_xbar with LatencyMode CUT_SLV_AX or CUT_ALL_AX. axi_demux_simple routes W
+    once AWVALID is presented, so a bare crossbar port can take W first (axi_xbar_pow2,
+    NO_LATENCY, reached it); behind an AW spill register the port's AW waits only while the
+    register holds earlier AWs, whose data comes first. There the bmc asserts W never comes
+    before its AW instead. A CDC, FIFO or cut in front takes W on its own channel."""
+    xr = _protocol(tmp_path / "xr", P3 / "axi_xbar_rules.ir.yaml")  # CUT_ALL_AX
+    for m in ("cpu", "dbg", "dma"):
+        assert (f"  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+                f"proto_no_w_first_{m}: assert (!bag_{m}_w_first);\n") in xr  # fmt: skip
+        assert f"proto_w_first_{m}: cover" not in xr
+        assert (f"  // proto_no_w_first_{m}: no cover, {m} enters xbar's AW spill register "
+                "(CUT_ALL_AX)\n") in xr  # fmt: skip
+    assert "proto_w_first_a: cover" in _protocol(tmp_path / "xp", P3 / "axi_xbar_pow2.ir.yaml")
+    ad = _protocol(tmp_path / "ad", P3 / "axi_adapters.ir.yaml")  # CUT_SLV_AX, CDC and FIFO first
+    assert "proto_w_first_cpu: cover" in ad and "proto_w_first_dma: cover" in ad
+    assert "proto_no_w_first" not in ad
+
+
+def test_a_master_through_a_one_at_a_time_lite_converter_opens_one_read(tmp_path: Path) -> None:
+    """D80 (owner: keep the RTL, document the limit): mixed_lite_shared's dbg enters
+    bag_axi_to_axil, PULP axi_to_axi_lite with MaxTrans 2, whose burst splitter's
+    axi_demux_simple has 1-bit ID counters (idx_width(2)), full at 1, any full blocking every
+    ID: one read and one write at a time, fewer than configured. proto_same_id_dbg was
+    unreached (nightly 43207958073); the bmc asserts the limit instead."""
+    ls = _protocol(tmp_path, P3 / "mixed_lite_shared.ir.yaml")
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_same_id_dbg: assert (!bag_dbg_same_id);\n") in ls  # fmt: skip
+    assert "proto_same_id_dbg: cover" not in ls
+    assert ("  // proto_no_same_id_dbg: no cover, dbg enters dbg_pc_2_cfg, PULP axi_to_axi_lite "
+            "with MaxTrans 2: one read at a time (D80)\n") in ls  # fmt: skip
+    # Nor can four reads or four unanswered writes be open (a local cover run, D82, left
+    # proto_full_dbg unreached).
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_full_dbg: assert (!bag_dbg_full);\n") in ls  # fmt: skip
+    assert "proto_full_dbg: cover" not in ls
+    assert "proto_w_first_dbg: cover" in ls
+
+
+def test_a_cover_task_holds_the_other_masters_idle(tmp_path: Path) -> None:
+    """D82 (owner, 2026-11-13): 33 per-port cover tasks ran past an hour, each holding the
+    whole design. A master port's cover task assumes every other master idle; a slave port's
+    keeps, for each access the IR sends it, only the nearest master making it (ties by name).
+    A trace with idle masters is legal in the full design, so a cover it reaches still counts;
+    the bmc keeps every master free."""
+    xr = _protocol(tmp_path, P3 / "axi_xbar_rules.ir.yaml")
+    # Each block ends on a line of its own (the last one once ran into `endmodule`).
+    assert "`endif\nendmodule\n" in xr and "`endifendmodule" not in xr
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", xr, re.S))
+    idle = {p: sorted(re.findall(r"bag_idle_(\w+)_for_\w+: assume", b)) for p, b in blocks.items()}
+    assert idle == {"cpu": ["dbg", "dma"], "dbg": ["cpu", "dma"], "dma": ["cpu", "dbg"],
+                    "mem": ["dbg", "dma"], "regs": ["dbg"], "rom": ["dma"]}  # fmt: skip
+    # regs: cpu only reads it, so dma (the one writer) stays too; rom: cpu reads it (ahead
+    # of dbg by name), dbg is its only writer.
+    assert ("  always_comb bag_idle_dbg_for_cpu: assume (!(dbg_axi_awvalid || dbg_axi_wvalid "
+            "|| dbg_axi_arvalid));\n") in xr  # fmt: skip
+    job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
+    assert "\ncover_rom: read_slang -D BAG_COVER_rom -D BAG_IDLE_rom --extern-modules " in job
+    assert "\nbmc: read_slang --extern-modules " in job
+
+
 def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
     """D77, D79: the bmc runs at PROTOCOL_DEPTH; each checked port's covers run in a task of
     their own, at its path depth (never below 16), reading only that port's covers: its macro
@@ -628,7 +690,7 @@ def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path
     job = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
     assert "[tasks]\nbmc\ncover_cpu\ncover_dual0\ncover_ro0\ncover_sec0\ncover_wo0\n\n" in job
     assert f"bmc: depth {PROTOCOL_DEPTH}\ncover_cpu: mode cover\ncover_cpu: depth 16\n" in job
-    assert "\ncover_ro0: read_slang -D BAG_COVER_ro0 --extern-modules " in job
+    assert "\ncover_ro0: read_slang -D BAG_COVER_ro0 -D BAG_IDLE_ro0 --extern-modules " in job
     assert "\nbmc: read_slang --extern-modules " in job
     assert ("cover_cpu: chformal -remove -cover bag_apb4_rules_fapb_master_dual0 "
             "bag_apb4_rules_fapb_master_ro0 bag_apb4_rules_fapb_master_sec0 "

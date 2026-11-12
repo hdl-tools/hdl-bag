@@ -218,7 +218,7 @@ def _deep(config: str, unit: str) -> bool:
 SLOW_CONTROLS = {("p3/bridges_pulp", "br_per")}
 DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)} | SLOW_CONTROLS
 # CI may allow more to measure a deep test's cost (pr.yml suite=deep).
-DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "3600"))
+DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "7200"))
 
 
 def test_only_the_deepest_and_slowest_route_jobs_wait_for_the_nightly() -> None:

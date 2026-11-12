@@ -34,11 +34,12 @@ PATH_EDGES_PER_HALVING = 2
 CDC_STEPS = 8
 
 
-def reachable(spec: Spec) -> set[tuple[str, str]]:
-    """The (master, slave) pairs where some access of the master reaches the slave."""
+def reaching(spec: Spec) -> dict[tuple[str, str], set[str]]:
+    """The (master, slave) pairs where some access of the master reaches the slave, each with
+    the kinds of access ("read", "write") that do."""
     from hdl_bag.tests_gen.route_model import pin_sets, probes, route
 
-    out: set[tuple[str, str]] = set()
+    out: dict[tuple[str, str], set[str]] = {}
     addrs = probes(spec)
     for m in spec.masters:
         for addr in (a for a in addrs if a < 1 << m.addr_width):
@@ -47,8 +48,13 @@ def reachable(spec: Spec) -> set[tuple[str, str]]:
                     for pins in pin_sets(spec):
                         slave = route(spec, m.name, addr, write, nonsec, pins).slave
                         if slave is not None:
-                            out.add((m.name, slave))
+                            out.setdefault((m.name, slave), set()).add("write" if write else "read")
     return out
+
+
+def reachable(spec: Spec) -> set[tuple[str, str]]:
+    """The (master, slave) pairs where some access of the master reaches the slave."""
+    return set(reaching(spec))
 
 
 def _buses(inst: Instance) -> list[Bus]:
@@ -87,14 +93,37 @@ def path_steps(steps: list[tuple[Bus, Instance, Bus]], multi: bool) -> int:
     return 2 * edges + CDC_STEPS * crossings
 
 
+def _cost(spec: Spec, netlist: Netlist, a: str, b: str) -> int | None:
+    """The solver steps a transfer between ports A and B needs, if a path joins them."""
+    multi = len({c.domain for c in spec.clocks}) > 1
+    p = path(netlist, a, b)
+    return path_steps(p, multi) if p else None
+
+
 def port_depths(spec: Spec, netlist: Netlist, ports: list[str]) -> dict[str, int]:
     """Each of PORTS (external port names) with its protocol depth in solver steps."""
-    multi = len({c.domain for c in spec.clocks}) > 1
     pairs = reachable(spec)
     out = {}
     for port in ports:
         peers = [s for m, s in pairs if m == port] + [m for m, s in pairs if s == port]
-        costs = [path_steps(p, multi) for q in sorted(set(peers))
-                 if (p := path(netlist, port, q)) is not None and p]  # fmt: skip
+        costs = [c for q in sorted(set(peers))
+                 if (c := _cost(spec, netlist, port, q)) is not None]  # fmt: skip
         out[port] = max(PROTOCOL_DEPTH, min(costs, default=PROTOCOL_DEPTH))
     return out
+
+
+def active_masters(spec: Spec, netlist: Netlist, port: str,
+                   pairs: dict[tuple[str, str], set[str]]) -> list[str]:  # fmt: skip
+    """The masters PORT's cover task keeps active (D82), the others held idle: a master port,
+    itself; a slave port, for each kind of access the IR sends it (PAIRS, from reaching), the
+    nearest master making it (by path cost, then name), so each of its covers still has a
+    master to make it."""
+    if port in {m.name for m in spec.masters}:
+        return [port]
+    keep = set()
+    for kind in ("read", "write"):
+        ranked = sorted((c, m) for (m, s), kinds in pairs.items() if s == port and kind in kinds
+                        if (c := _cost(spec, netlist, m, port)) is not None)  # fmt: skip
+        if ranked:
+            keep.add(ranked[0][1])
+    return sorted(keep)

@@ -86,7 +86,7 @@ from typing import TYPE_CHECKING
 from hdl_bag.flows.formal import SbyTask, sby_job
 from hdl_bag.formal_gen.decode import render_decode
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
-from hdl_bag.gen.netlist import Bus, Netlist
+from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import flat_signal_name
@@ -621,11 +621,59 @@ _FAXI4 = ("awvalid", "awready", "awid", "awaddr", "awlen", "awsize", "awburst", 
           "rvalid", "rready", "rid", "rdata", "rresp", "rlast")  # fmt: skip
 
 
+# D81: the LatencyMode values with a spill register on AW in front of the crossbar's demux and
+# none on W (axi_pkg: DemuxAw without DemuxW).
+AW_SPILL_ONLY = ("CUT_SLV_AX", "CUT_ALL_AX")
+
+
+def _first(netlist: Netlist, bus: Bus) -> Instance | None:
+    """The component master port BUS attaches to."""
+    for inst in netlist.instances:
+        if inst.kind == "fabric" and any(b.name == bus.name for b in inst.masters):
+            return inst
+        if inst.kind != "fabric" and inst.up is not None and inst.up.name == bus.name:
+            return inst
+    return None
+
+
+def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
+    """The bag_faxi4 events the design never lets the master on AXI4 master port BUS make,
+    each with why; the protocol job asserts them absent instead of covering them.
+
+    - w_first (D81): the port enters a bag_axi_xbar whose LatencyMode spills AW but not W.
+      axi_demux_simple routes W once AWVALID is presented, so a bare crossbar port may take W
+      first; behind the spill register the port's AW waits only while the register holds
+      earlier AWs, and the data the port then takes is theirs.
+    - same_id (D80, owner: keep the RTL, document the limit): the port enters an AXI4 to
+      AXI4-Lite protocol adapter (PULP axi_to_axi_lite) with MaxTrans of 2 or less. Its burst
+      splitter's axi_demux_simple has idx_width(MaxTrans)-bit ID counters, full at 1 there,
+      and any full counter blocks every ID: one read and one write at a time, so neither two
+      reads of one ID nor a full table (full: four reads, or four writes owed a response)."""
+    first = _first(netlist, bus)
+    out: dict[str, str] = {}
+    if first is None:
+        return out
+    mode = first.fabric.latency_mode if first.fabric is not None else None
+    if first.template == "bag_axi_xbar" and mode in AW_SPILL_ONLY:
+        out["w_first"] = f"{bus.name} enters {first.name}'s AW spill register ({mode})"
+    if (first.template == "bag_pc" and first.adapter is not None and first.down is not None
+            and first.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
+        fab = {f.name: f for f in spec.fabrics}[first.adapter.fabric]
+        trans = fab.max_mst_trans  # as the bag_pc template sets MaxTrans on a master's path
+        if trans is not None and trans <= 2:
+            out["same_id"] = (f"{bus.name} enters {first.name}, PULP axi_to_axi_lite with "
+                              f"MaxTrans {trans}: one read at a time (D80)")  # fmt: skip
+            out["full"] = (f"{bus.name} enters {first.name}, PULP axi_to_axi_lite with "
+                           f"MaxTrans {trans}: one read and one write at a time (D80)")  # fmt: skip
+    return out
+
+
 def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
-          active: dict[str, set[str]]) -> list[str]:  # fmt: skip
+          active: dict[str, set[str]], absent: dict[str, str]) -> list[str]:  # fmt: skip
     """BAG's AXI4 checker on BUS, and its covers. The checker follows every ID of the port by
     itself (D64), so it needs no ID mapping. A signal the port lacks takes the value the spec
-    implies (no ID: a single ID 0; no AxLOCK, AxCACHE, AxQOS, AxREGION: 0)."""
+    implies (no ID: a single ID 0; no AxLOCK, AxCACHE, AxQOS, AxREGION: 0). ABSENT: the events
+    the design never lets the environment master make (``never``), asserted, not covered."""
     idw = max(bus.id_width, 1)
 
     def v(sig: str) -> str:
@@ -675,8 +723,14 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
         # AxLOCK intact (AXI4-Lite and bag_axi2ahb drop it), which the port alone does not
         # tell; test_an_axi4_slave_environment_may_give_exokay_to_an_exclusive_access keeps
         # the EXOKAY rules from holding vacuously.
-        covers += [(f"proto_{e}_{bus.name}", f"bag_{bus.name}_{e}") for e in events]
+        covers += [(f"proto_{e}_{bus.name}", f"bag_{bus.name}_{e}") for e in events
+                   if e not in absent]  # fmt: skip
     lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
+    for e, why in absent.items():
+        label = f"proto_no_{e}_{bus.name}"
+        lines += [f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
+                  f"{label}: assert (!bag_{bus.name}_{e});",
+                  f"  // {label}: no cover, {why}"]  # fmt: skip
     if bus.is_slave:
         lines += _only_what_reaches(bus, dom, can, write=f"{v('awvalid')} || {v('wvalid')}",
                                     read=v("arvalid"))  # fmt: skip
@@ -799,7 +853,9 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
             body.append(f"  // {bus.name}: AXI4 {side} port; the design is its {design} "
                         "(bag_faxi4)")  # fmt: skip
-            body += [*_own_covers(bus, _axi4(spec, bus, domains[bus.domain], ports, active)), ""]
+            absent = {} if bus.is_slave else never(spec, netlist, bus)
+            lines = _axi4(spec, bus, domains[bus.domain], ports, active, absent)
+            body += [*_own_covers(bus, lines), ""]
     if ahb:
         active = _active(spec)
         for bus in ahb:
@@ -807,6 +863,7 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             body.append(f"  // {bus.name}: AHB-Lite {side} port; the design is its {design} "
                         "(bag_fahb)")  # fmt: skip
             body += [*_own_covers(bus, _ahb(spec, bus, domains[bus.domain], ports, active)), ""]
+    body += _idle(spec, netlist, ports)
     name = f"bag_{spec.project.name}_protocol_props"
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
@@ -814,6 +871,44 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
 def cover_macro(port: str) -> str:
     """The macro that keeps PORT's covers in the protocol property file (D79)."""
     return f"BAG_COVER_{port}"
+
+
+def idle_macro(port: str) -> str:
+    """The macro that holds the masters PORT's cover task does not need idle (D82)."""
+    return f"BAG_IDLE_{port}"
+
+
+def _requests(spec: Spec, bus: Bus, port: "_Ports") -> str:
+    """What master port BUS presents when it asks for anything."""
+    if bus.protocol in AXI_FAMILY:
+        return " || ".join(_value(spec, bus, s, port) for s in ("awvalid", "wvalid", "arvalid"))
+    if bus.protocol is Protocol.AHB_LITE:
+        return f"{_value(spec, bus, 'htrans', port)}[1]"
+    return _value(spec, bus, "psel", port)
+
+
+def _idle(spec: Spec, netlist: Netlist, port: "_Ports") -> list[str]:
+    """Per checked port, the masters its cover task holds idle (D82, owner 2026-11-13): with
+    the whole design in every cover task, per-port tasks of up to 68 steps ran past an hour.
+    A trace in which those masters ask for nothing is legal in the full design, so a cover it
+    reaches still counts; the bmc defines no such macro and keeps every master free."""
+    from hdl_bag.formal_gen.depth import active_masters, reaching
+
+    pairs = reaching(spec)
+    masters = [b for b in netlist.ports if b.external and not b.is_slave]
+    out = []
+    for p in protocol_ports(spec, netlist):
+        keep = active_masters(spec, netlist, p, pairs)
+        idle = [m for m in masters if m.name not in keep]
+        if not idle:
+            continue
+        out += [f"`ifdef {idle_macro(p)}",
+                f"  // D82: {p}'s cover task; {', '.join(keep) or 'no master'} active, the "
+                "other masters idle"]  # fmt: skip
+        out += [f"  always_comb bag_idle_{m.name}_for_{p}: "
+                f"assume (!({_requests(spec, m, port)}));" for m in idle]  # fmt: skip
+        out += ["`endif", ""]
+    return out
 
 
 def _own_covers(bus: Bus, lines: list[str]) -> list[str]:
@@ -846,7 +941,8 @@ def protocol_tasks(spec: Spec, netlist: Netlist) -> list[SbyTask]:
         others = sorted(m for q, m in zips.items() if q != port)
         after = (f"chformal -remove -cover {' '.join(others)}",) if others else ()
         tasks.append(SbyTask(f"cover_{port}", "cover", depths[port],
-                             defines=(cover_macro(port),), after=after))  # fmt: skip
+                             defines=(cover_macro(port), idle_macro(port)),
+                             after=after))  # fmt: skip
     return tasks
 
 

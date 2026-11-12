@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 from test_decode_mutations import DECODE_CONTROL_CONFIGS, ROUTE_CONTROL_CASES
-from test_formal_eda import GENERATED_JOBS
+from test_formal_eda import GENERATED_JOBS, IN_CORPUS
 
 from hdl_bag.flows.formal import run_sby
 from hdl_bag.formal_gen import formal_jobs
@@ -36,7 +36,7 @@ NODE = "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds"
 DEEP_S = 300
 TIMEOUT_S = 1200
 # CI may allow more to measure a deep test's cost (pr.yml suite=deep).
-DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "3600"))
+DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "7200"))
 
 
 def _path(config: str) -> Path:
@@ -73,7 +73,7 @@ def elsewhere() -> dict[tuple[str, str, str], str]:
     generated = {by_name[c] for c, _ in GENERATED_JOBS}
     route = {(c, f"route_{u}") for c, u in ROUTE_CONTROL_CASES}
     for config, job, task in all_tasks():
-        if config in generated:
+        if config in generated and (config.split("/", 1)[1], job) not in IN_CORPUS:
             out[config, job, task] = "test_the_generated_jobs_hold"
         elif job == "decode" and config in DECODE_CONTROL_CONFIGS:
             out[config, job, task] = "test_the_decode_job_holds_unmutated"

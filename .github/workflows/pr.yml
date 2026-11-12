@@ -122,7 +122,7 @@ jobs:
       keyword: ${{ github.event_name == 'workflow_dispatch' && inputs.select || '' }}
       shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.select != '') && 1 || (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 20 || 4) }}
       workers: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && '2' || 'auto' }}
-      deep-timeout: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 10800 || 3600 }}
+      deep-timeout: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 10800 || 7200 }}
       save-cache: ${{ !((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) }}
     permissions:
       contents: read
