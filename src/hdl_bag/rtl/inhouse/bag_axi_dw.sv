@@ -125,8 +125,89 @@ module bag_axi_dw #(
     $fatal(1, "bag_axi_dw needs the same ID width on both sides");
   end
 
-  slv_req_t  slv_req;
-  slv_resp_t slv_resp;
+  slv_req_t  slv_req_in, slv_req;
+  slv_resp_t slv_resp_out, slv_resp;
+
+  // Exclusive accesses through the PULP converter, which ignores AxLOCK. An in-house
+  // replacement for it must keep exclusive accesses legal itself, and should then carry an
+  // over-long one (below) through as exclusive rather than make it fail.
+  //
+  // Upsizing: axi_dw_upsizer widens every modifiable INCR burst, so an exclusive access could
+  // leave it misaligned to its new total (AXI A7.2.4: 2 beats of 4 bytes at 0x...08 became
+  // 1 beat of 64). Exclusive accesses enter it non-modifiable: it passes them on beat for beat.
+  //
+  // Downsizing: axi_dw_downsizer splits each wide beat, so an exclusive access could leave it
+  // with more than the 16 beats A7.2.4 allows (16 beats of 8 bytes became 32 of 4). Such an
+  // access goes on as a normal one, so it fails as an exclusive access may: a read's OKAY
+  // says so, and a write's beats go with no byte strobe set, so no byte changes and its OKAY
+  // says so too (owner, 2026-11-12). A write still reaches the slave: one acting on any write,
+  // whatever its strobes, sees it.
+  localparam int unsigned MstMaxSize = $clog2(MstDataWidth / 8);
+  localparam bit Downsize = SlvDataWidth > MstDataWidth;
+
+  function automatic logic too_long(input logic [7:0] len, input logic [2:0] size);
+    logic [31:0] beats;
+    beats = 32'(len) + 32'd1;
+    if (int'(size) > int'(MstMaxSize)) beats = beats << (int'(size) - int'(MstMaxSize));
+    return Downsize && beats > 32'd16;
+  endfunction
+
+  // Downsizing, whether each write burst the converter has taken, oldest first, has its
+  // strobes cleared. A burst's W beats wait for its AW (the downsizer's do anyway), so they
+  // follow these in order. Upsizing, nothing waits.
+  localparam int unsigned Open = 4;
+  localparam int unsigned OpenW = $clog2(Open + 1);
+  logic [Open-1:0] zap_q, zap_d;
+  logic [OpenW-1:0] open_q, open_d;
+  logic aw_room, w_known, aw_hs, w_end;
+
+  assign aw_room = !Downsize || open_q != OpenW'(Open);
+  assign w_known = !Downsize || open_q != '0;
+  assign aw_hs = Downsize && slv_req.aw_valid && slv_resp.aw_ready;
+  assign w_end = Downsize && slv_req.w_valid && slv_resp.w_ready && slv_req.w.last;
+
+  always_comb begin
+    slv_req = slv_req_in;
+    if (slv_req_in.aw.lock) begin
+      slv_req.aw.cache[1] = 1'b0;
+      if (too_long(slv_req_in.aw.len, slv_req_in.aw.size)) slv_req.aw.lock = 1'b0;
+    end
+    if (slv_req_in.ar.lock) begin
+      slv_req.ar.cache[1] = 1'b0;
+      if (too_long(slv_req_in.ar.len, slv_req_in.ar.size)) slv_req.ar.lock = 1'b0;
+    end
+    slv_req.aw_valid = slv_req_in.aw_valid && aw_room;
+    slv_req.w_valid = slv_req_in.w_valid && w_known;
+    if (zap_q[0]) slv_req.w.strb = '0;
+    slv_resp_out = slv_resp;
+    slv_resp_out.aw_ready = slv_resp.aw_ready && aw_room;
+    slv_resp_out.w_ready = slv_resp.w_ready && w_known;
+  end
+
+  always_comb begin
+    zap_d = zap_q;
+    open_d = open_q;
+    if (w_end) begin
+      zap_d = zap_d >> 1;
+      open_d = open_d - 1'b1;
+    end
+    if (aw_hs) begin
+      zap_d[open_d[$clog2(Open)-1:0]] =
+          slv_req_in.aw.lock && too_long(slv_req_in.aw.len, slv_req_in.aw.size);
+      open_d = open_d + 1'b1;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      zap_q <= '0;
+      open_q <= '0;
+    end else begin
+      zap_q <= zap_d;
+      open_q <= open_d;
+    end
+  end
+
   mst_req_t  mst_req;
   mst_resp_t mst_resp;
 
@@ -183,8 +264,8 @@ module bag_axi_dw #(
       .ruser_o(s_ruser_o),
       .rvalid_o(s_rvalid_o),
       .rready_i(s_rready_i),
-      .req_o (slv_req),
-      .resp_i(slv_resp)
+      .req_o (slv_req_in),
+      .resp_i(slv_resp_out)
   );
 
   axi_dw_converter #(

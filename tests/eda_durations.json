@@ -818,5 +818,8 @@
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p2/nested_deep-route_apb_a-bmc]": 2.59,
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p2/ahb2apb_nested-reset-prove]": 2.45,
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_lite_shared-route_per-bmc]": 2.36,
- "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_apb_masters-route_dbg_apb-bmc]": 2.33
+ "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_apb_masters-route_dbg_apb-bmc]": 2.33,
+ "tests/flows/test_formal_eda.py::test_a_width_converter_keeps_exclusive_accesses_legal[32-64]": 55.64,
+ "tests/flows/test_formal_eda.py::test_a_width_converter_keeps_exclusive_accesses_legal[64-32]": 30.95,
+ "tests/flows/test_formal_eda.py::test_an_exclusive_write_too_long_to_downsize_changes_no_byte": 23.23
 }
