@@ -27,6 +27,7 @@ import shutil
 import signal
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -290,31 +291,58 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None,
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 
-def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str], depths: dict[Mode, int],
+@dataclass(frozen=True)
+class SbyTask:
+    """One task of a job: its name, mode and depth; the macros its read of the files defines,
+    and Yosys script it runs after prep (D77: a cover task per port)."""
+
+    name: str
+    mode: Mode
+    depth: int
+    defines: tuple[str, ...] = ()
+    after: tuple[str, ...] = ()
+
+
+def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str],
+            depths: dict[Mode, int] | None = None, tasks: Sequence[SbyTask] = (),
             copy: Sequence[tuple[str, str]], engine: str = "smtbmc yices",
             multiclock: bool = True, prelude: Sequence[str] = ()) -> str:  # fmt: skip
-    """The text of a SymbiYosys job: one task per mode of DEPTHS, each at its depth. FILES are
+    """The text of a SymbiYosys job: one task per mode of DEPTHS, each at its depth, or the
+    TASKS given (named, each with its mode, depth, macros and script after prep). FILES are
     read with yosys-slang in compile order, as named in the work directory; COPY lists the
     (destination, source) pairs of its [files] section, sources relative to the job file.
     PRELUDE is Yosys script run before slang reads FILES (modules from Yosys's own frontend,
     which the slang-read files may then instantiate)."""
-    bad = sorted(set(depths) - set(MODES))
-    if bad or not depths:
-        raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {bad or 'none'}")
-    for mode, depth in depths.items():
-        if depth < 1:
-            raise ValueError(f"formal depth must be at least 1, not {depth} ({mode})")
+    if depths and tasks:
+        raise ValueError("formal job takes depths or tasks, not both")
+    if not tasks:
+        depths = depths or {}
+        bad = sorted(set(depths) - set(MODES))
+        if bad or not depths:
+            raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {bad or 'none'}")
+        tasks = [SbyTask(m, m, d) for m, d in depths.items()]
+    for t in tasks:
+        if t.mode not in MODES:
+            raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {[t.mode]}")
+        if t.depth < 1:
+            raise ValueError(f"formal depth must be at least 1, not {t.depth} ({t.name})")
     extern = ["--extern-modules"] if prelude else []
     read = " ".join([*extern, *(f"-I {d}" for d in incdirs), "--top", top, *files])
     before = "".join(f"{line}\n" for line in prelude)
-    tasks = "".join(f"{m}\n" for m in depths)
-    options = "".join(f"{m}: mode {m}\n{m}: depth {d}\n" for m, d in depths.items())
+    if any(t.defines for t in tasks):
+        reads = "".join(f"{t.name}: read_slang {''.join(f'-D {d} ' for d in t.defines)}{read}\n"
+                        for t in tasks)  # fmt: skip
+    else:
+        reads = f"read_slang {read}\n"
+    after = "".join(f"{t.name}: {line}\n" for t in tasks for line in t.after)
+    names = "".join(f"{t.name}\n" for t in tasks)
+    options = "".join(f"{t.name}: mode {t.mode}\n{t.name}: depth {t.depth}\n" for t in tasks)
     copied = "".join(f"{dest} {src}\n" if src != dest else f"{dest}\n" for dest, src in copy)
     return (
-        f"[tasks]\n{tasks}\n"
+        f"[tasks]\n{names}\n"
         f"[options]\n{options}{'multiclock on' if multiclock else 'multiclock off'}\n\n"
         f"[engines]\n{engine}\n\n"
-        f"[script]\nplugin -i slang\n{before}read_slang {read}\nprep -top {top}\n\n"
+        f"[script]\nplugin -i slang\n{before}{reads}prep -top {top}\n{after}\n"
         f"[files]\n{copied}"
     )
 

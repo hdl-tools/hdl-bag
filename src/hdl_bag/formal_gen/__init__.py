@@ -83,7 +83,7 @@ fabric behaves (D8).
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hdl_bag.flows.formal import sby_job
+from hdl_bag.flows.formal import SbyTask, sby_job
 from hdl_bag.formal_gen.decode import render_decode
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Netlist
@@ -107,10 +107,10 @@ COVER_DEPTH = 40
 # Bounded depth for the protocol checkers, in solver steps: their transaction counters have
 # no invariant tying them to the fabric's state, so they are checked to a depth, not proved.
 # The cover task runs at the same depth, so a reached cover is a state the check explored.
-# Owner (2026-11-08): 16 until PR 4 sets depths per config class. 16 is one step short on
-# mixed_apb_masters (its first completed write to pmu is at step 16), which so reports an
-# unreached cover; 20 reaches it but takes axil_shared_fixed and axil_xbar_rules past 10
-# minutes (about 40 s at 16).
+# Owner (2026-11-08): 16, about 40 s on axil_shared_fixed and axil_xbar_rules (20 took them past
+# 10 minutes). D79 (owner, 2026-11-12): the bmc stays at 16 on every design; each port's covers
+# run in a task of their own at that port's path depth (formal_gen.depth, D77), so a cover
+# reached past step 16 shows the check can fire there, but the bmc did not check that far.
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
@@ -716,7 +716,7 @@ def formal_jobs(spec: Spec, netlist: Netlist) -> list[tuple[str, tuple[str, ...]
         return []
     out: list[tuple[str, tuple[str, ...]]] = [("reset", ("prove", "cover"))]
     if checkers(spec, netlist) or axi4_ports(netlist) or ahb_ports(netlist):
-        out.append(("protocol", ("bmc", "cover")))
+        out.append(("protocol", ("bmc", *(f"cover_{p}" for p in protocol_ports(spec, netlist)))))
     if decoded_fabrics(netlist):
         out.append(("decode", ("prove",)))
     out += [(f"route_{i.name}", ("bmc", "cover")) for i in units(netlist)]
@@ -792,23 +792,62 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
         body.append(f"  // {chk.port}: {bus.protocol.value} {side} port; the design is its "
                     f"{design} ({chk.vendor})")  # fmt: skip
         body += [*_checker(spec, bus, chk, domains[bus.domain], ports)]
-        body += [*_covers(spec, bus, chk, ports), ""]
+        body += [*_own_covers(bus, _covers(spec, bus, chk, ports)), ""]
     if axi4:
         active = _active(spec)
         for bus in axi4:
             side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
             body.append(f"  // {bus.name}: AXI4 {side} port; the design is its {design} "
                         "(bag_faxi4)")  # fmt: skip
-            body += [*_axi4(spec, bus, domains[bus.domain], ports, active), ""]
+            body += [*_own_covers(bus, _axi4(spec, bus, domains[bus.domain], ports, active)), ""]
     if ahb:
         active = _active(spec)
         for bus in ahb:
             side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
             body.append(f"  // {bus.name}: AHB-Lite {side} port; the design is its {design} "
                         "(bag_fahb)")  # fmt: skip
-            body += [*_ahb(spec, bus, domains[bus.domain], ports, active), ""]
+            body += [*_own_covers(bus, _ahb(spec, bus, domains[bus.domain], ports, active)), ""]
     name = f"bag_{spec.project.name}_protocol_props"
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
+
+
+def cover_macro(port: str) -> str:
+    """The macro that keeps PORT's covers in the protocol property file (D79)."""
+    return f"BAG_COVER_{port}"
+
+
+def _own_covers(bus: Bus, lines: list[str]) -> list[str]:
+    """LINES with BUS's covers moved to the end, inside its macro: only the port's own cover
+    task reads them (D79), so each runs at its own depth."""
+    covers = [line for line in lines if ": cover (" in line]
+    if not covers:
+        return lines
+    rest = [line for line in lines if ": cover (" not in line]
+    return [*rest, f"`ifdef {cover_macro(bus.name)}", *covers, "`endif"]
+
+
+def protocol_ports(spec: Spec, netlist: Netlist) -> list[str]:
+    """The ports the protocol job checks, in its order: ZipCPU's, then AXI4, then AHB-Lite."""
+    return [*(c.port for c in checkers(spec, netlist)), *(b.name for b in axi4_ports(netlist)),
+            *(b.name for b in ahb_ports(netlist))]  # fmt: skip
+
+
+def protocol_tasks(spec: Spec, netlist: Netlist) -> list[SbyTask]:
+    """The protocol job's tasks (D79): the bmc at PROTOCOL_DEPTH, and a cover task per checked
+    port at its path depth (D77), reading that port's covers and dropping the covers inside the
+    other ports' ZipCPU checkers."""
+    from hdl_bag.formal_gen.depth import port_depths
+
+    ports = protocol_ports(spec, netlist)
+    depths = port_depths(spec, netlist, ports)
+    zips = {c.port: c.module for c in checkers(spec, netlist)}
+    tasks = [SbyTask("bmc", "bmc", PROTOCOL_DEPTH)]
+    for port in ports:
+        others = sorted(m for q, m in zips.items() if q != port)
+        after = (f"chformal -remove -cover {' '.join(others)}",) if others else ()
+        tasks.append(SbyTask(f"cover_{port}", "cover", depths[port],
+                             defines=(cover_macro(port),), after=after))  # fmt: skip
+    return tasks
 
 
 def render_sby(spec: Spec, top: str, files: list[str], incdirs: list[str], props: str,
@@ -849,9 +888,13 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
     # A design in one clock domain has no clock ratio to explore: one clock, so each solver
     # step is an edge (free clocks cost about two steps an edge; formal corpus, D77).
     multi = len({c.domain for c in spec.clocks}) > 1
-    job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs,
-                  depths={"bmc": PROTOCOL_DEPTH, "cover": PROTOCOL_DEPTH},
-                  copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
+    tasks = protocol_tasks(spec, netlist)
+    # SBY v0.69 takes one task name before a colon.
+    engine = "\n".join(
+        ["bmc: smtbmc bitwuzla", *(f"{t.name}: smtbmc yices" for t in tasks if t.mode == "cover")]
+    )
+    job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs, tasks=tasks,
+                  copy=[*copy, (props, props)], engine=engine,
                   multiclock=multi, prelude=prelude)  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"
 

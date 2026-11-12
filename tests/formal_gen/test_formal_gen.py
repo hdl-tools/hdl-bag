@@ -20,6 +20,7 @@ from hdl_bag.formal_gen import (
     formal_jobs,
     props_module,
 )
+from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
@@ -505,12 +506,14 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
 
 def test_the_protocol_bmc_runs_on_bitwuzla_and_everything_else_on_yices(tmp_path: Path) -> None:
     """D67: yices could not reach depth 16 on axi_xbar_rules's protocol bmc; bitwuzla can.
-    Its cover task, where bitwuzla was slower, and the reset job keep yices."""
+    Its cover tasks (one per port, D79), where bitwuzla was slower, and the reset job keep
+    yices."""
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
     formal = tmp_path / "formal"
     assert (
-        "[engines]\nbmc: smtbmc bitwuzla\ncover: smtbmc yices\n"
-        in (formal / "axi_xbar_rules_protocol.sby").read_text()
+        "[engines]\nbmc: smtbmc bitwuzla\ncover_cpu: smtbmc yices\ncover_dbg: smtbmc yices\n"
+        "cover_dma: smtbmc yices\ncover_mem: smtbmc yices\ncover_regs: smtbmc yices\n"
+        "cover_rom: smtbmc yices\n" in (formal / "axi_xbar_rules_protocol.sby").read_text()
     )
     assert "[engines]\nsmtbmc yices\n" in (formal / "axi_xbar_rules_reset.sby").read_text()
 
@@ -608,11 +611,33 @@ def test_an_axi4_slave_nothing_reaches_gets_neither_access(
     assert "proto_no_read_ddr0: assert (!(ddr0_axi_arvalid));\n" in text
 
 
-def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
-    """So each cover reached is a state the bounded check explored."""
-    generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)
-    job = (tmp_path / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
-    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover: mode cover\ncover: depth {PROTOCOL_DEPTH}\n" in job
+def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
+    """D77, D79: the bmc runs at PROTOCOL_DEPTH; each checked port's covers run in a task of
+    their own, at its path depth (never below 16), reading only that port's covers: its macro
+    keeps BAG's, and chformal drops those inside the other ports' ZipCPU checkers. On
+    bridges_inhouse (one domain, one clock) spi sits behind three bridges from the nearest
+    master that reaches it: 8 edges for one component and 4 for each of the other four."""
+    assert (PROTOCOL_DEPTH, PATH_EDGES, PATH_EDGES_PER_HOP) == (16, 8, 4)
+    generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path / "a", P2)
+    job = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
+    assert "[tasks]\nbmc\ncover_cpu\ncover_dual0\ncover_ro0\ncover_sec0\ncover_wo0\n\n" in job
+    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert "\ncover_ro0: read_slang -D BAG_COVER_ro0 --extern-modules " in job
+    assert "\nbmc: read_slang --extern-modules " in job
+    assert ("cover_cpu: chformal -remove -cover bag_apb4_rules_fapb_master_dual0 "
+            "bag_apb4_rules_fapb_master_ro0 bag_apb4_rules_fapb_master_sec0 "
+            "bag_apb4_rules_fapb_master_wo0\n") in job  # fmt: skip
+    props = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sv").read_text(encoding="utf-8")
+    assert "`ifdef BAG_COVER_ro0\n  always_comb proto_read_ro0: cover (" in props
+    # Every cover sits inside its port's macro, and nothing else does.
+    inside = re.findall(r"`ifdef BAG_COVER_\w+\n(.*?)`endif", props, re.S)
+    assert inside and all(": cover (" in line for b in inside for line in b.splitlines())
+    assert props.count(": cover (") == sum(b.count(": cover (") for b in inside)
+    generate(load(P3 / "bridges_inhouse.ir.yaml"), tmp_path / "b", P3)
+    job = (tmp_path / "b" / "formal" / "bridges_inhouse_protocol.sby").read_text(encoding="utf-8")
+    assert "cover_spi: mode cover\ncover_spi: depth 24\n" in job
+    assert "cover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert f"bmc: mode bmc\nbmc: depth {PROTOCOL_DEPTH}\n" in job
 
 
 def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: Path) -> None:
@@ -743,10 +768,10 @@ def test_a_design_in_one_clock_domain_checks_its_ports_on_one_clock(tmp_path: Pa
     generate(load(P3 / "mixed_ahb_secure.ir.yaml"), tmp_path / "one", P3)
     one = tmp_path / "one" / "formal" / "mixed_ahb_secure_protocol.sby"
     job = one.read_text(encoding="utf-8")
-    assert "cover: depth 16\nmulticlock off\n" in job
+    assert "cover_tcm: depth 16\nmulticlock off\n" in job
     generate(load(P3 / "axil_adapters.ir.yaml"), tmp_path / "two", P3)
     job = (tmp_path / "two" / "formal" / "axil_adapters_protocol.sby").read_text(encoding="utf-8")
-    assert "cover: depth 16\nmulticlock on\n" in job
+    assert "cover_mem: depth 48\nmulticlock on\n" in job
 
 
 def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(

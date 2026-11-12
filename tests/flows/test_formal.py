@@ -16,6 +16,7 @@ from hdl_bag.cli import main
 from hdl_bag.flows.base import Finding, Report
 from hdl_bag.flows.formal import (
     UNSAT,
+    SbyTask,
     SymbiYosys,
     bounded_notes,
     job_sources,
@@ -187,6 +188,34 @@ def test_sby_job_has_a_task_and_a_depth_per_mode() -> None:
         "[script]\nplugin -i slang\nread_slang -I rtl/inc --top t rtl/a.sv p.sv\nprep -top t\n\n"
         "[files]\nrtl ../rtl\np.sv\n"
     )
+
+
+def test_sby_job_tasks_can_each_read_their_own_macros_and_trim_after_prep() -> None:
+    """D77: a protocol job has a cover task per port, each at its own depth, reading the
+    property file with that port's macro (its covers) and removing the covers of the other
+    ports' vendored checkers after prep."""
+    tasks = [SbyTask("bmc", "bmc", 20),
+             SbyTask("cover_a", "cover", 16, defines=("BAG_COVER_a",)),
+             SbyTask("cover_b", "cover", 24, defines=("BAG_COVER_b",),
+                     after=("chformal -remove -cover chk_a",))]  # fmt: skip
+    text = sby_job(top="t", files=["rtl/a.sv", "p.sv"], incdirs=[], tasks=tasks,
+                   copy=[("p.sv", "p.sv")], engine="bmc: smtbmc bitwuzla\ncover_a: smtbmc yices\n"
+                   "cover_b: smtbmc yices", multiclock=False)  # fmt: skip
+    assert text == (
+        "[tasks]\nbmc\ncover_a\ncover_b\n\n"
+        "[options]\nbmc: mode bmc\nbmc: depth 20\ncover_a: mode cover\ncover_a: depth 16\n"
+        "cover_b: mode cover\ncover_b: depth 24\nmulticlock off\n\n"
+        "[engines]\nbmc: smtbmc bitwuzla\ncover_a: smtbmc yices\ncover_b: smtbmc yices\n\n"
+        "[script]\nplugin -i slang\n"
+        "bmc: read_slang --top t rtl/a.sv p.sv\n"
+        "cover_a: read_slang -D BAG_COVER_a --top t rtl/a.sv p.sv\n"
+        "cover_b: read_slang -D BAG_COVER_b --top t rtl/a.sv p.sv\n"
+        "prep -top t\ncover_b: chformal -remove -cover chk_a\n\n"
+        "[files]\np.sv\n"
+    )
+    with pytest.raises(ValueError) as exc:
+        sby_job(top="t", files=[], incdirs=[], depths={"bmc": 4}, tasks=tasks, copy=[])
+    assert str(exc.value) == "formal job takes depths or tasks, not both"
 
 
 @pytest.mark.parametrize(
