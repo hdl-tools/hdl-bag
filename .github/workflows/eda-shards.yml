@@ -33,6 +33,10 @@ on:
         description: The SBY time limit of a deep formal test, in seconds (D76)
         type: number
         default: 3600
+      keyword:
+        description: Only the tests whose names match this pytest -k expression (all if empty)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -71,6 +75,7 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       EDA_MARKS: ${{ inputs.marks }}
       BAG_DEEP_TIMEOUT_S: ${{ inputs.deep-timeout }}
+      EDA_KEYWORD: ${{ inputs.keyword }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -84,11 +89,24 @@ jobs:
       - run: ccache --zero-stats
       - run: >-
           CCACHE_BASEDIR="$PWD"
-          uv run pytest -m "$EDA_MARKS" -n ${{ inputs.workers }} --splits ${{ inputs.shards }} --group ${{ matrix.group }}
+          uv run pytest -m "$EDA_MARKS" ${EDA_KEYWORD:+-k "$EDA_KEYWORD"} -n ${{ inputs.workers }} --splits ${{ inputs.shards }} --group ${{ matrix.group }}
           --durations-path tests/eda_durations.json --splitting-algorithm least_duration
           --durations=0 --durations-min=0
       - run: ccache --show-stats
         if: always()
+      # A failed formal test leaves its job's work in pytest's temporary directory: keep the
+      # counterexample and cover traces with the property files they refer to, for diagnosis.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: formal-traces-${{ matrix.group }}
+          path: |
+            /tmp/pytest-of-*/**/formal/*.sv
+            /tmp/pytest-of-*/**/formal/*.sby
+            /tmp/pytest-of-*/**/formal/*/engine_*/trace*.vcd
+            /tmp/pytest-of-*/**/formal/*/engine_*/trace*.yw
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/cache/save@v4
         if: success() && inputs.save-cache
         with:
