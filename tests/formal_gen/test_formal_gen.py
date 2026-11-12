@@ -734,6 +734,21 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
         assert want in job, unit
 
 
+def test_a_design_in_one_clock_domain_checks_its_ports_on_one_clock(tmp_path: Path) -> None:
+    """Formal corpus run 43047322627: with free clocks the protocol job's 16 steps were about 8
+    clock edges, and single-domain designs (mixed_ahb_secure, mixed_lite_shared, bridges_inhouse
+    and others) left covers unreached. A design in one domain has no clock ratio to explore, so
+    its protocol job runs on one clock, as a single-domain route job does: 16 steps, 16 edges.
+    A design with several domains keeps free clocks."""
+    generate(load(P3 / "mixed_ahb_secure.ir.yaml"), tmp_path / "one", P3)
+    one = tmp_path / "one" / "formal" / "mixed_ahb_secure_protocol.sby"
+    job = one.read_text(encoding="utf-8")
+    assert "cover: depth 16\nmulticlock off\n" in job
+    generate(load(P3 / "axil_adapters.ir.yaml"), tmp_path / "two", P3)
+    job = (tmp_path / "two" / "formal" / "axil_adapters_protocol.sby").read_text(encoding="utf-8")
+    assert "cover: depth 16\nmulticlock on\n" in job
+
+
 def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
     tmp_path: Path,
 ) -> None:

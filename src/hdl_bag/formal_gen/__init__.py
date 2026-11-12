@@ -22,7 +22,8 @@ Output layout (relative to the output directory)::
 Properties attach with ``bind`` to the lint top (the flat top, or ``<top>_flat`` in the
 sv-interface style), so they see its ports by name and the design needs no formal
 wrapper. Its inputs are free; the property module assumes what the environment must do.
-Clocks are free too (multiclock), so any clock ratio and phase is covered. Registers that
+Clocks are free too (multiclock), so any clock ratio and phase is covered; a protocol job
+of a design in one clock domain runs on one clock, each solver step an edge. Registers that
 must see every solver step, whatever the clocks do, are instances of ``bag_step_ff0/1``
 (``formal/bag_step.v``, registered on ``$global_clock`` and read by Yosys's own frontend):
 yosys-slang has no global clock, and a register on a net marked ``(* gclk *)`` is clocked by
@@ -845,10 +846,13 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
     copy = [("rtl", "../rtl"), (STEP, STEP), *((f, f) for f in own)]
     if found:
         copy.append(("zipcpu", "vendor/zipcpu"))
+    # A design in one clock domain has no clock ratio to explore: one clock, so each solver
+    # step is an edge (free clocks cost about two steps an edge; formal corpus, D77).
+    multi = len({c.domain for c in spec.clocks}) > 1
     job = sby_job(top=top, files=[*files, *own, props], incdirs=incdirs,
                   depths={"bmc": PROTOCOL_DEPTH, "cover": PROTOCOL_DEPTH},
                   copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
-                  prelude=prelude)  # fmt: skip
+                  multiclock=multi, prelude=prelude)  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"
 
 
