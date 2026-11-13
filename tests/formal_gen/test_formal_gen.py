@@ -25,6 +25,7 @@ from hdl_bag.formal_gen.units import (
     ROUTE_CYCLES,
     ROUTE_CYCLES_PER_FIFO,
     ROUTE_DEPTH,
+    ROUTE_DEPTH_LITE_FIFO,
     SCOREBOARD,
     id_prefixes,
 )
@@ -668,15 +669,35 @@ def test_a_cover_task_holds_the_other_masters_idle(tmp_path: Path) -> None:
     assert "`endif\nendmodule\n" in xr and "`endifendmodule" not in xr
     blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", xr, re.S))
     idle = {p: sorted(re.findall(r"bag_idle_(\w+)_for_\w+: assume", b)) for p, b in blocks.items()}
-    assert idle == {"cpu": ["dbg", "dma"], "dbg": ["cpu", "dma"], "dma": ["cpu", "dbg"],
+    # Master ports enter the crossbar's arbiter, so each keeps one competitor (D86).
+    assert idle == {"cpu": ["dma"], "dbg": ["dma"], "dma": ["dbg"],
                     "mem": ["dbg", "dma"], "regs": ["dbg"], "rom": ["dma"]}  # fmt: skip
     # regs: cpu only reads it, so dma (the one writer) stays too; rom: cpu reads it (ahead
     # of dbg by name), dbg is its only writer.
-    assert ("  always_comb bag_idle_dbg_for_cpu: assume (!(dbg_axi_awvalid || dbg_axi_wvalid "
-            "|| dbg_axi_arvalid));\n") in xr  # fmt: skip
+    assert ("  always_comb bag_idle_dma_for_cpu: assume (!(dma_axi_awvalid || dma_axi_wvalid "
+            "|| dma_axi_arvalid));\n") in xr  # fmt: skip
     job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
     assert "\ncover_rom: read_slang -D BAG_COVER_rom -D BAG_IDLE_rom --extern-modules " in job
     assert "\nbmc: read_slang --extern-modules " in job
+
+
+def test_a_master_entering_an_arbiter_keeps_one_competitor_in_its_cover_task(
+    tmp_path: Path,
+) -> None:
+    """D86 (owner, 2026-11-13, amends D82): on the in-house shared bus a master's AW waits,
+    so its W can go first, only while another master holds the bus; with every other master
+    idle, axi_shared_fixed's proto_w_first_m0..m2 went unreached (nightly 43328525704). A
+    master port whose first component is a fabric with more than one master keeps the
+    nearest competing master free (path cost, then name). One master on its fabric: none."""
+    sf = _protocol(tmp_path / "f", P3 / "axi_shared_fixed.ir.yaml")
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", sf, re.S))
+    idle = {p: sorted(re.findall(r"bag_idle_(\w+)_for_\w+: assume", b)) for p, b in blocks.items()}
+    assert {p: idle[p] for p in ("m0", "m1", "m2")} == {"m0": ["m2"], "m1": ["m2"], "m2": ["m1"]}
+    assert "  // D82: m0's cover task; m0, m1 active, the other masters idle\n" in sf
+    ds = _protocol(tmp_path / "d", GOLDEN)
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", ds, re.S))
+    # mcu0 is the AHB-Lite bus's one master; cpu0 enters a register slice first.
+    assert "bag_idle_cpu0_for_mcu0" in blocks["mcu0"] and "bag_idle_dbg0_for_cpu0" in blocks["cpu0"]
 
 
 def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
@@ -839,6 +860,25 @@ def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_two_more_edges(tmp_path: 
         job = (formal / f"mixed_lite_shared_route_{unit}.sby").read_text(encoding="utf-8")
         want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
         assert want in job, unit
+
+
+def test_an_axi4_lite_bridge_with_a_fifo_across_domains_gets_34_steps(tmp_path: Path) -> None:
+    """Nightly 43047322627 and 43328525704: bridges_pulp_cdc's br_per (AXI4-Lite 64 bits to
+    APB4 32 across domains, FIFO depth 2) left its upstream B and R handshakes unreached at
+    24 steps; at 44 they came at steps 33 (local run, 16 s). mixed_narrow_apb's br_c8 (the
+    same with 8-bit APB) also reached its last cover at 33. Such a unit gets at least
+    ROUTE_DEPTH_LITE_FIFO steps; AXI4 bridges with a FIFO (bridges_pulp's br_per, all covers
+    at 24) and AXI4-Lite ones without (mixed_cdc_chain's br_per, 21) keep their depths."""
+    assert ROUTE_DEPTH_LITE_FIFO == 34
+    cases = (("bridges_pulp_cdc", "br_per", 34), ("mixed_narrow_apb", "br_c8", 36),
+             ("bridges_pulp", "br_per", 24), ("mixed_cdc_chain", "br_per", 24))  # fmt: skip
+    for config, unit, depth in cases:
+        generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
+            encoding="utf-8"
+        )
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        assert want in job, (config, unit)
 
 
 def test_a_design_in_one_clock_domain_checks_its_ports_on_one_clock(tmp_path: Path) -> None:

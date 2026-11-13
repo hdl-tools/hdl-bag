@@ -51,6 +51,7 @@ _LOC: Final = re.compile(r"^(?P<file>.+?):(?P<line>\d+)\.\d+(?:-\d+\.\d+)?$")
 # SBY shortens a long summary in its log and names the file that holds all of it.
 _FULL: Final = re.compile(r"^summary: see (?P<path>\S+) for a complete summary$")
 _STEP: Final = re.compile(r"\bstep (?P<step>\d+)\b")
+_REACHED: Final = re.compile(r"Reached cover statement in step (?P<step>\d+) at \S+ (?P<name>\S+)")
 UNSAT = "assumptions are unsatisfiable: the environment allows no trace, so nothing was checked"
 
 
@@ -219,6 +220,18 @@ def bounded_notes(job: Path, *, task: str | None = None) -> list[str]:
     return out
 
 
+def reached_covers(output: str) -> list[tuple[str, int]]:
+    """The covers SBY OUTPUT (a task's log, maybe cut short) reports reached, each with its
+    step, in order (D85: a timed-out cover task names what it reached, so the covers still
+    missing can be told apart). A labelled cover shows its name; an unlabelled one (ZipCPU's)
+    its source file and line."""
+    out = []
+    for m in _REACHED.finditer(output):
+        loc = _LOC.match(m["name"])
+        out.append((f"{loc['file']}:{loc['line']}" if loc else _short(m["name"]), int(m["step"])))
+    return out
+
+
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """Stop PROC and everything it started (POSIX); only PROC itself elsewhere."""
     killpg = getattr(os, "killpg", None)
@@ -274,6 +287,11 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None,
                            f"{expected[0] if task else job.stem}: no verdict within "
                            f"{timeout:g} s{reached} "
                            "(allow more with --timeout)")  # fmt: skip
+            if got := reached_covers(partial or ""):
+                listed = ", ".join(f"{n} (step {k})" for n, k in got)
+                notes = (*notes, f"{expected[0] if task else job.stem}: {len(got)} "
+                                 f"{'cover' if len(got) == 1 else 'covers'} reached before "
+                                 f"the time limit: {listed}")  # fmt: skip
             return Report("formal", (late,), (backend.name,), notes=notes)
     job_dir = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
     summaries = {}

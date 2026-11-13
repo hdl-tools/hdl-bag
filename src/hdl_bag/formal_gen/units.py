@@ -57,6 +57,12 @@ ROUTE_CYCLES_PER_HALVING = 2
 # br_ahb (AXI4-Lite to AHB-Lite, same width, FIFO depth 2) reached its upstream B handshake at
 # step 9 (nightly 43207958073 left it unreached at 8).
 ROUTE_CYCLES_PER_FIFO = 2
+# An AXI4-Lite bridge with a FIFO across domains (axi_lite_dw_converter, axi_fifo, axi_cdc,
+# axi_lite_to_apb) answers later: bridges_pulp_cdc's br_per (64 to 32 bits) and
+# mixed_narrow_apb's br_c8 (64 to 8) reached their upstream B and R handshakes at step 33
+# (bridges_pulp_cdc's left unreached at 24 in nightlies 43047322627 and 43328525704). Such a
+# unit gets at least this many steps.
+ROUTE_DEPTH_LITE_FIFO = 34
 # Scoreboard entries per master and request channel (D71): an AXI4 master keeps at most 4
 # transactions open (bag_faxi4's tables, D66), and the environment keeps the others within
 # the same bound; an AHB-Lite master has one address phase beyond its data phase; the APB
@@ -106,7 +112,10 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
         fifo = unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0
         return False, (ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
                        + ROUTE_CYCLES_PER_FIFO * fifo)  # fmt: skip
-    return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+    depth = ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+    lite_fifo = (up is not None and up.protocol is Protocol.AXI4_LITE
+                 and unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0)  # fmt: skip
+    return True, max(depth, ROUTE_DEPTH_LITE_FIFO) if lite_fifo else depth
 
 
 def id_prefixes(fab: Fabric) -> list[int]:

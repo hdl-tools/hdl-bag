@@ -37,6 +37,10 @@ on:
         description: Only the tests whose names match this pytest -k expression (all if empty)
         type: string
         default: ""
+      bmc-engine:
+        description: Run the formal corpus's protocol bmc tasks on this SBY engine (D84; as generated if empty)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -76,6 +80,7 @@ jobs:
       EDA_MARKS: ${{ inputs.marks }}
       BAG_DEEP_TIMEOUT_S: ${{ inputs.deep-timeout }}
       EDA_KEYWORD: ${{ inputs.keyword }}
+      BAG_BMC_ENGINE: ${{ inputs.bmc-engine }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4

@@ -117,9 +117,20 @@ def active_masters(spec: Spec, netlist: Netlist, port: str,
     """The masters PORT's cover task keeps active (D82), the others held idle: a master port,
     itself; a slave port, for each kind of access the IR sends it (PAIRS, from reaching), the
     nearest master making it (by path cost, then name), so each of its covers still has a
-    master to make it."""
-    if port in {m.name for m in spec.masters}:
-        return [port]
+    master to make it.
+
+    D86 (owner, 2026-11-13): a master port whose first component is a fabric with more than one
+    master also keeps the nearest other master (path cost, then name), so covers that need
+    contention at the arbiter (W before AW on the in-house shared bus) stay reachable."""
+    masters = sorted(m.name for m in spec.masters)
+    if port in masters:
+        fabric = next((i for i in netlist.instances if i.kind == "fabric"
+                       and any(b.name == port for b in i.masters)), None)  # fmt: skip
+        if fabric is None or len(fabric.masters) < 2:
+            return [port]
+        rivals = sorted((c, m) for m in masters if m != port
+                        if (c := _cost(spec, netlist, m, port)) is not None)  # fmt: skip
+        return sorted([port, *(r[1] for r in rivals[:1])])
     keep = set()
     for kind in ("read", "write"):
         ranked = sorted((c, m) for (m, s), kinds in pairs.items() if s == port and kind in kinds

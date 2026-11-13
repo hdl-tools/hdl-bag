@@ -37,6 +37,17 @@ DEEP_S = 300
 TIMEOUT_S = 1200
 # CI may allow more to measure a deep test's cost (pr.yml suite=deep).
 DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "7200"))
+# D84 (owner, 2026-11-13): CI may run the bmc tasks on another engine, to measure it against
+# the generated one (pr.yml's bmc_engine input). Unset, the job runs as generated.
+BMC_ENGINE = os.environ.get("BAG_BMC_ENGINE", "")
+GENERATED_BMC_ENGINE = "bmc: smtbmc bitwuzla"
+
+
+def with_bmc_engine(job: str, engine: str) -> str:
+    """JOB (a .sby file's text) with its bmc task on ENGINE, for an engine measurement (D84)."""
+    lines = job.split("\n")
+    assert lines.count(GENERATED_BMC_ENGINE) == 1, "the job's bmc engine line moved"
+    return "\n".join(f"bmc: {engine}" if line == GENERATED_BMC_ENGINE else line for line in lines)
 
 
 def _path(config: str) -> Path:
@@ -113,8 +124,23 @@ def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: st
     generate(spec, tmp_path, _path(config).parent)
     timeout = DEEP_TIMEOUT_S if deep(config, job, task, _MEASURED) else TIMEOUT_S
     sby = tmp_path / "formal" / f"{spec.project.name}_{job}.sby"
+    if BMC_ENGINE and task == "bmc" and job == "protocol":
+        sby.write_text(with_bmc_engine(sby.read_text(encoding="utf-8"), BMC_ENGINE),
+                       encoding="utf-8", newline="\n")  # fmt: skip
     report = run_sby(sby, tmp_path, timeout=timeout, task=task)
     assert report.ok, report.format()
+
+
+def test_an_engine_measurement_swaps_only_the_bmc_engine(tmp_path: Path) -> None:
+    """D84: a measurement run puts the protocol bmc on another engine and leaves the rest of
+    the job, the cover tasks' engine included, as generated."""
+    spec = _spec("p3/axi_xbar_rules")
+    generate(spec, tmp_path, _path("p3/axi_xbar_rules").parent)
+    job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
+    swapped = with_bmc_engine(job, "abc bmc3")
+    assert GENERATED_BMC_ENGINE not in swapped and "\nbmc: abc bmc3\n" in swapped
+    assert swapped.replace("bmc: abc bmc3", GENERATED_BMC_ENGINE) == job
+    assert "cover_cpu: smtbmc yices" in swapped
 
 
 def test_every_generated_task_runs_once() -> None:

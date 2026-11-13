@@ -22,6 +22,7 @@ from hdl_bag.flows.formal import (
     job_sources,
     job_tasks,
     prove,
+    reached_covers,
     run_formal,
     run_sby,
     sby_job,
@@ -311,6 +312,23 @@ def test_another_sby_version_is_noted(tmp_path: Path, monkeypatch: pytest.Monkey
     assert report.ok and report.notes == ("sby 0.70 is not the pinned v0.69",)
 
 
+def test_a_timed_out_cover_task_names_the_covers_it_reached() -> None:
+    """D85 (owner, 2026-11-13): a cover task that runs out of time must say which covers it
+    reached, and at which step, so the ones still missing can be told apart (the nightly's
+    timeout gave only the last step)."""
+    log = (DATA / "cover_unreached.log").read_text(encoding="utf-8")
+    got = reached_covers(log)
+    assert len(got) == 11
+    assert got[:2] == [("active_cpu_axi_bvalid", 2), ("reset_again_0", 2)]
+    assert got[-1][1] == 19
+    assert reached_covers("SBY 10:00:00 [x] engine_0: ##   0:00:00  Checking step 3..\n") == []
+    zip_ = (
+        "SBY  5:54:01 [x] engine_0: ##   0:00:07  Reached cover statement in step 33 at "
+        "top.u_chk: zipcpu/faxil_slave.v:764.4-764.41 (_witness_.check_cover_zipcpu_7)\n"
+    )
+    assert reached_covers(zip_) == [("zipcpu/faxil_slave.v:764", 33)]
+
+
 @posix
 def test_a_timeout_stops_sby_and_everything_it_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -319,11 +337,14 @@ def test_a_timeout_stops_sby_and_everything_it_started(
     them running."""
     pid_file = tmp_path / "child.pid"
     job = _fake_sby(tmp_path, monkeypatch, "echo 'SBY 10:00:00 [x_prove] engine_0: ##   0:00:00  "
+                    "Reached cover statement in step 2 at top: u_p.seen_a'\n"
+                    "echo 'SBY 10:00:00 [x_prove] engine_0: ##   0:00:00  "
                     f"Checking assertions in step 3..'\nsleep 300 &\necho $! > {pid_file}\nwait\n")  # fmt: skip
     report = run_sby(job, tmp_path, timeout=2)
     assert [(f.rule, f.message) for f in report.findings] == [
         ("FORMAL-TIMEOUT", "x: no verdict within 2 s, reached step 3 (allow more with --timeout)")
     ]
+    assert "x: 1 cover reached before the time limit: seen_a (step 2)" in report.notes
     child = int(pid_file.read_text())
     for _ in range(50):  # SIGKILL is delivered asynchronously
         try:

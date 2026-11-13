@@ -20,6 +20,14 @@ on:
         description: Only tests whose names match this pytest -k expression, on one shard
         type: string
         default: ""
+      select_shards:
+        description: With select, spread the matching tests over this many jobs (1 if empty)
+        type: string
+        default: ""
+      bmc_engine:
+        description: Run the formal corpus's protocol bmc tasks on this SBY engine (D84)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -120,7 +128,8 @@ jobs:
             || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 'eda' || 'eda and not deep') }}
       timeout-minutes: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && 300 || 30 }}
       keyword: ${{ github.event_name == 'workflow_dispatch' && inputs.select || '' }}
-      shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.select != '') && 1 || (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 20 || 4) }}
+      bmc-engine: ${{ github.event_name == 'workflow_dispatch' && inputs.bmc_engine || '' }}
+      shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.select != '') && (inputs.select_shards != '' && fromJSON(inputs.select_shards) || 1) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 20 || 4) }}
       workers: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && '2' || 'auto' }}
       deep-timeout: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 10800 || 7200 }}
       save-cache: ${{ !((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) }}
