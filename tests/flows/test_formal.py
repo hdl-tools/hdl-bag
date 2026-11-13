@@ -327,6 +327,12 @@ def test_a_timed_out_cover_task_names_the_covers_it_reached() -> None:
         "top.u_chk: zipcpu/faxil_slave.v:764.4-764.41 (_witness_.check_cover_zipcpu_7)\n"
     )
     assert reached_covers(zip_) == [("zipcpu/faxil_slave.v:764", 33)]
+    # Nightly 43381018017 showed one as ":": a location set apart by spaces is still found.
+    spaced = (
+        "SBY 1:00:00 [x] engine_0: ##   0:00:07  Reached cover statement in step 20 at "
+        "top.u_props.u_pmu : zipcpu/faxil_master.v:801.4-801.40\n"
+    )
+    assert reached_covers(spaced) == [("zipcpu/faxil_master.v:801", 20)]
 
 
 @posix

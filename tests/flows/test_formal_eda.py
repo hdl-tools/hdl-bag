@@ -774,6 +774,10 @@ def _dw_harness(root: Path, up: int, down: int, checks: str) -> list[Path]:
         "  logic first = 1'b1, was_out = 1'b0;\n"
         "  always_ff @(posedge clk) begin first <= 1'b0; was_out <= rst_n; end\n"
         "  always_comb if (first) assume (!rst_n);\n"
+        "  // Out of reset for good: a reset pulse between two clock edges clears the design\n"
+        "  // (asynchronously) unseen by the checkers, which sample at edges, and D51's reset\n"
+        "  // sequence rules it out. A reset in the middle of a transfer is the reset job's.\n"
+        "  always_comb if (was_out) assume (rst_n);\n"
         "  // Quiet until bag_faxi4 checks (its first edge out of reset), as generated jobs are.\n"
         "  always_comb if (!(rst_n && was_out))\n"
         "    assume (!s_awvalid && !s_wvalid && !s_arvalid && !m_bvalid && !m_rvalid);\n"
@@ -787,16 +791,17 @@ def _dw_harness(root: Path, up: int, down: int, checks: str) -> list[Path]:
     return [*files, Path("rtl/t.sv")]
 
 
-def _dw_prove(root: Path, up: int, down: int, checks: str) -> None:
-    """CHECKS (statements, out of reset) hold on the _dw_harness to depth 10, and every
-    cover among them is reached."""
+def _dw_prove(root: Path, up: int, down: int, checks: str, depth: int = 10,
+              timeout: float = 1200) -> None:  # fmt: skip
+    """CHECKS (statements, out of reset) hold on the _dw_harness to DEPTH, and every cover
+    among them is reached, each task within TIMEOUT seconds."""
     files = _dw_harness(root, up, down, checks)
     incdirs = [Path("rtl/vendor/pulp/axi/include"), Path("rtl/vendor/pulp/common_cells/include")]
     props = [Path("bag_faxi4.sv"), Path("t_props.sv")]
     modes: tuple[Mode, ...] = ("bmc", "cover")
     for mode in modes:
-        report = prove(files, "t", root, properties=props, depth=10, incdirs=incdirs, mode=mode,
-                       timeout=1200)  # fmt: skip
+        report = prove(files, "t", root, properties=props, depth=depth, incdirs=incdirs, mode=mode,
+                       timeout=timeout)  # fmt: skip
         assert report.ok, report.format()
 
 
@@ -815,6 +820,25 @@ def test_a_width_converter_keeps_exclusive_accesses_legal(
               "                                    && m_awlen != 0);\n"
               "    exclusive_read_through: cover (m_arvalid && m_arready && m_arlock\n"
               "                                   && m_arlen != 0);\n")  # fmt: skip
+
+
+@pytest.mark.deep
+def test_a_downsized_write_response_holds_until_taken(tmp_path: Path) -> None:
+    """D88 (owner, 2026-11-14: fix in bag_axi_dw, PULP untouched): PULP's axi_dw_downsizer
+    answers a write with a response it merges for the write its W side is on, so a finished
+    write's B waiting for BREADY changed when the W side moved on, SLVERR to OKAY
+    (mixed_adapters_bridges' protocol bmc on boolector, port dbg, faxil_slave.v:341; upstream
+    pulp-platform/axi issue 289). The same holds for the bursts it refuses (WRAP, multi-beat
+    FIXED) and answers itself. bag_faxi4's b_hold on the slave side checks it, with
+    back-to-back writes of one or two beats; the cover shows an error response held while
+    the next write goes on. Unfixed, b_hold failed at step 18 (single-beat writes hid it at
+    16), so the bmc runs to 19: about 20 minutes, nightly only (deep)."""
+    _dw_prove(tmp_path, 64, 32,
+              "    assume (!s_arvalid);\n"
+              "    if (s_awvalid) assume (s_awlen <= 8'd1);\n"
+              "    error_held_with_a_write_on: cover (s_bvalid && !s_bready && s_bresp[1]\n"
+              "                                      && m_awvalid);\n",
+              depth=19, timeout=3600)  # fmt: skip
 
 
 def test_an_exclusive_write_too_long_to_downsize_changes_no_byte(tmp_path: Path) -> None:

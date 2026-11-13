@@ -1009,5 +1009,6 @@
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[golden/demo_ss-protocol-cover_ddr0]": 7202.76,
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_narrow_apb-protocol-cover_ram]": 213.79,
  "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/axi_xbar_pow2-protocol-cover_b]": 131.82,
- "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_apb_masters-protocol-cover_dbg]": 2.14
+ "tests/formal_gen/test_formal_corpus.py::test_the_formal_corpus_holds[p3/mixed_apb_masters-protocol-cover_dbg]": 2.14,
+ "tests/flows/test_formal_eda.py::test_a_downsized_write_response_holds_until_taken": 874.43
 }

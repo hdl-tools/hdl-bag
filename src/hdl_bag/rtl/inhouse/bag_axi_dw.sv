@@ -161,7 +161,44 @@ module bag_axi_dw #(
   logic [OpenW-1:0] open_q, open_d;
   logic aw_room, w_known, aw_hs, w_end;
 
-  assign aw_room = !Downsize || open_q != OpenW'(Open);
+  mst_req_t  mst_req;
+  mst_resp_t mst_resp;
+
+  // D88 (owner, 2026-11-14): downsized write responses. axi_dw_downsizer answers a write with
+  // a response it merges for the write its W side is on (pulp-platform/axi issue 289): while
+  // a finished write's B waits for BREADY, the W side moving on changes it (SLVERR became
+  // OKAY), and with the W side idle the merge restarts each cycle, so on a write split into
+  // several narrow bursts (over 256 narrow beats) an error on an earlier one could be lost.
+  // Here each write the converter takes gets an entry, in AW order, that merges the narrow
+  // responses the converter absorbs (by ID: the oldest open entry, since one ID's narrow
+  // responses come in order); the B it forwards answers with its entry merged with its own
+  // narrow response, which waits with it, so the answer holds. A burst the downsizer cannot
+  // split (WRAP, or a multi-beat FIXED one: bursts.py, D34) it answers itself from an
+  // internal error slave on the same B path, unseen here; its entry says so and answers
+  // SLVERR, as the error slave does. An in-house downsizer should merge per write itself.
+  typedef struct packed {
+    logic           valid;
+    logic           own;   // the downsizer refuses it and answers it itself
+    slv_id_t        id;
+    axi_pkg::resp_t resp;
+  } b_open_t;
+  b_open_t [Open-1:0] bq_q, bq_d;
+  logic b_absorb, b_done;
+  int unsigned b_at;
+
+  // The oldest open write of ID, or Open if none.
+  function automatic int unsigned oldest(input b_open_t [Open-1:0] q, input slv_id_t id);
+    oldest = Open;
+    for (int unsigned i = Open; i > 0; i--) begin
+      if (q[i-1].valid && q[i-1].id == id) oldest = i - 1;
+    end
+  endfunction
+
+  assign b_absorb = Downsize && mst_resp.b_valid && mst_req.b_ready && !slv_resp.b_valid;
+  assign b_done = Downsize && slv_resp.b_valid && slv_req_in.b_ready;
+  assign b_at = oldest(bq_q, Downsize && slv_resp.b_valid ? slv_resp.b.id : mst_resp.b.id);
+
+  assign aw_room = !Downsize || (open_q != OpenW'(Open) && !bq_q[Open-1].valid);
   assign w_known = !Downsize || open_q != '0;
   assign aw_hs = Downsize && slv_req.aw_valid && slv_resp.aw_ready;
   assign w_end = Downsize && slv_req.w_valid && slv_resp.w_ready && slv_req.w.last;
@@ -182,6 +219,46 @@ module bag_axi_dw #(
     slv_resp_out = slv_resp;
     slv_resp_out.aw_ready = slv_resp.aw_ready && aw_room;
     slv_resp_out.w_ready = slv_resp.w_ready && w_known;
+    if (Downsize && slv_resp.b_valid && b_at < Open) begin
+      slv_resp_out.b.resp = bq_q[b_at].own ? bq_q[b_at].resp :
+          axi_pkg::resp_precedence(bq_q[b_at].resp, mst_resp.b.resp);
+    end
+  end
+
+  // Whether the downsizer refuses AW (axi_dw_downsizer: WRAP always; FIXED of more than one
+  // beat; the same rule as bursts.refusing_converter).
+  function automatic logic refused(input axi_pkg::burst_t burst, input axi_pkg::len_t len);
+    return burst == axi_pkg::BURST_WRAP || (burst == axi_pkg::BURST_FIXED && len != '0);
+  endfunction
+
+  always_comb begin
+    bq_d = bq_q;
+    if (b_absorb && b_at < Open && !bq_q[b_at].own)
+      bq_d[b_at].resp = axi_pkg::resp_precedence(bq_q[b_at].resp, mst_resp.b.resp);
+    if (b_done && b_at < Open) begin
+      for (int unsigned i = 0; i < Open - 1; i++) begin
+        if (i >= b_at) bq_d[i] = bq_q[i+1];
+      end
+      bq_d[Open-1] = '0;
+    end
+    if (aw_hs) begin
+      for (int unsigned i = Open; i > 0; i--) begin
+        if (!bq_d[i-1].valid && (i == 1 || bq_d[i-2].valid)) begin
+          bq_d[i-1] = '{
+              valid: 1'b1,
+              own: refused(slv_req.aw.burst, slv_req.aw.len),
+              id: slv_req.aw.id,
+              resp: refused(slv_req.aw.burst, slv_req.aw.len) ? axi_pkg::RESP_SLVERR :
+                  axi_pkg::RESP_EXOKAY
+          };
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) bq_q <= '0;
+    else bq_q <= bq_d;
   end
 
   always_comb begin
@@ -207,9 +284,6 @@ module bag_axi_dw #(
       open_q <= open_d;
     end
   end
-
-  mst_req_t  mst_req;
-  mst_resp_t mst_resp;
 
   bag_axi_from_flat #(
       .AddrWidth   (AddrWidth),

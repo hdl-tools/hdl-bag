@@ -51,7 +51,10 @@ _LOC: Final = re.compile(r"^(?P<file>.+?):(?P<line>\d+)\.\d+(?:-\d+\.\d+)?$")
 # SBY shortens a long summary in its log and names the file that holds all of it.
 _FULL: Final = re.compile(r"^summary: see (?P<path>\S+) for a complete summary$")
 _STEP: Final = re.compile(r"\bstep (?P<step>\d+)\b")
-_REACHED: Final = re.compile(r"Reached cover statement in step (?P<step>\d+) at \S+ (?P<name>\S+)")
+_REACHED: Final = re.compile(
+    r"Reached cover statement in step (?P<step>\d+) at (?P<rest>.*)$", re.M
+)
+_SRC: Final = re.compile(r"(?P<file>[\w./-]+\.s?v):(?P<line>\d+)")
 UNSAT = "assumptions are unsatisfiable: the environment allows no trace, so nothing was checked"
 
 
@@ -227,8 +230,11 @@ def reached_covers(output: str) -> list[tuple[str, int]]:
     its source file and line."""
     out = []
     for m in _REACHED.finditer(output):
-        loc = _LOC.match(m["name"])
-        out.append((f"{loc['file']}:{loc['line']}" if loc else _short(m["name"]), int(m["step"])))
+        rest = m["rest"].strip()
+        if src := _SRC.search(rest):
+            out.append((f"{src['file']}:{src['line']}", int(m["step"])))
+        else:
+            out.append((_short(rest.split()[-1].rstrip(":")), int(m["step"])))
     return out
 
 
