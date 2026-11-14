@@ -166,11 +166,15 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     covered = set(re.findall(r"reset_mid_(\w+): cover", text))
     assert asserted and covered <= set(asserted)
     assert covered, f"{config.stem}: no cover at all"
-    # And every checked protocol port has a cover of its own.
+    # And every checked protocol port has a cover of its own: in the protocol job, or in its
+    # fabric's route job (D90).
     spec = load(config)
     protocol = tmp_path / "formal" / f"{spec.project.name}_protocol.sv"
     if protocol.is_file():
-        ports = set(re.findall(r"proto_\w+?_(\w+): cover", protocol.read_text(encoding="utf-8")))
+        texts = [protocol, *sorted((tmp_path / "formal").glob(f"{spec.project.name}_route_*.sv"))]
+        found_covers = r"proto_\w+?_(\w+): cover"
+        ports = {p for f in texts
+                 for p in re.findall(found_covers, f.read_text(encoding="utf-8"))}  # fmt: skip
         netlist = build_netlist(spec)
         own = [*axi4_ports(netlist), *ahb_ports(netlist)]
         found = {c.port for c in checkers(spec, netlist)} | {b.name for b in own}
@@ -656,6 +660,50 @@ def test_a_master_through_a_one_at_a_time_lite_converter_opens_one_read(tmp_path
             "proto_no_full_dbg: assert (!bag_dbg_full);\n") in ls  # fmt: skip
     assert "proto_full_dbg: cover" not in ls
     assert "proto_w_first_dbg: cover" in ls
+
+
+def test_a_one_at_a_time_lite_converter_further_along_still_limits_the_port(
+    tmp_path: Path,
+) -> None:
+    """D91 (owner, 2026-11-14, extends D80): axil_adapters' cpu goes through bag_dw (64 to 32
+    bits) and then bag_pc to AXI4-Lite (PULP axi_to_axi_lite, MaxTrans 2) before its fabric;
+    proto_same_id_cpu and proto_full_cpu went unreached for 3 hours (run 43381018017). Such a
+    converter anywhere between a master and its fabric limits the port as when it is first.
+    proto_w_first_cpu too: a downsizing bag_axi_dw holds W until it has taken the AW."""
+    aa = _protocol(tmp_path, P3 / "axil_adapters.ir.yaml")
+    for e in ("same_id", "full", "w_first"):
+        assert f"proto_no_{e}_cpu: assert (!bag_cpu_{e});" in aa, e
+        assert f"proto_{e}_cpu: cover" not in aa, e
+    assert ("  // proto_no_same_id_cpu: no cover, cpu reaches cpu_pc_2_cfg, PULP "
+            "axi_to_axi_lite with MaxTrans 2: one read at a time (D80, D91)\n") in aa  # fmt: skip
+    assert ("  // proto_no_w_first_cpu: no cover, cpu enters cpu_dw_2_cfg, a downsizing "
+            "bag_axi_dw: W waits for its AW (D91)\n") in aa  # fmt: skip
+    assert "proto_multi_write_cpu: cover" in aa
+
+
+def test_an_apb_port_behind_a_crossing_bridge_is_covered_by_its_fabric_unit(
+    tmp_path: Path,
+) -> None:
+    """D90 (owner, 2026-11-14): demo_ss's gpio0, spi0, timer0 and uart0 cover tasks reached
+    none of their covers by step 27 in 3 hours (run 43381018017): cpu0 reaches them through a
+    cut, the AXI crossbar and an AXI4-to-APB bridge across clock domains. A slave port of an
+    APB fabric whose masters all come through bridges between clock domains gets its protocol
+    covers in that fabric's route unit, which holds the same checker on the same port alone;
+    the protocol job keeps its checker (the bmc) and drops its cover task. aon_apb's ports,
+    behind a bridge within one domain, keep theirs."""
+    ds = _protocol(tmp_path, GOLDEN)
+    job = (tmp_path / "formal" / "demo_ss_protocol.sby").read_text(encoding="utf-8")
+    route = (tmp_path / "formal" / "demo_ss_route_periph_apb.sv").read_text(encoding="utf-8")
+    for p in ("gpio0", "spi0", "timer0", "uart0"):
+        assert f"\ncover_{p}\n" not in job, p
+        assert f"proto_read_{p}: cover" not in ds, p
+        assert f"  // {p}: covers in route_periph_apb (D90)\n" in ds, p
+        # At the clock edge, out of reset, as every route property.
+        assert re.search(rf"\n  always @\(posedge \w+\) proto_read_{p}: cover \(bag_live_D_PER "
+                         rf"&& {p}_apb_psel && ", route), p  # fmt: skip
+        assert f"BAG_IDLE_{p}" not in ds, p
+    assert "\ncover_wdt0\n" in job and "proto_read_wdt0: cover" in ds
+    assert "proto_read_wdt0" not in route
 
 
 def test_a_cover_task_holds_the_other_masters_idle(tmp_path: Path) -> None:

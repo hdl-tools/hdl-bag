@@ -28,7 +28,9 @@ harness port), an environment and the properties:
   by the fabrics' windows (route_model.window), and none appears without one.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
@@ -38,6 +40,9 @@ from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
+
+if TYPE_CHECKING:
+    from hdl_bag.formal_gen import Checker
 
 # Bounded depth of a route job whose unit spans clock domains, in solver steps (free clocks:
 # about two per edge), plus ROUTE_DEPTH_PER_HALVING for each halving of a bridge's data width
@@ -853,8 +858,9 @@ def _decls(ports: list[tuple[str, int, bool]]) -> str:
     )
 
 
-def render_unit(spec: Spec, inst: Instance) -> Unit:
-    """INST alone in a harness module, with its environment and properties."""
+def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) -> Unit:
+    """INST alone in a harness module, with its environment and properties. COVERS: the
+    protocol job's checkers on ports of INST whose covers its route job carries (D90)."""
     atts = _attachments(inst)
     scope = Scope(spec, "flat", {a.bus.name: a.bus for a in atts})
     text, ctx = render_instance_ctx(scope, inst)
@@ -880,6 +886,20 @@ def render_unit(spec: Spec, inst: Instance) -> Unit:
         h.arbitration()
     else:
         h.bridge_window()
+    if covers:
+        from hdl_bag.formal_gen import _covers, _Ports
+
+        buses = {a.bus.name: a.bus for a in atts}
+        for chk in covers:
+            bus = buses[chk.port]
+            d = bus.domain
+            h.body.append(f"  // D90: {chk.port}'s protocol covers (the protocol job's bmc "
+                          "keeps its checker there; its covers are reached here), at the "
+                          "clock edge as every route property")  # fmt: skip
+            for line in _covers(spec, bus, chk, _Ports()):
+                label, expr = line.removeprefix("  always_comb ").split(": cover ", 1)
+                h.body.append(f"  always @(posedge {h.domains()[d]}) {label}: cover "
+                              f"(bag_live_{d} && {expr.removeprefix('(')}")  # fmt: skip
     module = f"bag_{spec.project.name}_unit_{inst.name}"
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,
@@ -893,9 +913,13 @@ def render_route(spec: Spec, netlist: Netlist, hdr: str) -> list[tuple[str, Unit
     job's top) and the unit. Each unit has a job of its own: the units share nothing, and a
     joint job's every solver step holds them all (bridges_pulp's eight units reached step 9
     of 16 in 20 minutes)."""
+    from hdl_bag.formal_gen import checkers, route_covered
+
+    via = route_covered(netlist)
+    found = checkers(spec, netlist)
     out = []
     for inst in units(netlist):
-        u = render_unit(spec, inst)
+        u = render_unit(spec, inst, [c for c in found if via.get(c.port) == inst.name])
         text = "\n".join([hdr.rstrip("\n"), "",
                           f"// Route properties of {spec.project.name}'s {inst.kind} {inst.name} "
                           "on its own (see hdl_bag.formal_gen.units).", u.text])  # fmt: skip

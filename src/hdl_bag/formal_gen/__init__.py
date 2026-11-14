@@ -648,7 +648,11 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
       AXI4-Lite protocol adapter (PULP axi_to_axi_lite) with MaxTrans of 2 or less. Its burst
       splitter's axi_demux_simple has idx_width(MaxTrans)-bit ID counters, full at 1 there,
       and any full counter blocks every ID: one read and one write at a time, so neither two
-      reads of one ID nor a full table (full: four reads, or four writes owed a response)."""
+      reads of one ID nor a full table (full: four reads, or four writes owed a response).
+      D91 (owner, 2026-11-14): the same where such an adapter comes later on the master's
+      adapter chain, before its fabric (axil_adapters' cpu: bag_dw, then bag_pc).
+    - w_first (D91): the port enters a downsizing bag_dw, whose bag_axi_dw holds W until it
+      has taken the AW (the downsizer's W beats wait for it)."""
     first = _first(netlist, bus)
     out: dict[str, str] = {}
     if first is None:
@@ -656,15 +660,28 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
     mode = first.fabric.latency_mode if first.fabric is not None else None
     if first.template == "bag_axi_xbar" and mode in AW_SPILL_ONLY:
         out["w_first"] = f"{bus.name} enters {first.name}'s AW spill register ({mode})"
-    if (first.template == "bag_pc" and first.adapter is not None and first.down is not None
-            and first.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
-        fab = {f.name: f for f in spec.fabrics}[first.adapter.fabric]
+    if (first.template == "bag_dw" and first.up is not None and first.down is not None
+            and first.up.data_width > first.down.data_width):  # fmt: skip
+        out["w_first"] = (f"{bus.name} enters {first.name}, a downsizing bag_axi_dw: W waits "
+                          "for its AW (D91)")  # fmt: skip
+    chain: list[Instance] = []
+    inst: Instance | None = first
+    while inst is not None and inst.kind == "adapter":
+        chain.append(inst)
+        inst = _first(netlist, inst.down) if inst.down is not None else None
+    for k, a in enumerate(chain):
+        if not (a.template == "bag_pc" and a.adapter is not None and a.down is not None
+                and a.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
+            continue
+        fab = {f.name: f for f in spec.fabrics}[a.adapter.fabric]
         trans = fab.max_mst_trans  # as the bag_pc template sets MaxTrans on a master's path
         if trans is not None and trans <= 2:
-            out["same_id"] = (f"{bus.name} enters {first.name}, PULP axi_to_axi_lite with "
-                              f"MaxTrans {trans}: one read at a time (D80)")  # fmt: skip
-            out["full"] = (f"{bus.name} enters {first.name}, PULP axi_to_axi_lite with "
-                           f"MaxTrans {trans}: one read and one write at a time (D80)")  # fmt: skip
+            how, why = ("enters", "D80") if k == 0 else ("reaches", "D80, D91")
+            out["same_id"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with "
+                              f"MaxTrans {trans}: one read at a time ({why})")  # fmt: skip
+            out["full"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with MaxTrans "
+                           f"{trans}: one read and one write at a time ({why})")  # fmt: skip
+            break
     return out
 
 
@@ -770,7 +787,7 @@ def formal_jobs(spec: Spec, netlist: Netlist) -> list[tuple[str, tuple[str, ...]
         return []
     out: list[tuple[str, tuple[str, ...]]] = [("reset", ("prove", "cover"))]
     if checkers(spec, netlist) or axi4_ports(netlist) or ahb_ports(netlist):
-        out.append(("protocol", ("bmc", *(f"cover_{p}" for p in protocol_ports(spec, netlist)))))
+        out.append(("protocol", ("bmc", *(f"cover_{p}" for p in cover_ports(spec, netlist)))))
     if decoded_fabrics(netlist):
         out.append(("decode", ("prove",)))
     out += [(f"route_{i.name}", ("bmc", "cover")) for i in units(netlist)]
@@ -840,13 +857,17 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
     ports = _Ports()
     body, domains = _environment(spec, netlist, ports)
     buses = {b.name: b for b in netlist.ports}
+    via = route_covered(netlist)
     for chk in found:
         bus = buses[chk.port]
         side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
         body.append(f"  // {chk.port}: {bus.protocol.value} {side} port; the design is its "
                     f"{design} ({chk.vendor})")  # fmt: skip
         body += [*_checker(spec, bus, chk, domains[bus.domain], ports)]
-        body += [*_own_covers(bus, _covers(spec, bus, chk, ports)), ""]
+        if chk.port in via:
+            body += [f"  // {chk.port}: covers in route_{via[chk.port]} (D90)", ""]
+        else:
+            body += [*_own_covers(bus, _covers(spec, bus, chk, ports)), ""]
     if axi4:
         active = _active(spec)
         for bus in axi4:
@@ -866,6 +887,27 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
     body += _idle(spec, netlist, ports)
     name = f"bag_{spec.project.name}_protocol_props"
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
+
+
+def route_covered(netlist: Netlist) -> dict[str, str]:
+    """The slave ports whose protocol covers their fabric's route job carries, each with that
+    fabric (D90, owner 2026-11-14): those of an APB fabric whose masters all come through
+    bridges between clock domains. demo_ss's gpio0, spi0, timer0 and uart0 reached none of
+    their covers by step 27 in 3 hours, behind a cut, the AXI crossbar and such a bridge; the
+    fabric's route unit holds the same checker on the same port with the bridge's APB side as
+    its environment. The protocol job's bmc keeps the checker; the port has no cover task."""
+    downs = {i.down.name: i for i in netlist.instances if i.kind == "bridge" and i.down}
+    out: dict[str, str] = {}
+    for f in netlist.instances:
+        if f.kind != "fabric" or f.template != "bag_apb_mux" or not f.masters:
+            continue
+        crossing = [downs[m.name] for m in f.masters if m.name in downs]
+        if len(crossing) == len(f.masters) and all(
+            b.up is not None and b.down is not None and b.up.domain != b.down.domain
+            for b in crossing
+        ):
+            out |= {s.name: f.name for s in f.slaves if s.external}
+    return out
 
 
 def cover_macro(port: str) -> str:
@@ -897,7 +939,7 @@ def _idle(spec: Spec, netlist: Netlist, port: "_Ports") -> list[str]:
     pairs = reaching(spec)
     masters = [b for b in netlist.ports if b.external and not b.is_slave]
     out = []
-    for p in protocol_ports(spec, netlist):
+    for p in cover_ports(spec, netlist):
         keep = active_masters(spec, netlist, p, pairs)
         idle = [m for m in masters if m.name not in keep]
         if not idle:
@@ -927,13 +969,20 @@ def protocol_ports(spec: Spec, netlist: Netlist) -> list[str]:
             *(b.name for b in ahb_ports(netlist))]  # fmt: skip
 
 
+def cover_ports(spec: Spec, netlist: Netlist) -> list[str]:
+    """The checked ports with a cover task of their own: all but those whose fabric's route
+    job carries their covers (D90)."""
+    via = route_covered(netlist)
+    return [p for p in protocol_ports(spec, netlist) if p not in via]
+
+
 def protocol_tasks(spec: Spec, netlist: Netlist) -> list[SbyTask]:
     """The protocol job's tasks (D79): the bmc at PROTOCOL_DEPTH, and a cover task per checked
     port at its path depth (D77), reading that port's covers and dropping the covers inside the
-    other ports' ZipCPU checkers."""
+    other ports' ZipCPU checkers; none for a port whose route job carries its covers (D90)."""
     from hdl_bag.formal_gen.depth import port_depths
 
-    ports = protocol_ports(spec, netlist)
+    ports = cover_ports(spec, netlist)
     depths = port_depths(spec, netlist, ports)
     zips = {c.port: c.module for c in checkers(spec, netlist)}
     tasks = [SbyTask("bmc", "bmc", PROTOCOL_DEPTH)]

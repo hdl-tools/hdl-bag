@@ -23,7 +23,7 @@ from test_decode_mutations import DECODE_CONTROL_CONFIGS, ROUTE_CONTROL_CASES
 from test_formal_eda import GENERATED_JOBS, IN_CORPUS
 
 from hdl_bag.flows.formal import run_sby
-from hdl_bag.formal_gen import formal_jobs
+from hdl_bag.formal_gen import PROTOCOL_DEPTH, formal_jobs
 from hdl_bag.gen import generate
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import Spec, load
@@ -41,6 +41,25 @@ DEEP_TIMEOUT_S = int(os.environ.get("BAG_DEEP_TIMEOUT_S", "7200"))
 # the generated one (pr.yml's bmc_engine input). Unset, the job runs as generated.
 BMC_ENGINE = os.environ.get("BAG_BMC_ENGINE", "")
 GENERATED_BMC_ENGINE = "bmc: smtbmc bitwuzla"
+
+
+# D89 (owner, 2026-11-14): the protocol bmc's depth for configs it does not finish at
+# PROTOCOL_DEPTH (16) within DEEP_TIMEOUT_S: the step bitwuzla had reached at 7200 s in
+# nightly 43328525704 (mixed_adapters_bridges': 15, before the D88 fix), each recorded as that
+# config's proof bound in the Phase 5 report. D84's engine trial found none faster.
+BMC_DEPTHS = {
+    "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 12,
+    "p3/bridges_inhouse": 13, "p3/mixed_ahb_secure": 13, "p3/mixed_shared_chain": 14,
+    "p3/mixed_adapters_bridges": 15,
+}  # fmt: skip
+
+
+def with_bmc_depth(job: str, depth: int) -> str:
+    """JOB (a protocol .sby file's text) with its bmc task at DEPTH (D89)."""
+    lines = job.split("\n")
+    old = f"bmc: depth {PROTOCOL_DEPTH}"
+    assert lines.count(old) == 1, "the job's bmc depth line moved"
+    return "\n".join(f"bmc: depth {depth}" if line == old else line for line in lines)
 
 
 def with_bmc_engine(job: str, engine: str) -> str:
@@ -124,11 +143,34 @@ def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: st
     generate(spec, tmp_path, _path(config).parent)
     timeout = DEEP_TIMEOUT_S if deep(config, job, task, _MEASURED) else TIMEOUT_S
     sby = tmp_path / "formal" / f"{spec.project.name}_{job}.sby"
-    if BMC_ENGINE and task == "bmc" and job == "protocol":
-        sby.write_text(with_bmc_engine(sby.read_text(encoding="utf-8"), BMC_ENGINE),
-                       encoding="utf-8", newline="\n")  # fmt: skip
+    if task == "bmc" and job == "protocol" and (BMC_ENGINE or config in BMC_DEPTHS):
+        text = sby.read_text(encoding="utf-8")
+        if config in BMC_DEPTHS:
+            text = with_bmc_depth(text, BMC_DEPTHS[config])
+        if BMC_ENGINE:
+            text = with_bmc_engine(text, BMC_ENGINE)
+        sby.write_text(text, encoding="utf-8", newline="\n")
     report = run_sby(sby, tmp_path, timeout=timeout, task=task)
     assert report.ok, report.format()
+
+
+def test_a_design_too_big_for_depth_16_has_its_bmc_bound_pinned(tmp_path: Path) -> None:
+    """D89 (owner, 2026-11-14, after D84 found no faster engine): the protocol bmc of these
+    configs gave no verdict at depth 16 within 7200 s; the corpus runs it to the step it had
+    reached (bitwuzla, nightly 43328525704), recorded as its proof bound. The generated job
+    keeps 16; only this test changes the depth."""
+    assert BMC_DEPTHS == {
+        "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 12,
+        "p3/bridges_inhouse": 13, "p3/mixed_ahb_secure": 13, "p3/mixed_shared_chain": 14,
+        "p3/mixed_adapters_bridges": 15,
+    }  # fmt: skip
+    spec = _spec("p3/axi_xbar_rules")
+    generate(spec, tmp_path, _path("p3/axi_xbar_rules").parent)
+    job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
+    pinned = with_bmc_depth(job, 12)
+    assert "\nbmc: depth 12\n" in pinned and "\nbmc: depth 16\n" not in pinned
+    assert pinned.replace("bmc: depth 12", "bmc: depth 16") == job
+    assert all(config in {c for c, _, _ in all_tasks()} for config in BMC_DEPTHS)
 
 
 def test_an_engine_measurement_swaps_only_the_bmc_engine(tmp_path: Path) -> None:
