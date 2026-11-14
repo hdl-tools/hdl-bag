@@ -81,6 +81,7 @@ markers = [
     "eda: needs the EDA tools (Verilator, slang, Verible, cocotb)",
     "smoke: the per-PR subset of the EDA tests (tests/smoke.py)",
     "deep: an EDA test beyond the full run's time limit; the nightly runs it (D74)",
+    "alone: a deep formal test the nightly runs one per runner, with a longer limit (D93)",
 ]
 
 [tool.ruff.lint.per-file-ignores]

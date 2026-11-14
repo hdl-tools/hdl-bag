@@ -125,7 +125,8 @@ jobs:
              || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
             && 'eda and smoke'
             || ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 'eda and deep')
-            || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 'eda' || 'eda and not deep') }}
+            || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))
+                && ((github.event_name == 'workflow_dispatch' && inputs.select != '') && 'eda' || 'eda and not alone') || 'eda and not deep') }}
       timeout-minutes: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && 300 || 30 }}
       keyword: ${{ github.event_name == 'workflow_dispatch' && inputs.select || '' }}
       bmc-engine: ${{ github.event_name == 'workflow_dispatch' && inputs.bmc_engine || '' }}
@@ -137,10 +138,27 @@ jobs:
       contents: read
       packages: read
 
+  eda-alone:
+    # D93 (owner, 2026-11-14): the formal corpus's ALONE tasks (tests/formal_gen/test_formal_corpus.py), one per
+    # runner with their 4 h SBY limit, so no other solver competes for the runner's memory; the nightly's
+    # two-at-a-time shards leave them out. A dispatch that selects tests by name runs them there instead.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly' && inputs.select == '')
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: eda and alone
+      shards: 11
+      workers: '1'
+      timeout-minutes: 300
+      save-cache: false
+    permissions:
+      contents: read
+      packages: read
+
   eda:
-    # The one check to require: passes only when every shard did.
-    needs: eda-shard
+    # The one check to require: passes only when every shard did (and the alone jobs, when they ran).
+    needs: [eda-shard, eda-alone]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - run: test "${{ needs.eda-shard.result }}" = success
+      - run: test "${{ needs.eda-alone.result }}" = success || test "${{ needs.eda-alone.result }}" = skipped

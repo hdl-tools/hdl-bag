@@ -187,22 +187,45 @@ def deep(config: str, job: str, task: str, measured: dict[str, float]) -> bool:
     return took is None or took > DEEP_S
 
 
+# D93 (owner, 2026-11-14): the D92 tasks that did not pass in nightly 43566745036 (timed out
+# at DEEP_TIMEOUT_S, an engine that died beside another solver, or a lost runner) run alone,
+# one per runner (pr.yml's eda-alone job, marked alone), with ALONE_TIMEOUT_S.
+ALONE = {
+    ("golden/demo_ss", "cover_cpu0_writes"), ("golden/demo_ss", "cover_cpu0_reads"),
+    ("golden/demo_ss", "cover_ddr0_writes"),
+    ("p3/axi_adapters", "cover_cpu_writes"), ("p3/axi_adapters", "cover_cpu_reads"),
+    ("p3/axi_adapters", "cover_ddr_writes"), ("p3/axi_adapters", "cover_ddr_reads"),
+    ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_pmu_writes"),
+    ("p3/mixed_wide_to_narrow", "cover_mem_writes"),
+    ("p3/mixed_wide_to_narrow", "cover_rom_writes"),
+}  # fmt: skip
+ALONE_TIMEOUT_S = int(os.environ.get("BAG_ALONE_TIMEOUT_S", "14400"))
+
 _SKIP = elsewhere()
 _MEASURED = _measured()
 CASES = [(c, j, s) for c, j, t in all_tasks() if (c, j, t) not in _SKIP
          for s in (split_tasks(c, t) if j == "protocol" else [t])]  # fmt: skip
 
 
+def marks(case: tuple[str, str, str]) -> list[pytest.MarkDecorator]:
+    """CASE's marks: deep by its measured time (D76), alone and deep if it is in ALONE (D93)."""
+    config, _, task = case
+    if (config, task) in ALONE:
+        return [pytest.mark.deep, pytest.mark.alone]
+    return [pytest.mark.deep] if deep(*case, _MEASURED) else []
+
+
 @pytest.mark.eda
 @pytest.mark.parametrize(("config", "job", "task"), [
-    pytest.param(*t, id=_id(*t), marks=[pytest.mark.deep] if deep(*t, _MEASURED) else [])
-    for t in CASES])  # fmt: skip
+    pytest.param(*t, id=_id(*t), marks=marks(t)) for t in CASES])  # fmt: skip
 def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: str) -> None:
     """The bmc (or prove) task is clean to its depth, and the cover task reaches every cover,
     so no assertion holds vacuously."""
     spec = _spec(config)
     generate(spec, tmp_path, _path(config).parent)
     timeout = DEEP_TIMEOUT_S if deep(config, job, task, _MEASURED) else TIMEOUT_S
+    if (config, task) in ALONE:
+        timeout = ALONE_TIMEOUT_S
     sby = tmp_path / "formal" / f"{spec.project.name}_{job}.sby"
     if task == "bmc" and job == "protocol" and (BMC_ENGINE or config in BMC_DEPTHS):
         text = sby.read_text(encoding="utf-8")
@@ -300,6 +323,36 @@ def test_a_deep_cover_task_runs_as_a_write_task_and_a_read_task(tmp_path: Path) 
     assert _split_port("p3/axi_adapters", "cover_pmu_reads") == "pmu"
     assert _split_port("p3/axi_adapters", "cover_dbg") is None
     assert split_tasks("p3/axi_adapters", "cover_dbg") == ["cover_dbg"]
+
+
+def test_a_split_task_still_short_runs_alone_for_four_hours() -> None:
+    """D93 (owner, 2026-11-14): the D92 tasks that did not pass in nightly 43566745036 (eight
+    timed out at 7200 s, demo_ss cpu0_reads' engine died with another solver on the runner,
+    and shard 12's lost runner left cpu0_writes and rom_writes unmeasured) get ALONE_TIMEOUT_S
+    and the alone mark: the nightly runs them in a job of their own, one test per runner, and
+    leaves them out of its two-at-a-time shards."""
+    assert {
+        ("golden/demo_ss", "cover_cpu0_writes"), ("golden/demo_ss", "cover_cpu0_reads"),
+        ("golden/demo_ss", "cover_ddr0_writes"),
+        ("p3/axi_adapters", "cover_cpu_writes"), ("p3/axi_adapters", "cover_cpu_reads"),
+        ("p3/axi_adapters", "cover_ddr_writes"), ("p3/axi_adapters", "cover_ddr_reads"),
+        ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_pmu_writes"),
+        ("p3/mixed_wide_to_narrow", "cover_mem_writes"),
+        ("p3/mixed_wide_to_narrow", "cover_rom_writes"),
+    } == ALONE  # fmt: skip
+    assert ALONE_TIMEOUT_S == 14400 or "BAG_ALONE_TIMEOUT_S" in os.environ
+    split = {(c, t) for c, j, t in CASES if _split_port(c, t)}
+    assert split >= ALONE
+    for c, j, t in CASES:
+        names = {m.name for m in marks((c, j, t))}
+        assert ("alone" in names) == ((c, t) in ALONE), (c, t)
+        assert "alone" not in names or "deep" in names, (c, t)
+    flow = (TESTS.parent / ".github" / "workflows" / "pr.yml").read_text(encoding="utf-8")
+    alone = flow.split("\n  eda-alone:\n", 1)[1].split("\n\n", 1)[0]
+    assert "marks: eda and alone\n" in alone and f"shards: {len(ALONE)}\n" in alone
+    assert "workers: '1'\n" in alone and "timeout-minutes: 300\n" in alone
+    # The two-at-a-time shards leave them out, unless a dispatch selects tests by name.
+    assert "&& 'eda' || 'eda and not alone') || 'eda and not deep') }}" in flow
 
 
 def test_every_generated_task_runs_once() -> None:
