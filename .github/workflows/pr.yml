@@ -140,15 +140,15 @@ jobs:
 
   eda-alone:
     # D93 (owner, 2026-11-14): the formal corpus's ALONE tasks (tests/formal_gen/test_formal_corpus.py), one per
-    # runner with their 4 h SBY limit, so no other solver competes for the runner's memory; the nightly's
+    # runner with their 4 h SBY limit (cpu0_reads 5 h, D94), so no other solver competes for the runner's memory; the nightly's
     # two-at-a-time shards leave them out. A dispatch that selects tests by name runs them there instead.
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly' && inputs.select == '')
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: eda and alone
-      shards: 11
+      shards: 16
       workers: '1'
-      timeout-minutes: 300
+      timeout-minutes: 340
       save-cache: false
     permissions:
       contents: read

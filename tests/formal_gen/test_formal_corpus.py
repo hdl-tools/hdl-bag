@@ -189,17 +189,29 @@ def deep(config: str, job: str, task: str, measured: dict[str, float]) -> bool:
 
 # D93 (owner, 2026-11-14): the D92 tasks that did not pass in nightly 43566745036 (timed out
 # at DEEP_TIMEOUT_S, an engine that died beside another solver, or a lost runner) run alone,
-# one per runner (pr.yml's eda-alone job, marked alone), with ALONE_TIMEOUT_S.
+# one per runner (pr.yml's eda-alone job, marked alone), with ALONE_TIMEOUT_S. D94 (owner,
+# 2026-11-15): with them every split task over 6000 s in nightly 43587180724, two of which
+# timed out at 7200 s on the shared runners; ALONE_LONGER gives cpu0_reads 5 h.
 ALONE = {
     ("golden/demo_ss", "cover_cpu0_writes"), ("golden/demo_ss", "cover_cpu0_reads"),
-    ("golden/demo_ss", "cover_ddr0_writes"),
+    ("golden/demo_ss", "cover_ddr0_writes"), ("golden/demo_ss", "cover_ddr0_reads"),
     ("p3/axi_adapters", "cover_cpu_writes"), ("p3/axi_adapters", "cover_cpu_reads"),
     ("p3/axi_adapters", "cover_ddr_writes"), ("p3/axi_adapters", "cover_ddr_reads"),
-    ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_pmu_writes"),
+    ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_per_reads"),
+    ("p3/axi_adapters", "cover_pmu_writes"), ("p3/axi_adapters", "cover_pmu_reads"),
     ("p3/mixed_wide_to_narrow", "cover_mem_writes"),
+    ("p3/mixed_wide_to_narrow", "cover_mem_reads"),
     ("p3/mixed_wide_to_narrow", "cover_rom_writes"),
+    ("p3/mixed_wide_to_narrow", "cover_rom_reads"),
 }  # fmt: skip
 ALONE_TIMEOUT_S = int(os.environ.get("BAG_ALONE_TIMEOUT_S", "14400"))
+ALONE_LONGER = {("golden/demo_ss", "cover_cpu0_reads"): 18000}
+
+
+def alone_timeout(config: str, task: str) -> int:
+    """The SBY limit of an ALONE task (D93, D94)."""
+    return ALONE_LONGER.get((config, task), ALONE_TIMEOUT_S)
+
 
 _SKIP = elsewhere()
 _MEASURED = _measured()
@@ -225,7 +237,7 @@ def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: st
     generate(spec, tmp_path, _path(config).parent)
     timeout = DEEP_TIMEOUT_S if deep(config, job, task, _MEASURED) else TIMEOUT_S
     if (config, task) in ALONE:
-        timeout = ALONE_TIMEOUT_S
+        timeout = alone_timeout(config, task)
     sby = tmp_path / "formal" / f"{spec.project.name}_{job}.sby"
     if task == "bmc" and job == "protocol" and (BMC_ENGINE or config in BMC_DEPTHS):
         text = sby.read_text(encoding="utf-8")
@@ -330,17 +342,30 @@ def test_a_split_task_still_short_runs_alone_for_four_hours() -> None:
     timed out at 7200 s, demo_ss cpu0_reads' engine died with another solver on the runner,
     and shard 12's lost runner left cpu0_writes and rom_writes unmeasured) get ALONE_TIMEOUT_S
     and the alone mark: the nightly runs them in a job of their own, one test per runner, and
-    leaves them out of its two-at-a-time shards."""
+    leaves them out of its two-at-a-time shards.
+
+    D94 (owner, 2026-11-15): nightly 43587180724 timed out per_reads and rom_reads at 7200 s
+    (6339 s and 6132 s the run before), so every split task over 6000 s runs alone too (pmu,
+    mem and ddr0 reads took 6152 to 6501 s); demo_ss cpu0_reads, at step 30 of its read after
+    14400 s alone, gets 18000 s, so the job's limit is 340 minutes (GitHub allows 360)."""
     assert {
         ("golden/demo_ss", "cover_cpu0_writes"), ("golden/demo_ss", "cover_cpu0_reads"),
-        ("golden/demo_ss", "cover_ddr0_writes"),
+        ("golden/demo_ss", "cover_ddr0_writes"), ("golden/demo_ss", "cover_ddr0_reads"),
         ("p3/axi_adapters", "cover_cpu_writes"), ("p3/axi_adapters", "cover_cpu_reads"),
         ("p3/axi_adapters", "cover_ddr_writes"), ("p3/axi_adapters", "cover_ddr_reads"),
-        ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_pmu_writes"),
+        ("p3/axi_adapters", "cover_per_writes"), ("p3/axi_adapters", "cover_per_reads"),
+        ("p3/axi_adapters", "cover_pmu_writes"), ("p3/axi_adapters", "cover_pmu_reads"),
         ("p3/mixed_wide_to_narrow", "cover_mem_writes"),
+        ("p3/mixed_wide_to_narrow", "cover_mem_reads"),
         ("p3/mixed_wide_to_narrow", "cover_rom_writes"),
+        ("p3/mixed_wide_to_narrow", "cover_rom_reads"),
     } == ALONE  # fmt: skip
     assert ALONE_TIMEOUT_S == 14400 or "BAG_ALONE_TIMEOUT_S" in os.environ
+    assert ALONE_LONGER == {("golden/demo_ss", "cover_cpu0_reads"): 18000}
+    assert alone_timeout("golden/demo_ss", "cover_cpu0_reads") == 18000
+    assert alone_timeout("p3/axi_adapters", "cover_ddr_reads") == ALONE_TIMEOUT_S
+    # The longest SBY limit and the run's setup fit in the job's limit.
+    assert max(ALONE_LONGER.values()) + 20 * 60 <= 340 * 60
     split = {(c, t) for c, j, t in CASES if _split_port(c, t)}
     assert split >= ALONE
     for c, j, t in CASES:
@@ -350,7 +375,7 @@ def test_a_split_task_still_short_runs_alone_for_four_hours() -> None:
     flow = (TESTS.parent / ".github" / "workflows" / "pr.yml").read_text(encoding="utf-8")
     alone = flow.split("\n  eda-alone:\n", 1)[1].split("\n\n", 1)[0]
     assert "marks: eda and alone\n" in alone and f"shards: {len(ALONE)}\n" in alone
-    assert "workers: '1'\n" in alone and "timeout-minutes: 300\n" in alone
+    assert "workers: '1'\n" in alone and "timeout-minutes: 340\n" in alone
     # The two-at-a-time shards leave them out, unless a dispatch selects tests by name.
     assert "&& 'eda' || 'eda and not alone') || 'eda and not deep') }}" in flow
 
