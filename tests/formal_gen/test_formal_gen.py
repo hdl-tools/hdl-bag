@@ -748,6 +748,62 @@ def test_a_master_entering_an_arbiter_keeps_one_competitor_in_its_cover_task(
     assert "bag_idle_cpu0_for_mcu0" in blocks["mcu0"] and "bag_idle_dbg0_for_cpu0" in blocks["cpu0"]
 
 
+def test_a_port_s_covers_split_into_a_write_task_and_a_read_task(tmp_path: Path) -> None:
+    """D92 (owner, 2026-11-14): the deep cover tasks of nightly 43533410868 lacked only round
+    trips (data back, an error, a response stall), and a group of them needs the whole trip,
+    so a split by kind of cover alone saves nothing. Each port with covers both ways carries a
+    write and a read variant: BAG_WRITES_<port> keeps its write covers and holds its active
+    masters to writes (a master kept only for reads goes idle), BAG_READS_<port> the reverse.
+    A trace of one direction is legal in the full design, so a cover it reaches still counts.
+    The generated tasks define neither; the corpus test runs the measured ones split."""
+    ad = _protocol(tmp_path / "a", P3 / "axi_adapters.ir.yaml")
+    assert ("`ifdef BAG_COVER_ddr\n`ifndef BAG_READS_ddr\n"
+            "  always_comb proto_aw_stall_ddr: cover (ddr_axi_awvalid && !ddr_axi_awready);\n"
+            "  always_comb proto_w_stall_ddr: cover (ddr_axi_wvalid && !ddr_axi_wready);\n"
+            "  always_comb proto_write_ddr: cover (ddr_axi_wvalid && ddr_axi_wready "
+            "&& ddr_axi_wlast);\n"
+            "  always_comb proto_b_error_ddr: cover (ddr_axi_bvalid && ddr_axi_bready "
+            "&& ddr_axi_bresp[1]);\n"
+            "`endif\n`ifndef BAG_WRITES_ddr\n"
+            "  always_comb proto_ar_stall_ddr: cover (ddr_axi_arvalid && !ddr_axi_arready);\n"
+            "  always_comb proto_read_ddr: cover (ddr_axi_rvalid && ddr_axi_rready "
+            "&& ddr_axi_rlast);\n"
+            "  always_comb proto_r_error_ddr: cover (ddr_axi_rvalid && ddr_axi_rready "
+            "&& ddr_axi_rresp[1]);\n"
+            "`endif\n`endif\n") in ad  # fmt: skip
+    assert ("`ifdef BAG_WRITES_ddr\n"
+            "  // D92: ddr's write cover task; dma active, making no reads\n"
+            "  always_comb bag_no_read_dma_for_ddr: assume (!(dma_axi_arvalid));\n"
+            "`endif\n\n`ifdef BAG_READS_ddr\n"
+            "  // D92: ddr's read cover task; dma active, making no writes\n"
+            "  always_comb bag_no_write_dma_for_ddr: assume (!(dma_axi_awvalid "
+            "|| dma_axi_wvalid));\n`endif\n") in ad  # fmt: skip
+    # A master port: the table's covers go with the writes, two reads of one ID with reads.
+    cpu = re.search(r"`ifdef BAG_COVER_cpu\n(.*?)`endif\n`endif\n", ad, re.S)
+    assert cpu
+    groups = re.findall(r"`ifndef BAG_(\w+)S_cpu\n(.*?)`endif", cpu[0], re.S)
+    kinds = {g: re.findall(r"proto_(\w+)_cpu: cover", b) for g, b in groups}
+    assert kinds == {"READ": ["b_stall", "write", "multi_write", "w_first", "full"],
+                     "WRITE": ["r_stall", "read", "same_id"]}  # fmt: skip
+    # regs: cpu reads it and dma writes it, so each task keeps only the one it needs.
+    xr = _protocol(tmp_path / "x", P3 / "axi_xbar_rules.ir.yaml")
+    writes = re.search(r"`ifdef BAG_WRITES_regs\n(.*?)`endif", xr, re.S)
+    reads = re.search(r"`ifdef BAG_READS_regs\n(.*?)`endif", xr, re.S)
+    assert writes and reads
+    assert re.findall(r"always_comb (\w+): assume", writes[1]) == [
+        "bag_idle_cpu_for_regs_writes",
+        "bag_no_read_dma_for_regs",
+    ]
+    assert re.findall(r"always_comb (\w+): assume", reads[1]) == [
+        "bag_idle_dma_for_regs_reads",
+        "bag_no_write_cpu_for_regs",
+    ]
+    # A port the IR only reads has nothing to split.
+    rules = _protocol(tmp_path / "r", P2 / "apb4_rules.ir.yaml")
+    assert "BAG_WRITES_ro0" not in rules and "BAG_READS_ro0" not in rules
+    assert "`ifndef BAG_READS_dual0\n" in rules
+
+
 def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
     """D77, D79: the bmc runs at PROTOCOL_DEPTH; each checked port's covers run in a task of
     their own, at its path depth (never below 16), reading only that port's covers: its macro
@@ -767,7 +823,9 @@ def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path
     props = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sv").read_text(encoding="utf-8")
     assert "`ifdef BAG_COVER_ro0\n  always_comb proto_read_ro0: cover (" in props
     # Every cover sits inside its port's macro, and nothing else does.
-    inside = re.findall(r"`ifdef BAG_COVER_\w+\n(.*?)`endif", props, re.S)
+    # (D92: a port with covers both ways holds them in a write group and a read group.)
+    inside = re.findall(r"`ifdef BAG_COVER_\w+\n(.*?)`endif\n(?!`)", props, re.S)
+    inside = [re.sub(r"`(ifndef BAG_(WRITE|READ)S_\w+|endif)\n", "", b) for b in inside]
     assert inside and all(": cover (" in line for b in inside for line in b.splitlines())
     assert props.count(": cover (") == sum(b.count(": cover (") for b in inside)
     generate(load(P3 / "bridges_inhouse.ir.yaml"), tmp_path / "b", P3)

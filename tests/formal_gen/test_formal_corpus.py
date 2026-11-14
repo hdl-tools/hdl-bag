@@ -23,7 +23,7 @@ from test_decode_mutations import DECODE_CONTROL_CONFIGS, ROUTE_CONTROL_CASES
 from test_formal_eda import GENERATED_JOBS, IN_CORPUS
 
 from hdl_bag.flows.formal import run_sby
-from hdl_bag.formal_gen import PROTOCOL_DEPTH, formal_jobs
+from hdl_bag.formal_gen import PROTOCOL_DEPTH, checkers, formal_jobs
 from hdl_bag.gen import generate
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import Spec, load
@@ -53,6 +53,65 @@ BMC_DEPTHS = {
     "p3/bridges_inhouse": 13, "p3/mixed_ahb_secure": 13, "p3/mixed_shared_chain": 14,
     "p3/mixed_adapters_bridges": 15,
 }  # fmt: skip
+
+
+# D92 (owner, 2026-11-14): the cover tasks still short of their covers at DEEP_TIMEOUT_S in
+# nightly 43533410868, each run as two tasks, cover_<port>_writes and cover_<port>_reads: the
+# property file's BAG_WRITES_<port> and BAG_READS_<port> hold the active masters to one
+# direction and keep that direction's covers, and the port's ZipCPU checker drops the other
+# direction's with its F_OPT_WRITE_ONLY or F_OPT_READ_ONLY. The generated job keeps one task.
+SPLIT = {
+    "golden/demo_ss": ("cpu0", "ddr0"),
+    "p3/axi_adapters": ("cpu", "ddr", "dma", "per", "pmu"),
+    "p3/bridges_inhouse_cdc": ("wdt",), "p3/mixed_wide_to_narrow": ("mem", "rom"),
+}  # fmt: skip
+DIRECTIONS = {"writes": "F_OPT_WRITE_ONLY", "reads": "F_OPT_READ_ONLY"}
+
+
+def with_direction_split(job: str, port: str, zipcpu: str | None) -> str:
+    """JOB (a protocol .sby file's text) with PORT's cover task as two (D92), one per
+    direction; ZIPCPU names the port's ZipCPU checker copy, if it has one."""
+    task = f"cover_{port}"
+    lines = job.split("\n")
+    assert lines.count(task) == 1, "the job's task list moved"
+    out = []
+    for line in lines:
+        if line == task:
+            out += [f"{task}_{d}" for d in DIRECTIONS]
+        elif line.startswith(f"{task}: "):
+            body = line.removeprefix(f"{task}: ")
+            for d in DIRECTIONS:
+                macro = f"-D BAG_IDLE_{port} -D BAG_{d.upper()}_{port}"
+                out.append(f"{task}_{d}: " + body.replace(f"-D BAG_IDLE_{port}", macro))
+        else:
+            out.append(line)
+            if zipcpu and line.startswith("chparam ") and line.endswith(f" {zipcpu}"):
+                out += [f"{task}_{d}: chparam -set {o} 1 {zipcpu}" for d, o in DIRECTIONS.items()]
+    return "\n".join(out)
+
+
+def split_tasks(config: str, task: str) -> list[str]:
+    """TASK as the corpus runs it: itself, or its two direction tasks (D92)."""
+    ports = SPLIT.get(config, ())
+    if task.removeprefix("cover_") in ports:
+        return [f"{task}_{d}" for d in DIRECTIONS]
+    return [task]
+
+
+def _split_port(config: str, task: str) -> str | None:
+    """The port whose direction task (D92) TASK is, if it is one."""
+    for d in DIRECTIONS:
+        port = task.removeprefix("cover_").removesuffix(f"_{d}")
+        if task.endswith(f"_{d}") and port in SPLIT.get(config, ()):
+            return port
+    return None
+
+
+def _zipcpu(spec: Spec, port: str) -> str | None:
+    """PORT's ZipCPU AXI4-Lite checker copy in the protocol job, if it has one: those take
+    F_OPT_WRITE_ONLY and F_OPT_READ_ONLY. The APB ones have neither, nor covers of their own."""
+    found = checkers(spec, build_netlist(spec))
+    return {c.port: c.module for c in found if c.vendor.startswith("faxil")}.get(port)
 
 
 def with_bmc_depth(job: str, depth: int) -> str:
@@ -130,7 +189,8 @@ def deep(config: str, job: str, task: str, measured: dict[str, float]) -> bool:
 
 _SKIP = elsewhere()
 _MEASURED = _measured()
-CASES = [t for t in all_tasks() if t not in _SKIP]
+CASES = [(c, j, s) for c, j, t in all_tasks() if (c, j, t) not in _SKIP
+         for s in (split_tasks(c, t) if j == "protocol" else [t])]  # fmt: skip
 
 
 @pytest.mark.eda
@@ -150,6 +210,9 @@ def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: st
             text = with_bmc_depth(text, BMC_DEPTHS[config])
         if BMC_ENGINE:
             text = with_bmc_engine(text, BMC_ENGINE)
+        sby.write_text(text, encoding="utf-8", newline="\n")
+    if job == "protocol" and (port := _split_port(config, task)):
+        text = with_direction_split(sby.read_text(encoding="utf-8"), port, _zipcpu(spec, port))
         sby.write_text(text, encoding="utf-8", newline="\n")
     report = run_sby(sby, tmp_path, timeout=timeout, task=task)
     assert report.ok, report.format()
@@ -186,13 +249,68 @@ def test_an_engine_measurement_swaps_only_the_bmc_engine(tmp_path: Path) -> None
     assert "cover_cpu: smtbmc yices" in swapped
 
 
+def test_a_deep_cover_task_runs_as_a_write_task_and_a_read_task(tmp_path: Path) -> None:
+    """D92 (owner, 2026-11-14): the ten cover tasks short of their covers at 7200 s in nightly
+    43533410868 run split by direction; each split port has covers both ways, and a ZipCPU
+    port's checker drops the other direction's covers itself. The generated job is unchanged
+    but for those two tasks."""
+    assert SPLIT == {
+        "golden/demo_ss": ("cpu0", "ddr0"),
+        "p3/axi_adapters": ("cpu", "ddr", "dma", "per", "pmu"),
+        "p3/bridges_inhouse_cdc": ("wdt",), "p3/mixed_wide_to_narrow": ("mem", "rom"),
+    }  # fmt: skip
+    for config, ports in SPLIT.items():
+        spec = _spec(config)
+        generate(spec, tmp_path / config, _path(config).parent)
+        props = (tmp_path / config / "formal" / f"{spec.project.name}_protocol.sv").read_text(
+            encoding="utf-8"
+        )
+        for p in ports:
+            assert f"`ifdef BAG_WRITES_{p}\n" in props and f"`ifdef BAG_READS_{p}\n" in props, p
+            assert (config, "protocol", f"cover_{p}_writes") in CASES, p
+            assert (config, "protocol", f"cover_{p}") not in CASES, p
+    spec = _spec("p3/axi_adapters")
+    generate(spec, tmp_path / "a", _path("p3/axi_adapters").parent)
+    job = (tmp_path / "a" / "formal" / "axi_adapters_protocol.sby").read_text(encoding="utf-8")
+    zipcpu = _zipcpu(spec, "pmu")
+    assert zipcpu == "bag_axi_adapters_faxil_master_pmu" and _zipcpu(spec, "ddr") is None
+    # ZipCPU's APB checkers have no direction options and no covers to drop.
+    # (bridges_inhouse_cdc dbg: an APB master port, fapb_slave.)
+    assert _zipcpu(_spec("p3/bridges_inhouse_cdc"), "dbg") is None
+    split = with_direction_split(job, "pmu", zipcpu)
+    assert "\ncover_pmu_writes\ncover_pmu_reads\ncover_cpu\n" in split
+    assert ("\ncover_pmu_writes: mode cover\ncover_pmu_reads: mode cover\n"
+            "cover_pmu_writes: depth 52\ncover_pmu_reads: depth 52\n") in split  # fmt: skip
+    assert "\ncover_pmu_writes: smtbmc yices\ncover_pmu_reads: smtbmc yices\n" in split
+    assert (
+        f" {zipcpu}\ncover_pmu_writes: chparam -set F_OPT_WRITE_ONLY 1 {zipcpu}\n"
+        f"cover_pmu_reads: chparam -set F_OPT_READ_ONLY 1 {zipcpu}\n"
+    ) in split
+    assert ("\ncover_pmu_reads: read_slang -D BAG_COVER_pmu -D BAG_IDLE_pmu -D BAG_READS_pmu "
+            "--extern-modules ") in split  # fmt: skip
+    assert (
+        "\ncover_pmu_writes: chformal -remove -cover bag_axi_adapters_faxil_slave_dbg\n"
+        "cover_pmu_reads: chformal -remove -cover bag_axi_adapters_faxil_slave_dbg\n"
+    ) in split
+    assert "\ncover_pmu\n" not in split and "\ncover_pmu:" not in split
+    # Only pmu's lines changed: every other line is as generated, in order.
+    kept = [ln for ln in split.split("\n") if not ln.startswith("cover_pmu_")]
+    assert kept == [ln for ln in job.split("\n") if ln != "cover_pmu"
+                    and not ln.startswith("cover_pmu:")]  # fmt: skip
+    assert _split_port("p3/axi_adapters", "cover_pmu_reads") == "pmu"
+    assert _split_port("p3/axi_adapters", "cover_dbg") is None
+    assert split_tasks("p3/axi_adapters", "cover_dbg") == ["cover_dbg"]
+
+
 def test_every_generated_task_runs_once() -> None:
     """Each task is either a corpus case or run by exactly the test named in elsewhere(): the
     generated-jobs configs run whole, the decode and route controls run their jobs. The two
     user-supplied fabric configs generate none (D8)."""
     tasks = all_tasks()
-    assert len(tasks) == len(set(tasks))
-    assert set(CASES) | set(_SKIP) == set(tasks) and not set(CASES) & set(_SKIP)
+    assert len(tasks) == len(set(tasks)) and len(CASES) == len(set(CASES))
+    # A split task (D92) stands for the generated one it came from.
+    run = {(c, j, f"cover_{p}" if (p := _split_port(c, t)) else t) for c, j, t in CASES}
+    assert run | set(_SKIP) == set(tasks) and not run & set(_SKIP)
     configs = {c for c, _, _ in tasks}
     assert sorted(set(_configs()) - configs) == ["p3/external_fabric", "p3/external_shared"]
     assert {"golden/demo_ss", "p3/mixed_narrow_apb"} <= {c for c, _, _ in CASES}

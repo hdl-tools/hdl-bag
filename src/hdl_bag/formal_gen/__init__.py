@@ -858,6 +858,7 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
     body, domains = _environment(spec, netlist, ports)
     buses = {b.name: b for b in netlist.ports}
     via = route_covered(netlist)
+    split: set[str] = set()
     for chk in found:
         bus = buses[chk.port]
         side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
@@ -867,7 +868,9 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
         if chk.port in via:
             body += [f"  // {chk.port}: covers in route_{via[chk.port]} (D90)", ""]
         else:
-            body += [*_own_covers(bus, _covers(spec, bus, chk, ports)), ""]
+            lines = _covers(spec, bus, chk, ports)
+            split |= {bus.name} if _both_ways(bus, lines) else set()
+            body += [*_own_covers(bus, lines), ""]
     if axi4:
         active = _active(spec)
         for bus in axi4:
@@ -876,6 +879,7 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
                         "(bag_faxi4)")  # fmt: skip
             absent = {} if bus.is_slave else never(spec, netlist, bus)
             lines = _axi4(spec, bus, domains[bus.domain], ports, active, absent)
+            split |= {bus.name} if _both_ways(bus, lines) else set()
             body += [*_own_covers(bus, lines), ""]
     if ahb:
         active = _active(spec)
@@ -883,8 +887,10 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             side, design = ("slave", "master") if bus.is_slave else ("master", "slave")
             body.append(f"  // {bus.name}: AHB-Lite {side} port; the design is its {design} "
                         "(bag_fahb)")  # fmt: skip
-            body += [*_own_covers(bus, _ahb(spec, bus, domains[bus.domain], ports, active)), ""]
-    body += _idle(spec, netlist, ports)
+            lines = _ahb(spec, bus, domains[bus.domain], ports, active)
+            split |= {bus.name} if _both_ways(bus, lines) else set()
+            body += [*_own_covers(bus, lines), ""]
+    body += _idle(spec, netlist, ports, split)
     name = f"bag_{spec.project.name}_protocol_props"
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
@@ -929,37 +935,104 @@ def _requests(spec: Spec, bus: Bus, port: "_Ports") -> str:
     return _value(spec, bus, "psel", port)
 
 
-def _idle(spec: Spec, netlist: Netlist, port: "_Ports") -> list[str]:
+def _requests_of(spec: Spec, bus: Bus, port: "_Ports", kind: str) -> str:
+    """What master port BUS presents when it asks for a KIND ("write" or "read")."""
+    if bus.protocol in AXI_FAMILY:
+        if kind == "write":
+            return " || ".join(_value(spec, bus, s, port) for s in ("awvalid", "wvalid"))
+        return _value(spec, bus, "arvalid", port)
+    if bus.protocol is Protocol.AHB_LITE:
+        req, wr = f"{_value(spec, bus, 'htrans', port)}[1]", _value(spec, bus, "hwrite", port)
+    else:
+        req, wr = _value(spec, bus, "psel", port), _value(spec, bus, "pwrite", port)
+    return f"{req} && {wr}" if kind == "write" else f"{req} && !{wr}"
+
+
+def _idle(spec: Spec, netlist: Netlist, port: "_Ports", split: set[str]) -> list[str]:
     """Per checked port, the masters its cover task holds idle (D82, owner 2026-11-13): with
     the whole design in every cover task, per-port tasks of up to 68 steps ran past an hour.
     A trace in which those masters ask for nothing is legal in the full design, so a cover it
-    reaches still counts; the bmc defines no such macro and keeps every master free."""
-    from hdl_bag.formal_gen.depth import active_masters, reaching
+    reaches still counts; the bmc defines no such macro and keeps every master free.
+
+    D92 (owner, 2026-11-14): for a port in SPLIT (covers both ways), a write variant and a read
+    variant on top: the masters the direction needs make only that kind of access, and the
+    ones the task kept for the other direction go idle as well."""
+    from hdl_bag.formal_gen.depth import active_masters, direction_masters, reaching
 
     pairs = reaching(spec)
     masters = [b for b in netlist.ports if b.external and not b.is_slave]
+    by_name = {m.name: m for m in masters}
     out = []
     for p in cover_ports(spec, netlist):
         keep = active_masters(spec, netlist, p, pairs)
         idle = [m for m in masters if m.name not in keep]
-        if not idle:
+        if idle:
+            out += [f"`ifdef {idle_macro(p)}",
+                    f"  // D82: {p}'s cover task; {', '.join(keep) or 'no master'} active, the "
+                    "other masters idle"]  # fmt: skip
+            out += [f"  always_comb bag_idle_{m.name}_for_{p}: "
+                    f"assume (!({_requests(spec, m, port)}));" for m in idle]  # fmt: skip
+            out += ["`endif", ""]
+        if p not in split:
             continue
-        out += [f"`ifdef {idle_macro(p)}",
-                f"  // D82: {p}'s cover task; {', '.join(keep) or 'no master'} active, the "
-                "other masters idle"]  # fmt: skip
-        out += [f"  always_comb bag_idle_{m.name}_for_{p}: "
-                f"assume (!({_requests(spec, m, port)}));" for m in idle]  # fmt: skip
-        out += ["`endif", ""]
+        for kind, other in (("write", "read"), ("read", "write")):
+            mine = direction_masters(spec, netlist, p, pairs, kind)
+            out += [f"`ifdef {direction_macro(p, kind)}",
+                    f"  // D92: {p}'s {kind} cover task; {', '.join(mine) or 'no master'} "
+                    f"active, making no {other}s"]  # fmt: skip
+            out += [f"  always_comb bag_idle_{m}_for_{p}_{kind}s: "
+                    f"assume (!({_requests(spec, by_name[m], port)}));"
+                    for m in keep if m not in mine]  # fmt: skip
+            out += [f"  always_comb bag_no_{other}_{m}_for_{p}: "
+                    f"assume (!({_requests_of(spec, by_name[m], port, other)}));"
+                    for m in mine]  # fmt: skip
+            out += ["`endif", ""]
     return out
+
+
+def direction_macro(port: str, kind: str) -> str:
+    """The macro that turns PORT's cover task into its KIND ("write" or "read") task (D92)."""
+    return f"BAG_{kind.upper()}S_{port}"
+
+
+# The covers only a write or only a read makes (D92). The others (a wait state, an error, a
+# burst beat, a full table) either one makes; a split task keeps them with the writes.
+_WRITE_EVENTS = frozenset({"aw_stall", "w_stall", "b_stall", "write", "b_error", "multi_write",
+                           "w_first"})  # fmt: skip
+_READ_EVENTS = frozenset({"ar_stall", "r_stall", "read", "r_error", "same_id"})
+
+
+def _cover_kind(port: str, line: str) -> str:
+    """Whether the cover on LINE, one of PORT's, is a write's, a read's or either's (D92)."""
+    event = line.split(": cover (", 1)[0].split()[-1].removeprefix("proto_")
+    event = event.removesuffix(f"_{port}")
+    return "write" if event in _WRITE_EVENTS else "read" if event in _READ_EVENTS else "either"
+
+
+def _both_ways(bus: Bus, lines: list[str]) -> bool:
+    """Whether BUS has covers both ways among LINES, so its cover task can split (D92)."""
+    kinds = {_cover_kind(bus.name, ln) for ln in lines if ": cover (" in ln}
+    return {"write", "read"} <= kinds
 
 
 def _own_covers(bus: Bus, lines: list[str]) -> list[str]:
     """LINES with BUS's covers moved to the end, inside its macro: only the port's own cover
-    task reads them (D79), so each runs at its own depth."""
+    task reads them (D79), so each runs at its own depth. With covers both ways, the writes'
+    and the reads' sit in groups that the other direction's task leaves out (D92)."""
     covers = [line for line in lines if ": cover (" in line]
     if not covers:
         return lines
     rest = [line for line in lines if ": cover (" not in line]
+    if _both_ways(bus, lines):
+        groups = []
+        for kind, other in (("write", "read"), ("read", "write")):
+            mine = {kind, "either"} if kind == "write" else {kind}
+            groups += [
+                f"`ifndef {direction_macro(bus.name, other)}",
+                *(c for c in covers if _cover_kind(bus.name, c) in mine),
+                "`endif",
+            ]
+        covers = groups
     return [*rest, f"`ifdef {cover_macro(bus.name)}", *covers, "`endif"]
 
 

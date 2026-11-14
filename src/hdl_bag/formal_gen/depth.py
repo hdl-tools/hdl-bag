@@ -133,8 +133,17 @@ def active_masters(spec: Spec, netlist: Netlist, port: str,
         return sorted([port, *(r[1] for r in rivals[:1])])
     keep = set()
     for kind in ("read", "write"):
-        ranked = sorted((c, m) for (m, s), kinds in pairs.items() if s == port and kind in kinds
-                        if (c := _cost(spec, netlist, m, port)) is not None)  # fmt: skip
-        if ranked:
-            keep.add(ranked[0][1])
+        keep |= set(direction_masters(spec, netlist, port, pairs, kind))
     return sorted(keep)
+
+
+def direction_masters(spec: Spec, netlist: Netlist, port: str,
+                      pairs: dict[tuple[str, str], set[str]], kind: str) -> list[str]:  # fmt: skip
+    """The masters PORT's KIND ("write" or "read") cover task keeps active (D92): a master
+    port, those of active_masters; a slave port, the nearest master making that kind of access
+    (by path cost, then name), as active_masters picks it."""
+    if port in {m.name for m in spec.masters}:
+        return active_masters(spec, netlist, port, pairs)
+    ranked = sorted((c, m) for (m, s), kinds in pairs.items() if s == port and kind in kinds
+                    if (c := _cost(spec, netlist, m, port)) is not None)  # fmt: skip
+    return [ranked[0][1]] if ranked else []
