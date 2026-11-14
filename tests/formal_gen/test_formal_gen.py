@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import hdl_bag
+from hdl_bag.flows.formal import job_tasks
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
@@ -16,9 +17,18 @@ from hdl_bag.formal_gen import (
     ahb_ports,
     axi4_ports,
     checkers,
+    formal_jobs,
     props_module,
 )
-from hdl_bag.formal_gen.units import ROUTE_CYCLES, ROUTE_DEPTH, SCOREBOARD, id_prefixes
+from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
+from hdl_bag.formal_gen.units import (
+    ROUTE_CYCLES,
+    ROUTE_CYCLES_PER_FIFO,
+    ROUTE_DEPTH,
+    ROUTE_DEPTH_LITE_FIFO,
+    SCOREBOARD,
+    id_prefixes,
+)
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import load
@@ -156,11 +166,15 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     covered = set(re.findall(r"reset_mid_(\w+): cover", text))
     assert asserted and covered <= set(asserted)
     assert covered, f"{config.stem}: no cover at all"
-    # And every checked protocol port has a cover of its own.
+    # And every checked protocol port has a cover of its own: in the protocol job, or in its
+    # fabric's route job (D90).
     spec = load(config)
     protocol = tmp_path / "formal" / f"{spec.project.name}_protocol.sv"
     if protocol.is_file():
-        ports = set(re.findall(r"proto_\w+?_(\w+): cover", protocol.read_text(encoding="utf-8")))
+        texts = [protocol, *sorted((tmp_path / "formal").glob(f"{spec.project.name}_route_*.sv"))]
+        found_covers = r"proto_\w+?_(\w+): cover"
+        ports = {p for f in texts
+                 for p in re.findall(found_covers, f.read_text(encoding="utf-8"))}  # fmt: skip
         netlist = build_netlist(spec)
         own = [*axi4_ports(netlist), *ahb_ports(netlist)]
         found = {c.port for c in checkers(spec, netlist)} | {b.name for b in own}
@@ -168,6 +182,21 @@ def test_every_design_checks_something_and_covers_each_check(tmp_path: Path,
     # Step registers come from formal/bag_step.v: under yosys-slang a register on a net
     # marked (* gclk *) is clocked by a free net, not the solver's step (PR 1's bug).
     assert "gclk" not in text and "always_ff @(posedge bag_step)" not in text
+
+
+@pytest.mark.parametrize("config", CONFIGS, ids=lambda c: c.stem)
+def test_formal_jobs_names_every_generated_job_and_its_tasks(tmp_path: Path,
+                                                             config: Path) -> None:  # fmt: skip
+    """The formal corpus (D76) lists its tests from formal_jobs, without generating: it must
+    name exactly the jobs generate writes, each with its tasks. A user-supplied fabric gets
+    none (D8)."""
+    spec = load(config)
+    out = generate(spec, tmp_path, config.parent)
+    found = {Path(rel).stem.removeprefix(f"{spec.project.name}_"):
+             tuple(t.removeprefix(f"{Path(rel).stem}_") for t in job_tasks(tmp_path / rel))
+             for rel in out.formal}  # fmt: skip
+    assert dict(formal_jobs(spec, build_netlist(spec))) == found
+    assert bool(found) is not _opaque(config)
 
 
 @pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
@@ -488,12 +517,14 @@ def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> 
 
 def test_the_protocol_bmc_runs_on_bitwuzla_and_everything_else_on_yices(tmp_path: Path) -> None:
     """D67: yices could not reach depth 16 on axi_xbar_rules's protocol bmc; bitwuzla can.
-    Its cover task, where bitwuzla was slower, and the reset job keep yices."""
+    Its cover tasks (one per port, D79), where bitwuzla was slower, and the reset job keep
+    yices."""
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path, P3)
     formal = tmp_path / "formal"
     assert (
-        "[engines]\nbmc: smtbmc bitwuzla\ncover: smtbmc yices\n"
-        in (formal / "axi_xbar_rules_protocol.sby").read_text()
+        "[engines]\nbmc: smtbmc bitwuzla\ncover_cpu: smtbmc yices\ncover_dbg: smtbmc yices\n"
+        "cover_dma: smtbmc yices\ncover_mem: smtbmc yices\ncover_regs: smtbmc yices\n"
+        "cover_rom: smtbmc yices\n" in (formal / "axi_xbar_rules_protocol.sby").read_text()
     )
     assert "[engines]\nsmtbmc yices\n" in (formal / "axi_xbar_rules_reset.sby").read_text()
 
@@ -591,11 +622,217 @@ def test_an_axi4_slave_nothing_reaches_gets_neither_access(
     assert "proto_no_read_ddr0: assert (!(ddr0_axi_arvalid));\n" in text
 
 
-def test_the_protocol_covers_run_at_the_bmc_depth(tmp_path: Path) -> None:
-    """So each cover reached is a state the bounded check explored."""
-    generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path, P2)
-    job = (tmp_path / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
-    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover: mode cover\ncover: depth {PROTOCOL_DEPTH}\n" in job
+def test_a_master_behind_an_aw_spill_never_gets_its_data_taken_first(tmp_path: Path) -> None:
+    """D81, nightly 43207958073: proto_w_first was unreached on 7 AXI4 masters wired straight
+    into a bag_axi_xbar with LatencyMode CUT_SLV_AX or CUT_ALL_AX. axi_demux_simple routes W
+    once AWVALID is presented, so a bare crossbar port can take W first (axi_xbar_pow2,
+    NO_LATENCY, reached it); behind an AW spill register the port's AW waits only while the
+    register holds earlier AWs, whose data comes first. There the bmc asserts W never comes
+    before its AW instead. A CDC, FIFO or cut in front takes W on its own channel."""
+    xr = _protocol(tmp_path / "xr", P3 / "axi_xbar_rules.ir.yaml")  # CUT_ALL_AX
+    for m in ("cpu", "dbg", "dma"):
+        assert (f"  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+                f"proto_no_w_first_{m}: assert (!bag_{m}_w_first);\n") in xr  # fmt: skip
+        assert f"proto_w_first_{m}: cover" not in xr
+        assert (f"  // proto_no_w_first_{m}: no cover, {m} enters xbar's AW spill register "
+                "(CUT_ALL_AX)\n") in xr  # fmt: skip
+    assert "proto_w_first_a: cover" in _protocol(tmp_path / "xp", P3 / "axi_xbar_pow2.ir.yaml")
+    ad = _protocol(tmp_path / "ad", P3 / "axi_adapters.ir.yaml")  # CUT_SLV_AX, CDC and FIFO first
+    assert "proto_w_first_cpu: cover" in ad and "proto_w_first_dma: cover" in ad
+    assert "proto_no_w_first" not in ad
+
+
+def test_a_master_through_a_one_at_a_time_lite_converter_opens_one_read(tmp_path: Path) -> None:
+    """D80 (owner: keep the RTL, document the limit): mixed_lite_shared's dbg enters
+    bag_axi_to_axil, PULP axi_to_axi_lite with MaxTrans 2, whose burst splitter's
+    axi_demux_simple has 1-bit ID counters (idx_width(2)), full at 1, any full blocking every
+    ID: one read and one write at a time, fewer than configured. proto_same_id_dbg was
+    unreached (nightly 43207958073); the bmc asserts the limit instead."""
+    ls = _protocol(tmp_path, P3 / "mixed_lite_shared.ir.yaml")
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_same_id_dbg: assert (!bag_dbg_same_id);\n") in ls  # fmt: skip
+    assert "proto_same_id_dbg: cover" not in ls
+    assert ("  // proto_no_same_id_dbg: no cover, dbg enters dbg_pc_2_cfg, PULP axi_to_axi_lite "
+            "with MaxTrans 2: one read at a time (D80)\n") in ls  # fmt: skip
+    # Nor can four reads or four unanswered writes be open (a local cover run, D82, left
+    # proto_full_dbg unreached).
+    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+            "proto_no_full_dbg: assert (!bag_dbg_full);\n") in ls  # fmt: skip
+    assert "proto_full_dbg: cover" not in ls
+    assert "proto_w_first_dbg: cover" in ls
+
+
+def test_a_one_at_a_time_lite_converter_further_along_still_limits_the_port(
+    tmp_path: Path,
+) -> None:
+    """D91 (owner, 2026-11-14, extends D80): axil_adapters' cpu goes through bag_dw (64 to 32
+    bits) and then bag_pc to AXI4-Lite (PULP axi_to_axi_lite, MaxTrans 2) before its fabric;
+    proto_same_id_cpu and proto_full_cpu went unreached for 3 hours (run 43381018017). Such a
+    converter anywhere between a master and its fabric limits the port as when it is first.
+    proto_w_first_cpu too: a downsizing bag_axi_dw holds W until it has taken the AW."""
+    aa = _protocol(tmp_path, P3 / "axil_adapters.ir.yaml")
+    for e in ("same_id", "full", "w_first"):
+        assert f"proto_no_{e}_cpu: assert (!bag_cpu_{e});" in aa, e
+        assert f"proto_{e}_cpu: cover" not in aa, e
+    assert ("  // proto_no_same_id_cpu: no cover, cpu reaches cpu_pc_2_cfg, PULP "
+            "axi_to_axi_lite with MaxTrans 2: one read at a time (D80, D91)\n") in aa  # fmt: skip
+    assert ("  // proto_no_w_first_cpu: no cover, cpu enters cpu_dw_2_cfg, a downsizing "
+            "bag_axi_dw: W waits for its AW (D91)\n") in aa  # fmt: skip
+    assert "proto_multi_write_cpu: cover" in aa
+
+
+def test_an_apb_port_behind_a_crossing_bridge_is_covered_by_its_fabric_unit(
+    tmp_path: Path,
+) -> None:
+    """D90 (owner, 2026-11-14): demo_ss's gpio0, spi0, timer0 and uart0 cover tasks reached
+    none of their covers by step 27 in 3 hours (run 43381018017): cpu0 reaches them through a
+    cut, the AXI crossbar and an AXI4-to-APB bridge across clock domains. A slave port of an
+    APB fabric whose masters all come through bridges between clock domains gets its protocol
+    covers in that fabric's route unit, which holds the same checker on the same port alone;
+    the protocol job keeps its checker (the bmc) and drops its cover task. aon_apb's ports,
+    behind a bridge within one domain, keep theirs."""
+    ds = _protocol(tmp_path, GOLDEN)
+    job = (tmp_path / "formal" / "demo_ss_protocol.sby").read_text(encoding="utf-8")
+    route = (tmp_path / "formal" / "demo_ss_route_periph_apb.sv").read_text(encoding="utf-8")
+    for p in ("gpio0", "spi0", "timer0", "uart0"):
+        assert f"\ncover_{p}\n" not in job, p
+        assert f"proto_read_{p}: cover" not in ds, p
+        assert f"  // {p}: covers in route_periph_apb (D90)\n" in ds, p
+        # At the clock edge, out of reset, as every route property.
+        assert re.search(rf"\n  always @\(posedge \w+\) proto_read_{p}: cover \(bag_live_D_PER "
+                         rf"&& {p}_apb_psel && ", route), p  # fmt: skip
+        assert f"BAG_IDLE_{p}" not in ds, p
+    assert "\ncover_wdt0\n" in job and "proto_read_wdt0: cover" in ds
+    assert "proto_read_wdt0" not in route
+
+
+def test_a_cover_task_holds_the_other_masters_idle(tmp_path: Path) -> None:
+    """D82 (owner, 2026-11-13): 33 per-port cover tasks ran past an hour, each holding the
+    whole design. A master port's cover task assumes every other master idle; a slave port's
+    keeps, for each access the IR sends it, only the nearest master making it (ties by name).
+    A trace with idle masters is legal in the full design, so a cover it reaches still counts;
+    the bmc keeps every master free."""
+    xr = _protocol(tmp_path, P3 / "axi_xbar_rules.ir.yaml")
+    # Each block ends on a line of its own (the last one once ran into `endmodule`).
+    assert "`endif\nendmodule\n" in xr and "`endifendmodule" not in xr
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", xr, re.S))
+    idle = {p: sorted(re.findall(r"bag_idle_(\w+)_for_\w+: assume", b)) for p, b in blocks.items()}
+    # Master ports enter the crossbar's arbiter, so each keeps one competitor (D86).
+    assert idle == {"cpu": ["dma"], "dbg": ["dma"], "dma": ["dbg"],
+                    "mem": ["dbg", "dma"], "regs": ["dbg"], "rom": ["dma"]}  # fmt: skip
+    # regs: cpu only reads it, so dma (the one writer) stays too; rom: cpu reads it (ahead
+    # of dbg by name), dbg is its only writer.
+    assert ("  always_comb bag_idle_dma_for_cpu: assume (!(dma_axi_awvalid || dma_axi_wvalid "
+            "|| dma_axi_arvalid));\n") in xr  # fmt: skip
+    job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
+    assert "\ncover_rom: read_slang -D BAG_COVER_rom -D BAG_IDLE_rom --extern-modules " in job
+    assert "\nbmc: read_slang --extern-modules " in job
+
+
+def test_a_master_entering_an_arbiter_keeps_one_competitor_in_its_cover_task(
+    tmp_path: Path,
+) -> None:
+    """D86 (owner, 2026-11-13, amends D82): on the in-house shared bus a master's AW waits,
+    so its W can go first, only while another master holds the bus; with every other master
+    idle, axi_shared_fixed's proto_w_first_m0..m2 went unreached (nightly 43328525704). A
+    master port whose first component is a fabric with more than one master keeps the
+    nearest competing master free (path cost, then name). One master on its fabric: none."""
+    sf = _protocol(tmp_path / "f", P3 / "axi_shared_fixed.ir.yaml")
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", sf, re.S))
+    idle = {p: sorted(re.findall(r"bag_idle_(\w+)_for_\w+: assume", b)) for p, b in blocks.items()}
+    assert {p: idle[p] for p in ("m0", "m1", "m2")} == {"m0": ["m2"], "m1": ["m2"], "m2": ["m1"]}
+    assert "  // D82: m0's cover task; m0, m1 active, the other masters idle\n" in sf
+    ds = _protocol(tmp_path / "d", GOLDEN)
+    blocks = dict(re.findall(r"`ifdef BAG_IDLE_(\w+)\n(.*?)`endif", ds, re.S))
+    # mcu0 is the AHB-Lite bus's one master; cpu0 enters a register slice first.
+    assert "bag_idle_cpu0_for_mcu0" in blocks["mcu0"] and "bag_idle_dbg0_for_cpu0" in blocks["cpu0"]
+
+
+def test_a_port_s_covers_split_into_a_write_task_and_a_read_task(tmp_path: Path) -> None:
+    """D92 (owner, 2026-11-14): the deep cover tasks of nightly 43533410868 lacked only round
+    trips (data back, an error, a response stall), and a group of them needs the whole trip,
+    so a split by kind of cover alone saves nothing. Each port with covers both ways carries a
+    write and a read variant: BAG_WRITES_<port> keeps its write covers and holds its active
+    masters to writes (a master kept only for reads goes idle), BAG_READS_<port> the reverse.
+    A trace of one direction is legal in the full design, so a cover it reaches still counts.
+    The generated tasks define neither; the corpus test runs the measured ones split."""
+    ad = _protocol(tmp_path / "a", P3 / "axi_adapters.ir.yaml")
+    assert ("`ifdef BAG_COVER_ddr\n`ifndef BAG_READS_ddr\n"
+            "  always_comb proto_aw_stall_ddr: cover (ddr_axi_awvalid && !ddr_axi_awready);\n"
+            "  always_comb proto_w_stall_ddr: cover (ddr_axi_wvalid && !ddr_axi_wready);\n"
+            "  always_comb proto_write_ddr: cover (ddr_axi_wvalid && ddr_axi_wready "
+            "&& ddr_axi_wlast);\n"
+            "  always_comb proto_b_error_ddr: cover (ddr_axi_bvalid && ddr_axi_bready "
+            "&& ddr_axi_bresp[1]);\n"
+            "`endif\n`ifndef BAG_WRITES_ddr\n"
+            "  always_comb proto_ar_stall_ddr: cover (ddr_axi_arvalid && !ddr_axi_arready);\n"
+            "  always_comb proto_read_ddr: cover (ddr_axi_rvalid && ddr_axi_rready "
+            "&& ddr_axi_rlast);\n"
+            "  always_comb proto_r_error_ddr: cover (ddr_axi_rvalid && ddr_axi_rready "
+            "&& ddr_axi_rresp[1]);\n"
+            "`endif\n`endif\n") in ad  # fmt: skip
+    assert ("`ifdef BAG_WRITES_ddr\n"
+            "  // D92: ddr's write cover task; dma active, making no reads\n"
+            "  always_comb bag_no_read_dma_for_ddr: assume (!(dma_axi_arvalid));\n"
+            "`endif\n\n`ifdef BAG_READS_ddr\n"
+            "  // D92: ddr's read cover task; dma active, making no writes\n"
+            "  always_comb bag_no_write_dma_for_ddr: assume (!(dma_axi_awvalid "
+            "|| dma_axi_wvalid));\n`endif\n") in ad  # fmt: skip
+    # A master port: the table's covers go with the writes, two reads of one ID with reads.
+    cpu = re.search(r"`ifdef BAG_COVER_cpu\n(.*?)`endif\n`endif\n", ad, re.S)
+    assert cpu
+    groups = re.findall(r"`ifndef BAG_(\w+)S_cpu\n(.*?)`endif", cpu[0], re.S)
+    kinds = {g: re.findall(r"proto_(\w+)_cpu: cover", b) for g, b in groups}
+    assert kinds == {"READ": ["b_stall", "write", "multi_write", "w_first", "full"],
+                     "WRITE": ["r_stall", "read", "same_id"]}  # fmt: skip
+    # regs: cpu reads it and dma writes it, so each task keeps only the one it needs.
+    xr = _protocol(tmp_path / "x", P3 / "axi_xbar_rules.ir.yaml")
+    writes = re.search(r"`ifdef BAG_WRITES_regs\n(.*?)`endif", xr, re.S)
+    reads = re.search(r"`ifdef BAG_READS_regs\n(.*?)`endif", xr, re.S)
+    assert writes and reads
+    assert re.findall(r"always_comb (\w+): assume", writes[1]) == [
+        "bag_idle_cpu_for_regs_writes",
+        "bag_no_read_dma_for_regs",
+    ]
+    assert re.findall(r"always_comb (\w+): assume", reads[1]) == [
+        "bag_idle_dma_for_regs_reads",
+        "bag_no_write_cpu_for_regs",
+    ]
+    # A port the IR only reads has nothing to split.
+    rules = _protocol(tmp_path / "r", P2 / "apb4_rules.ir.yaml")
+    assert "BAG_WRITES_ro0" not in rules and "BAG_READS_ro0" not in rules
+    assert "`ifndef BAG_READS_dual0\n" in rules
+
+
+def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
+    """D77, D79: the bmc runs at PROTOCOL_DEPTH; each checked port's covers run in a task of
+    their own, at its path depth (never below 16), reading only that port's covers: its macro
+    keeps BAG's, and chformal drops those inside the other ports' ZipCPU checkers. On
+    bridges_inhouse (one domain, one clock) spi sits behind three bridges from the nearest
+    master that reaches it: 8 edges for one component and 4 for each of the other four."""
+    assert (PROTOCOL_DEPTH, PATH_EDGES, PATH_EDGES_PER_HOP) == (16, 8, 4)
+    generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path / "a", P2)
+    job = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
+    assert "[tasks]\nbmc\ncover_cpu\ncover_dual0\ncover_ro0\ncover_sec0\ncover_wo0\n\n" in job
+    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert "\ncover_ro0: read_slang -D BAG_COVER_ro0 -D BAG_IDLE_ro0 --extern-modules " in job
+    assert "\nbmc: read_slang --extern-modules " in job
+    assert ("cover_cpu: chformal -remove -cover bag_apb4_rules_fapb_master_dual0 "
+            "bag_apb4_rules_fapb_master_ro0 bag_apb4_rules_fapb_master_sec0 "
+            "bag_apb4_rules_fapb_master_wo0\n") in job  # fmt: skip
+    props = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sv").read_text(encoding="utf-8")
+    assert "`ifdef BAG_COVER_ro0\n  always_comb proto_read_ro0: cover (" in props
+    # Every cover sits inside its port's macro, and nothing else does.
+    # (D92: a port with covers both ways holds them in a write group and a read group.)
+    inside = re.findall(r"`ifdef BAG_COVER_\w+\n(.*?)`endif\n(?!`)", props, re.S)
+    inside = [re.sub(r"`(ifndef BAG_(WRITE|READ)S_\w+|endif)\n", "", b) for b in inside]
+    assert inside and all(": cover (" in line for b in inside for line in b.splitlines())
+    assert props.count(": cover (") == sum(b.count(": cover (") for b in inside)
+    generate(load(P3 / "bridges_inhouse.ir.yaml"), tmp_path / "b", P3)
+    job = (tmp_path / "b" / "formal" / "bridges_inhouse_protocol.sby").read_text(encoding="utf-8")
+    assert "cover_spi: mode cover\ncover_spi: depth 24\n" in job
+    assert "cover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert f"bmc: mode bmc\nbmc: depth {PROTOCOL_DEPTH}\n" in job
 
 
 def test_the_decode_harness_checks_the_package_decoder_against_the_ir(tmp_path: Path) -> None:
@@ -717,6 +954,54 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
         assert want in job, unit
 
 
+def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_two_more_edges(tmp_path: Path) -> None:
+    """Nightly 43207958073: mixed_lite_shared's br_ahb (AXI4-Lite to AHB-Lite, same width,
+    FIFO depth 2) left its upstream B handshake unreached in 8 edges; at 16 it came at step 9.
+    The bridge's FIFO holds the request and the response an edge each, so a single-domain
+    bridge with a FIFO gets ROUTE_CYCLES_PER_FIFO more edges. br_per, without one, keeps 8."""
+    assert ROUTE_CYCLES_PER_FIFO == 2
+    generate(load(P3 / "mixed_lite_shared.ir.yaml"), tmp_path / "ls", P3)
+    formal = tmp_path / "ls" / "formal"
+    for unit, depth in (("br_ahb", 10), ("br_per", 8)):
+        job = (formal / f"mixed_lite_shared_route_{unit}.sby").read_text(encoding="utf-8")
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        assert want in job, unit
+
+
+def test_an_axi4_lite_bridge_with_a_fifo_across_domains_gets_34_steps(tmp_path: Path) -> None:
+    """Nightly 43047322627 and 43328525704: bridges_pulp_cdc's br_per (AXI4-Lite 64 bits to
+    APB4 32 across domains, FIFO depth 2) left its upstream B and R handshakes unreached at
+    24 steps; at 44 they came at steps 33 (local run, 16 s). mixed_narrow_apb's br_c8 (the
+    same with 8-bit APB) also reached its last cover at 33. Such a unit gets at least
+    ROUTE_DEPTH_LITE_FIFO steps; AXI4 bridges with a FIFO (bridges_pulp's br_per, all covers
+    at 24) and AXI4-Lite ones without (mixed_cdc_chain's br_per, 21) keep their depths."""
+    assert ROUTE_DEPTH_LITE_FIFO == 34
+    cases = (("bridges_pulp_cdc", "br_per", 34), ("mixed_narrow_apb", "br_c8", 36),
+             ("bridges_pulp", "br_per", 24), ("mixed_cdc_chain", "br_per", 24))  # fmt: skip
+    for config, unit, depth in cases:
+        generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
+            encoding="utf-8"
+        )
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        assert want in job, (config, unit)
+
+
+def test_a_design_in_one_clock_domain_checks_its_ports_on_one_clock(tmp_path: Path) -> None:
+    """Formal corpus run 43047322627: with free clocks the protocol job's 16 steps were about 8
+    clock edges, and single-domain designs (mixed_ahb_secure, mixed_lite_shared, bridges_inhouse
+    and others) left covers unreached. A design in one domain has no clock ratio to explore, so
+    its protocol job runs on one clock, as a single-domain route job does: 16 steps, 16 edges.
+    A design with several domains keeps free clocks."""
+    generate(load(P3 / "mixed_ahb_secure.ir.yaml"), tmp_path / "one", P3)
+    one = tmp_path / "one" / "formal" / "mixed_ahb_secure_protocol.sby"
+    job = one.read_text(encoding="utf-8")
+    assert "cover_tcm: depth 16\nmulticlock off\n" in job
+    generate(load(P3 / "axil_adapters.ir.yaml"), tmp_path / "two", P3)
+    job = (tmp_path / "two" / "formal" / "axil_adapters_protocol.sby").read_text(encoding="utf-8")
+    assert "cover_mem: depth 48\nmulticlock on\n" in job
+
+
 def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
     tmp_path: Path,
 ) -> None:
@@ -739,6 +1024,34 @@ def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
     per = (formal / "bridges_pulp_route_br_per.sv").read_text(encoding="utf-8")
     assert "br_per_p_in_window: assert (bag_busy && ((br_per_2_per_apb4_paddr ^ " in per
     assert "bag_up_req" not in per
+
+
+def test_a_bridge_route_job_sees_only_the_addresses_its_upstream_fabric_sends_it(
+    tmp_path: Path,
+) -> None:
+    """Formal corpus run 43047322627: bridges_inhouse_cdc's br_aon (AHB-Lite, 24-bit address,
+    to AXI4, 32-bit) failed br_aon_aw_in_window for upstream address 0x07_5000, which the ahb
+    fabric never sends it (br_aon's region is 0x4010_0000 to 0x4010_FFFF, the fabric's
+    address 0 being 0x4000_0000). The bridge subtracts its offset at 24 bits and the route
+    model's translation wraps at 32, so they differ only outside the window. The environment
+    presents only addresses in the bridge's regions on its upstream fabric; a bridge that is a
+    default slave there would take misses at any address and gets no such assumption."""
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path, P3)
+    text = (tmp_path / "formal" / "bridges_inhouse_cdc_route_br_aon.sv").read_text(encoding="utf-8")
+    assert ("  always_comb if (ahb_2_br_aon_ahb_hsel && ahb_2_br_aon_ahb_htrans[1]) assume "
+            "((ahb_2_br_aon_ahb_haddr >= 24'h10_0000 && ahb_2_br_aon_ahb_haddr <= 24'h10_FFFF));\n"
+            ) in text  # fmt: skip
+    spec = load(P3 / "bridges_inhouse_cdc.ir.yaml")
+    fab = next(f for f in spec.fabrics if f.name == "ahb")
+    decode = tuple(d.model_copy(update={"default_slave": "br_aon"}) for d in fab.decode)
+    fabrics = tuple(
+        f.model_copy(update={"decode": decode}) if f is fab else f for f in spec.fabrics
+    )
+    generate(spec.model_copy(update={"fabrics": fabrics}), tmp_path / "ds", P3)
+    text = (tmp_path / "ds" / "formal" / "bridges_inhouse_cdc_route_br_aon.sv").read_text(
+        encoding="utf-8")  # fmt: skip
+    assert "assume ((ahb_2_br_aon_ahb_haddr >=" not in text
+    assert "br_aon_aw_in_window: assert" in text
 
 
 def test_an_axi4_read_is_outstanding_until_its_last_beat(tmp_path: Path) -> None:

@@ -14,8 +14,20 @@ on:
       suite:
         description: EDA tests to run
         type: choice
-        options: [full, smoke]
+        options: [full, smoke, nightly, deep]
         default: full
+      select:
+        description: Only tests whose names match this pytest -k expression, on one shard
+        type: string
+        default: ""
+      select_shards:
+        description: With select, spread the matching tests over this many jobs (1 if empty)
+        type: string
+        default: ""
+      bmc_engine:
+        description: Run the formal corpus's protocol bmc tasks on this SBY engine (D84)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -100,7 +112,11 @@ jobs:
     # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold
     # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
     # label is added). The full list runs on every push to main and on demand, without the
-    # deep tests (D74); the nightly runs everything, with longer shard limits.
+    # deep tests (D74); the nightly runs everything (the formal corpus's deep tasks too, D76),
+    # on 20 jobs of 5 hours, two tests at a time each (four solvers on a 4-core runner took
+    # about twice as long). Dispatching suite=nightly runs that set on a branch;
+    # suite=deep runs only the deep tests, two at a time per job with a 3 h limit each, to
+    # measure what they cost without solvers competing for cores.
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: >-
@@ -108,17 +124,41 @@ jobs:
               && !contains(github.event.pull_request.labels.*.name, 'full-eda'))
              || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke'))
             && 'eda and smoke'
-            || (github.event_name == 'schedule' && 'eda' || 'eda and not deep') }}
-      timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 30 }}
-      save-cache: ${{ github.event_name != 'schedule' }}
+            || ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 'eda and deep')
+            || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))
+                && ((github.event_name == 'workflow_dispatch' && inputs.select != '') && 'eda' || 'eda and not alone') || 'eda and not deep') }}
+      timeout-minutes: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && 300 || 30 }}
+      keyword: ${{ github.event_name == 'workflow_dispatch' && inputs.select || '' }}
+      bmc-engine: ${{ github.event_name == 'workflow_dispatch' && inputs.bmc_engine || '' }}
+      shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.select != '') && (inputs.select_shards != '' && fromJSON(inputs.select_shards) || 1) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')) && 20 || 4) }}
+      workers: ${{ ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) && '2' || 'auto' }}
+      deep-timeout: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 10800 || 7200 }}
+      save-cache: ${{ !((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly'))) }}
+    permissions:
+      contents: read
+      packages: read
+
+  eda-alone:
+    # D93 (owner, 2026-11-14): the formal corpus's ALONE tasks (tests/formal_gen/test_formal_corpus.py), one per
+    # runner with their 4 h SBY limit, so no other solver competes for the runner's memory; the nightly's
+    # two-at-a-time shards leave them out. A dispatch that selects tests by name runs them there instead.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly' && inputs.select == '')
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: eda and alone
+      shards: 11
+      workers: '1'
+      timeout-minutes: 300
+      save-cache: false
     permissions:
       contents: read
       packages: read
 
   eda:
-    # The one check to require: passes only when every shard did.
-    needs: eda-shard
+    # The one check to require: passes only when every shard did (and the alone jobs, when they ran).
+    needs: [eda-shard, eda-alone]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - run: test "${{ needs.eda-shard.result }}" = success
+      - run: test "${{ needs.eda-alone.result }}" = success || test "${{ needs.eda-alone.result }}" = skipped

@@ -16,11 +16,13 @@ from hdl_bag.cli import main
 from hdl_bag.flows.base import Finding, Report
 from hdl_bag.flows.formal import (
     UNSAT,
+    SbyTask,
     SymbiYosys,
     bounded_notes,
     job_sources,
     job_tasks,
     prove,
+    reached_covers,
     run_formal,
     run_sby,
     sby_job,
@@ -189,6 +191,34 @@ def test_sby_job_has_a_task_and_a_depth_per_mode() -> None:
     )
 
 
+def test_sby_job_tasks_can_each_read_their_own_macros_and_trim_after_prep() -> None:
+    """D77: a protocol job has a cover task per port, each at its own depth, reading the
+    property file with that port's macro (its covers) and removing the covers of the other
+    ports' vendored checkers after prep."""
+    tasks = [SbyTask("bmc", "bmc", 20),
+             SbyTask("cover_a", "cover", 16, defines=("BAG_COVER_a",)),
+             SbyTask("cover_b", "cover", 24, defines=("BAG_COVER_b",),
+                     after=("chformal -remove -cover chk_a",))]  # fmt: skip
+    text = sby_job(top="t", files=["rtl/a.sv", "p.sv"], incdirs=[], tasks=tasks,
+                   copy=[("p.sv", "p.sv")], engine="bmc: smtbmc bitwuzla\ncover_a: smtbmc yices\n"
+                   "cover_b: smtbmc yices", multiclock=False)  # fmt: skip
+    assert text == (
+        "[tasks]\nbmc\ncover_a\ncover_b\n\n"
+        "[options]\nbmc: mode bmc\nbmc: depth 20\ncover_a: mode cover\ncover_a: depth 16\n"
+        "cover_b: mode cover\ncover_b: depth 24\nmulticlock off\n\n"
+        "[engines]\nbmc: smtbmc bitwuzla\ncover_a: smtbmc yices\ncover_b: smtbmc yices\n\n"
+        "[script]\nplugin -i slang\n"
+        "bmc: read_slang --top t rtl/a.sv p.sv\n"
+        "cover_a: read_slang -D BAG_COVER_a --top t rtl/a.sv p.sv\n"
+        "cover_b: read_slang -D BAG_COVER_b --top t rtl/a.sv p.sv\n"
+        "prep -top t\ncover_b: chformal -remove -cover chk_a\n\n"
+        "[files]\np.sv\n"
+    )
+    with pytest.raises(ValueError) as exc:
+        sby_job(top="t", files=[], incdirs=[], depths={"bmc": 4}, tasks=tasks, copy=[])
+    assert str(exc.value) == "formal job takes depths or tasks, not both"
+
+
 @pytest.mark.parametrize(
     ("depths", "message"),
     [({}, "formal modes must be some of bmc, prove, cover: none"),
@@ -282,6 +312,29 @@ def test_another_sby_version_is_noted(tmp_path: Path, monkeypatch: pytest.Monkey
     assert report.ok and report.notes == ("sby 0.70 is not the pinned v0.69",)
 
 
+def test_a_timed_out_cover_task_names_the_covers_it_reached() -> None:
+    """D85 (owner, 2026-11-13): a cover task that runs out of time must say which covers it
+    reached, and at which step, so the ones still missing can be told apart (the nightly's
+    timeout gave only the last step)."""
+    log = (DATA / "cover_unreached.log").read_text(encoding="utf-8")
+    got = reached_covers(log)
+    assert len(got) == 11
+    assert got[:2] == [("active_cpu_axi_bvalid", 2), ("reset_again_0", 2)]
+    assert got[-1][1] == 19
+    assert reached_covers("SBY 10:00:00 [x] engine_0: ##   0:00:00  Checking step 3..\n") == []
+    zip_ = (
+        "SBY  5:54:01 [x] engine_0: ##   0:00:07  Reached cover statement in step 33 at "
+        "top.u_chk: zipcpu/faxil_slave.v:764.4-764.41 (_witness_.check_cover_zipcpu_7)\n"
+    )
+    assert reached_covers(zip_) == [("zipcpu/faxil_slave.v:764", 33)]
+    # Nightly 43381018017 showed one as ":": a location set apart by spaces is still found.
+    spaced = (
+        "SBY 1:00:00 [x] engine_0: ##   0:00:07  Reached cover statement in step 20 at "
+        "top.u_props.u_pmu : zipcpu/faxil_master.v:801.4-801.40\n"
+    )
+    assert reached_covers(spaced) == [("zipcpu/faxil_master.v:801", 20)]
+
+
 @posix
 def test_a_timeout_stops_sby_and_everything_it_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -290,11 +343,14 @@ def test_a_timeout_stops_sby_and_everything_it_started(
     them running."""
     pid_file = tmp_path / "child.pid"
     job = _fake_sby(tmp_path, monkeypatch, "echo 'SBY 10:00:00 [x_prove] engine_0: ##   0:00:00  "
+                    "Reached cover statement in step 2 at top: u_p.seen_a'\n"
+                    "echo 'SBY 10:00:00 [x_prove] engine_0: ##   0:00:00  "
                     f"Checking assertions in step 3..'\nsleep 300 &\necho $! > {pid_file}\nwait\n")  # fmt: skip
     report = run_sby(job, tmp_path, timeout=2)
     assert [(f.rule, f.message) for f in report.findings] == [
         ("FORMAL-TIMEOUT", "x: no verdict within 2 s, reached step 3 (allow more with --timeout)")
     ]
+    assert "x: 1 cover reached before the time limit: seen_a (step 2)" in report.notes
     child = int(pid_file.read_text())
     for _ in range(50):  # SIGKILL is delivered asynchronously
         try:
@@ -310,6 +366,34 @@ def test_a_timeout_stops_sby_and_everything_it_started(
         time.sleep(0.1)
     else:
         pytest.fail(f"sby's child {child} is still running after the timeout")
+
+
+@posix
+def test_one_task_of_a_job_runs_on_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The formal corpus runs each task of a job as a test of its own (D76), so SBY is asked
+    for that task only, and only its verdict is expected."""
+    args = tmp_path / "args"
+    job = _fake_sby(tmp_path, monkeypatch, f'echo "$@" > {args}\n'
+                    "echo 'SBY 10:00:01 [x_cover] DONE (PASS, rc=0)'\n")  # fmt: skip
+    report = run_sby(job, tmp_path, task="cover")
+    assert report.ok, report.format()
+    assert args.read_text(encoding="utf-8") == "-f x.sby cover\n"
+
+
+def test_a_task_the_job_lacks_is_a_clear_error(tmp_path: Path) -> None:
+    job = tmp_path / "x.sby"
+    job.write_text(_TASKS, encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        run_sby(job, tmp_path, task="bmc")
+    assert str(exc.value) == f"{job}: no task bmc (it has prove, cover)"
+
+
+def test_a_bmc_task_on_its_own_gets_only_its_note(tmp_path: Path) -> None:
+    job = tmp_path / "x.sby"
+    job.write_text("[tasks]\nbmc\ncover\n\n[options]\nbmc: mode bmc\nbmc: depth 16\n"
+                   "cover: mode cover\ncover: depth 16\n\n[files]\n", encoding="utf-8")  # fmt: skip
+    assert bounded_notes(job, task="cover") == []
+    assert bounded_notes(job, task="bmc") == ["x_bmc: bounded check to depth 16 (bmc), not a proof"]
 
 
 # ---------------------------------------------------------------- CLI

@@ -27,6 +27,7 @@ import shutil
 import signal
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -50,6 +51,10 @@ _LOC: Final = re.compile(r"^(?P<file>.+?):(?P<line>\d+)\.\d+(?:-\d+\.\d+)?$")
 # SBY shortens a long summary in its log and names the file that holds all of it.
 _FULL: Final = re.compile(r"^summary: see (?P<path>\S+) for a complete summary$")
 _STEP: Final = re.compile(r"\bstep (?P<step>\d+)\b")
+_REACHED: Final = re.compile(
+    r"Reached cover statement in step (?P<step>\d+) at (?P<rest>.*)$", re.M
+)
+_SRC: Final = re.compile(r"(?P<file>[\w./-]+\.s?v):(?P<line>\d+)")
 UNSAT = "assumptions are unsatisfiable: the environment allows no trace, so nothing was checked"
 
 
@@ -193,9 +198,9 @@ def job_tasks(job: Path) -> list[str]:
     return tasks or [job.stem]
 
 
-def bounded_notes(job: Path) -> list[str]:
-    """For each bmc task of a job file, a note that it is a bounded check, not a proof: a pass
-    says no assertion fails within that many solver steps, nothing beyond."""
+def bounded_notes(job: Path, *, task: str | None = None) -> list[str]:
+    """For each bmc task of a job file (or TASK alone), a note that it is a bounded check, not
+    a proof: a pass says no assertion fails within that many solver steps, nothing beyond."""
     options: dict[str, dict[str, str]] = {}
     section = None
     for raw in job.read_text(encoding="utf-8").splitlines():
@@ -203,16 +208,33 @@ def bounded_notes(job: Path) -> list[str]:
         if line.startswith("["):
             section = line
         elif section == "[options]" and line and not line.startswith("#"):
-            task, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
+            owner, _, rest = line.rpartition(":") if ":" in line.split()[0] else ("", "", line)
             key, _, value = rest.strip().partition(" ")
-            options.setdefault(task.strip(), {})[key] = value.strip()
+            options.setdefault(owner.strip(), {})[key] = value.strip()
     out = []
-    for task, opts in sorted(options.items()):
+    for name_, opts in sorted(options.items()):
+        if task is not None and name_ != task:
+            continue
         mode = opts.get("mode", options.get("", {}).get("mode"))
         depth = opts.get("depth", options.get("", {}).get("depth", "?"))
         if mode == "bmc":
-            name = f"{job.stem}_{task}" if task else job.stem
+            name = f"{job.stem}_{name_}" if name_ else job.stem
             out.append(f"{name}: bounded check to depth {depth} (bmc), not a proof")
+    return out
+
+
+def reached_covers(output: str) -> list[tuple[str, int]]:
+    """The covers SBY OUTPUT (a task's log, maybe cut short) reports reached, each with its
+    step, in order (D85: a timed-out cover task names what it reached, so the covers still
+    missing can be told apart). A labelled cover shows its name; an unlabelled one (ZipCPU's)
+    its source file and line."""
+    out = []
+    for m in _REACHED.finditer(output):
+        rest = m["rest"].strip()
+        if src := _SRC.search(rest):
+            out.append((f"{src['file']}:{src['line']}", int(m["step"])))
+        else:
+            out.append((_short(rest.split()[-1].rstrip(":")), int(m["step"])))
     return out
 
 
@@ -226,12 +248,19 @@ def _kill_group(proc: subprocess.Popen[str]) -> None:
         killpg(proc.pid, getattr(signal, "SIGKILL", 9))  # SIGKILL is POSIX-only
 
 
-def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
-    """Run the SymbiYosys JOB (a .sby file) in its own directory; ROOT is what finding paths
-    are relative to. Each task's work directory is replaced (``sby -f``). Raises ValueError
-    if JOB does not exist."""
+def run_sby(job: Path, root: Path, *, timeout: float | None = None,
+            task: str | None = None) -> Report:  # fmt: skip
+    """Run the SymbiYosys JOB (a .sby file) in its own directory, or only its TASK; ROOT is
+    what finding paths are relative to. Each task's work directory is replaced (``sby -f``).
+    Raises ValueError if JOB does not exist or has no such task."""
     if not job.is_file():
         raise ValueError(f"{job}: no such SymbiYosys job (run bag generate again)")
+    expected = job_tasks(job)
+    if task is not None:
+        names = [t.removeprefix(f"{job.stem}_") for t in expected]
+        if task not in names:
+            raise ValueError(f"{job}: no task {task} (it has {', '.join(names)})")
+        expected = [f"{job.stem}_{task}"]
     backend = SymbiYosys()
     exe = shutil.which(backend.executable)
     if exe is None:
@@ -244,7 +273,8 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
     # SBY's own timeout option crashes in v0.69, so the time limit is enforced here. SBY
     # starts Yosys and the solvers as children, so the whole process group is stopped: on a
     # timeout, and on anything else that ends the wait (Ctrl-C included).
-    with subprocess.Popen([exe, "-f", job.name], cwd=job.parent, stdout=subprocess.PIPE,
+    args = [exe, "-f", job.name, *([task] if task else [])]
+    with subprocess.Popen(args, cwd=job.parent, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                           errors="replace", start_new_session=True) as proc:  # fmt: skip
         try:
@@ -260,8 +290,14 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
             steps = _STEP.findall(partial or "")
             reached = f", reached step {steps[-1]}" if steps else ""
             late = Finding(backend.name, "", 0, "FORMAL-TIMEOUT", "error",
-                           f"{job.stem}: no verdict within {timeout:g} s{reached} "
+                           f"{expected[0] if task else job.stem}: no verdict within "
+                           f"{timeout:g} s{reached} "
                            "(allow more with --timeout)")  # fmt: skip
+            if got := reached_covers(partial or ""):
+                listed = ", ".join(f"{n} (step {k})" for n, k in got)
+                notes = (*notes, f"{expected[0] if task else job.stem}: {len(got)} "
+                                 f"{'cover' if len(got) == 1 else 'covers'} reached before "
+                                 f"the time limit: {listed}")  # fmt: skip
             return Report("formal", (late,), (backend.name,), notes=notes)
     job_dir = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
     summaries = {}
@@ -270,40 +306,67 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None) -> Report:
         if m and (full := _FULL.match(m["msg"])) and (job.parent / full["path"]).is_file():
             summaries[m["job"]] = (job.parent / full["path"]).read_text(encoding="utf-8")
     findings = backend.parse(output, job_sources(job, root), "" if job_dir == "." else job_dir,
-                             summaries=summaries, expected=job_tasks(job))  # fmt: skip
+                             summaries=summaries, expected=expected)  # fmt: skip
     if proc.returncode != 0 and not findings:
         tail = output.strip().splitlines()[-1:] or ["no output"]
         message = f"{job.stem}: exit status {proc.returncode}: {tail[0]}"
         findings.append(Finding(backend.name, "", 0, "TOOL-FAILED", "error", message))
-    notes = (*notes, *bounded_notes(job))
+    notes = (*notes, *bounded_notes(job, task=task))
     return Report("formal", tuple(sorted(findings)), (backend.name,), notes=notes)
 
 
-def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str], depths: dict[Mode, int],
+@dataclass(frozen=True)
+class SbyTask:
+    """One task of a job: its name, mode and depth; the macros its read of the files defines,
+    and Yosys script it runs after prep (D77: a cover task per port)."""
+
+    name: str
+    mode: Mode
+    depth: int
+    defines: tuple[str, ...] = ()
+    after: tuple[str, ...] = ()
+
+
+def sby_job(*, top: str, files: Sequence[str], incdirs: Sequence[str],
+            depths: dict[Mode, int] | None = None, tasks: Sequence[SbyTask] = (),
             copy: Sequence[tuple[str, str]], engine: str = "smtbmc yices",
             multiclock: bool = True, prelude: Sequence[str] = ()) -> str:  # fmt: skip
-    """The text of a SymbiYosys job: one task per mode of DEPTHS, each at its depth. FILES are
+    """The text of a SymbiYosys job: one task per mode of DEPTHS, each at its depth, or the
+    TASKS given (named, each with its mode, depth, macros and script after prep). FILES are
     read with yosys-slang in compile order, as named in the work directory; COPY lists the
     (destination, source) pairs of its [files] section, sources relative to the job file.
     PRELUDE is Yosys script run before slang reads FILES (modules from Yosys's own frontend,
     which the slang-read files may then instantiate)."""
-    bad = sorted(set(depths) - set(MODES))
-    if bad or not depths:
-        raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {bad or 'none'}")
-    for mode, depth in depths.items():
-        if depth < 1:
-            raise ValueError(f"formal depth must be at least 1, not {depth} ({mode})")
+    if depths and tasks:
+        raise ValueError("formal job takes depths or tasks, not both")
+    if not tasks:
+        depths = depths or {}
+        bad = sorted(set(depths) - set(MODES))
+        if bad or not depths:
+            raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {bad or 'none'}")
+        tasks = [SbyTask(m, m, d) for m, d in depths.items()]
+    for t in tasks:
+        if t.mode not in MODES:
+            raise ValueError(f"formal modes must be some of {', '.join(MODES)}: {[t.mode]}")
+        if t.depth < 1:
+            raise ValueError(f"formal depth must be at least 1, not {t.depth} ({t.name})")
     extern = ["--extern-modules"] if prelude else []
     read = " ".join([*extern, *(f"-I {d}" for d in incdirs), "--top", top, *files])
     before = "".join(f"{line}\n" for line in prelude)
-    tasks = "".join(f"{m}\n" for m in depths)
-    options = "".join(f"{m}: mode {m}\n{m}: depth {d}\n" for m, d in depths.items())
+    if any(t.defines for t in tasks):
+        reads = "".join(f"{t.name}: read_slang {''.join(f'-D {d} ' for d in t.defines)}{read}\n"
+                        for t in tasks)  # fmt: skip
+    else:
+        reads = f"read_slang {read}\n"
+    after = "".join(f"{t.name}: {line}\n" for t in tasks for line in t.after)
+    names = "".join(f"{t.name}\n" for t in tasks)
+    options = "".join(f"{t.name}: mode {t.mode}\n{t.name}: depth {t.depth}\n" for t in tasks)
     copied = "".join(f"{dest} {src}\n" if src != dest else f"{dest}\n" for dest, src in copy)
     return (
-        f"[tasks]\n{tasks}\n"
+        f"[tasks]\n{names}\n"
         f"[options]\n{options}{'multiclock on' if multiclock else 'multiclock off'}\n\n"
         f"[engines]\n{engine}\n\n"
-        f"[script]\nplugin -i slang\n{before}read_slang {read}\nprep -top {top}\n\n"
+        f"[script]\nplugin -i slang\n{before}{reads}prep -top {top}\n{after}\n"
         f"[files]\n{copied}"
     )
 

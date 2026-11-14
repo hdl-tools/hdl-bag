@@ -28,7 +28,9 @@ harness port), an environment and the properties:
   by the fabrics' windows (route_model.window), and none appears without one.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
@@ -38,6 +40,9 @@ from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
+
+if TYPE_CHECKING:
+    from hdl_bag.formal_gen import Checker
 
 # Bounded depth of a route job whose unit spans clock domains, in solver steps (free clocks:
 # about two per edge), plus ROUTE_DEPTH_PER_HALVING for each halving of a bridge's data width
@@ -53,6 +58,16 @@ ROUTE_DEPTH_PER_HALVING = 6
 # mixed_cdc_chain's reached only edge 10 in 20 minutes.
 ROUTE_CYCLES = 8
 ROUTE_CYCLES_PER_HALVING = 2
+# A bridge with a FIFO holds the request and the response an edge each: mixed_lite_shared's
+# br_ahb (AXI4-Lite to AHB-Lite, same width, FIFO depth 2) reached its upstream B handshake at
+# step 9 (nightly 43207958073 left it unreached at 8).
+ROUTE_CYCLES_PER_FIFO = 2
+# An AXI4-Lite bridge with a FIFO across domains (axi_lite_dw_converter, axi_fifo, axi_cdc,
+# axi_lite_to_apb) answers later: bridges_pulp_cdc's br_per (64 to 32 bits) and
+# mixed_narrow_apb's br_c8 (64 to 8) reached their upstream B and R handshakes at step 33
+# (bridges_pulp_cdc's left unreached at 24 in nightlies 43047322627 and 43328525704). Such a
+# unit gets at least this many steps.
+ROUTE_DEPTH_LITE_FIFO = 34
 # Scoreboard entries per master and request channel (D71): an AXI4 master keeps at most 4
 # transactions open (bag_faxi4's tables, D66), and the environment keeps the others within
 # the same bound; an AHB-Lite master has one address phase beyond its data phase; the APB
@@ -99,8 +114,13 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     ratio = up.data_width // down.data_width if up is not None and down is not None else 1
     halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
     if len(unit.clocks) == 1:
-        return False, ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
-    return True, ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+        fifo = unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0
+        return False, (ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
+                       + ROUTE_CYCLES_PER_FIFO * fifo)  # fmt: skip
+    depth = ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
+    lite_fifo = (up is not None and up.protocol is Protocol.AXI4_LITE
+                 and unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0)  # fmt: skip
+    return True, max(depth, ROUTE_DEPTH_LITE_FIFO) if lite_fifo else depth
 
 
 def id_prefixes(fab: Fabric) -> list[int]:
@@ -757,6 +777,25 @@ class _Harness:
             self.body.append(f"  always_comb if (bag_busy && !bag_up_pend) assume (!{start});")
         elif p is Protocol.AHB_LITE:
             self.body.append(f"  always_comb if (bag_busy) assume (!{v(up, 'htrans')}[1]);")
+        # The upstream fabric sends the bridge only addresses in its regions there (formal
+        # corpus: a 24-bit upstream and the route model's 32-bit translation differ outside
+        # them), unless the bridge is a default slave, which takes misses anywhere.
+        upfab = fabrics[br.upstream]
+        if not any(d.default_slave == br.name for d in upfab.decode):
+            spans = [(r.base - w_up, r.base + r.size - 1 - w_up) for r in self.spec.memory_map
+                     if r.fabric == br.upstream and r.slave == br.name]  # fmt: skip
+            assert spans and all(0 <= lo <= hi < 1 << uw for lo, hi in spans), (br.name, spans)
+            if p in (Protocol.AXI4, Protocol.AXI4_LITE):
+                shown = [(v(up, "awvalid"), v(up, "awaddr")), (v(up, "arvalid"), v(up, "araddr"))]
+            elif p is Protocol.AHB_LITE:
+                hsel = v(up, "hsel") if "hsel" in up.signals else "1'b1"
+                shown = [(f"{hsel} && {v(up, 'htrans')}[1]", v(up, "haddr"))]
+            else:
+                shown = [(v(up, "psel"), v(up, "paddr"))]
+            for c, a in shown:
+                inside = " || ".join(f"({a} >= {lit(uw, lo)} && {a} <= {lit(uw, hi)})"
+                                     for lo, hi in spans)  # fmt: skip
+                self.body.append(f"  always_comb if ({c}) assume ({inside});")
         dw = dn.addr_width
         open_, win = "bag_busy", "bag_up_addr"
         if du == dd:
@@ -819,8 +858,9 @@ def _decls(ports: list[tuple[str, int, bool]]) -> str:
     )
 
 
-def render_unit(spec: Spec, inst: Instance) -> Unit:
-    """INST alone in a harness module, with its environment and properties."""
+def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) -> Unit:
+    """INST alone in a harness module, with its environment and properties. COVERS: the
+    protocol job's checkers on ports of INST whose covers its route job carries (D90)."""
     atts = _attachments(inst)
     scope = Scope(spec, "flat", {a.bus.name: a.bus for a in atts})
     text, ctx = render_instance_ctx(scope, inst)
@@ -846,6 +886,20 @@ def render_unit(spec: Spec, inst: Instance) -> Unit:
         h.arbitration()
     else:
         h.bridge_window()
+    if covers:
+        from hdl_bag.formal_gen import _covers, _Ports
+
+        buses = {a.bus.name: a.bus for a in atts}
+        for chk in covers:
+            bus = buses[chk.port]
+            d = bus.domain
+            h.body.append(f"  // D90: {chk.port}'s protocol covers (the protocol job's bmc "
+                          "keeps its checker there; its covers are reached here), at the "
+                          "clock edge as every route property")  # fmt: skip
+            for line in _covers(spec, bus, chk, _Ports()):
+                label, expr = line.removeprefix("  always_comb ").split(": cover ", 1)
+                h.body.append(f"  always @(posedge {h.domains()[d]}) {label}: cover "
+                              f"(bag_live_{d} && {expr.removeprefix('(')}")  # fmt: skip
     module = f"bag_{spec.project.name}_unit_{inst.name}"
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,
@@ -859,9 +913,13 @@ def render_route(spec: Spec, netlist: Netlist, hdr: str) -> list[tuple[str, Unit
     job's top) and the unit. Each unit has a job of its own: the units share nothing, and a
     joint job's every solver step holds them all (bridges_pulp's eight units reached step 9
     of 16 in 20 minutes)."""
+    from hdl_bag.formal_gen import checkers, route_covered
+
+    via = route_covered(netlist)
+    found = checkers(spec, netlist)
     out = []
     for inst in units(netlist):
-        u = render_unit(spec, inst)
+        u = render_unit(spec, inst, [c for c in found if via.get(c.port) == inst.name])
         text = "\n".join([hdr.rstrip("\n"), "",
                           f"// Route properties of {spec.project.name}'s {inst.kind} {inst.name} "
                           "on its own (see hdl_bag.formal_gen.units).", u.text])  # fmt: skip

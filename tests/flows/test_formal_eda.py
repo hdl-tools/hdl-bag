@@ -3,6 +3,7 @@
 """The formal flow against SymbiYosys (eda): prove() on tiny properties, the generated
 quiet-in-reset jobs on real designs, a reset bug they must catch, and the time limit."""
 
+import dataclasses
 import re
 from pathlib import Path
 from typing import Literal
@@ -76,32 +77,40 @@ def test_prove_reports_an_unreachable_cover(tmp_path: Path) -> None:
     assert [(f.rule, f.line) for f in report.findings] == [("FORMAL-COVER", 6)]
 
 
-@pytest.mark.parametrize(
-    ("config", "jobs"),
-    [("ahb_fixed", ("decode", "protocol", "reset", "route_ahb")),
-     ("ahb2apb_pt", ("decode", "protocol", "reset", "route_ahb_bus", "route_aon_apb",
-                     "route_br_ahb2aon")),
-     ("apb4_min", ("decode", "protocol", "reset", "route_apb")),
-     ("apb4_rules", ("decode", "protocol", "reset", "route_apb")),
-     ("axil_shared_one", ("decode", "protocol", "reset", "route_bus")),
-     ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
-     ("ahb_single", ("decode", "protocol", "reset", "route_ahb"))],
-)  # fmt: skip
+# Configs whose every job runs here, as one test; the formal corpus (D76) leaves them out.
+GENERATED_JOBS = [
+    ("ahb_fixed", ("decode", "protocol", "reset", "route_ahb")),
+    ("ahb2apb_pt", ("decode", "protocol", "reset", "route_ahb_bus", "route_aon_apb",
+                    "route_br_ahb2aon")),
+    ("apb4_min", ("decode", "protocol", "reset", "route_apb")),
+    ("apb4_rules", ("decode", "protocol", "reset", "route_apb")),
+    ("axil_shared_one", ("decode", "protocol", "reset", "route_bus")),
+    ("axi_shared_one", ("decode", "protocol", "reset", "route_bus")),
+    ("ahb_single", ("decode", "protocol", "reset", "route_ahb")),
+]  # fmt: skip
+# Jobs of those configs the formal corpus runs instead, task by task, placed by measured time
+# (D83: axi_shared_one's protocol job, on one clock for 16 edges since 76a2fd8, passed 600 s).
+IN_CORPUS = {("axi_shared_one", "protocol")}
+
+
+@pytest.mark.parametrize(("config", "jobs"), GENERATED_JOBS)
 def test_the_generated_jobs_hold(tmp_path: Path, config: str, jobs: tuple[str, ...]) -> None:
     """ahb_fixed asserts its reset synchronously and deasserts it asynchronously, so it has
     no synchronizer and its reset acts at once; ahb2apb_pt has a bridge with state on both
     sides; apb4_min has two reset groups and an alias pin; apb4_rules has a sync-assertion
     reset on APB ports, with read-only, write-only and secure slaves; axil_shared_one has
-    AXI4-Lite ports; axi_shared_one has AXI4 ports (bag_faxi4); ahb_single is the AHB-Lite
-    mutants' base. Every cover is reached (the protocol job's at its bmc depth), so no
-    assertion holds vacuously; the AXI4-Lite and APB ports pass ZipCPU's protocol checkers
-    (D60), the AXI4 and AHB-Lite ports BAG's own."""
+    AXI4-Lite ports; axi_shared_one has AXI4 ports (bag_faxi4; its protocol job runs in the
+    formal corpus, IN_CORPUS); ahb_single is the AHB-Lite mutants' base. Every cover is
+    reached, so no assertion holds vacuously; the AXI4-Lite and APB ports pass ZipCPU's
+    protocol checkers (D60), the AXI4 and AHB-Lite ports BAG's own."""
     where = P3 if config.startswith(("axil", "axi_")) else P2
     spec = load(where / f"{config}.ir.yaml")
     out = generate(spec, tmp_path, where)
-    report = run_formal(out, timeout=600)
-    assert report.ok, report.format()
     assert out.formal == tuple(f"formal/{spec.project.name}_{j}.sby" for j in jobs)
+    here = tuple(f"formal/{spec.project.name}_{j}.sby" for j in jobs
+                 if (config, j) not in IN_CORPUS)  # fmt: skip
+    report = run_formal(dataclasses.replace(out, formal=here), timeout=600)
+    assert report.ok, report.format()
 
 
 def test_a_bridge_with_no_reset_is_caught(tmp_path: Path) -> None:
@@ -713,3 +722,133 @@ def test_a_register_on_a_gclk_marked_net_fails_the_same_check(tmp_path: Path) ->
     assert [(f.rule, f.message.split(": ", 1)[1].split(" (")[0]) for f in report.findings] == [
         ("FORMAL-ASSERT", "assertion init_falls_at_once fails")
     ]
+
+
+def _dw_harness(root: Path, up: int, down: int, checks: str) -> list[Path]:
+    """bag_axi_dw from UP-bit data (its slave port, driven by an environment master) to
+    DOWN-bit data (its master port, answered by an environment slave), with bag_faxi4 on each
+    side: the near one assumes the environment's AXI4 rules, the far one asserts the
+    converter's; CHECKS are more statements, out of reset. Returns the files to prove, in
+    compile order (the PULP files and the wrapper's from mixed_wide_to_narrow, which has
+    one)."""
+    spec = load(P3 / "mixed_wide_to_narrow.ir.yaml")
+    out = generate(spec, root, P3)
+    files = [Path(f) for f in (root / f"{spec.project.name}.f").read_text(
+        encoding="utf-8").split() if f.startswith("rtl/") and "/pkg/" not in f
+        and f != f"rtl/{out.top}.sv"]  # fmt: skip
+    side = {"s": (up, True), "m": (down, False)}
+    ports: list[str] = []
+    conns: dict[str, list[str]] = {"s": [], "m": []}
+    for p, (width, design_is_slave) in side.items():
+        for n, w, master in _AXI4:
+            w = width if n == "wdata" or n == "rdata" else width // 8 if n == "wstrb" else w
+            w = 1 if n.endswith("id") else w
+            into_dw = master == design_is_slave
+            ports.append(f"{'input' if into_dw else 'output'} logic [{w - 1}:0] {p}_{n}")
+            conns[p].append(f".{n}({p}_{n})")
+    dw_conns = ", ".join(
+        f".{p}_{n}_{'i' if (master == ds) else 'o'}({p}_{n})"
+        for p, (_, ds) in side.items() for n, _, master in _AXI4
+    )  # fmt: skip
+    users = (
+        ".s_awuser_i('0), .s_wuser_i('0), .s_aruser_i('0), .s_buser_o(), .s_ruser_o(), "
+        ".m_awuser_o(), .m_wuser_o(), .m_aruser_o(), .m_buser_i('0), .m_ruser_i('0)"
+    )
+    (root / "rtl" / "t.sv").write_text(
+        f"module t (input logic clk, input logic rst_n, {', '.join(ports)});\n"
+        f"  bag_axi_dw #(.AddrWidth(32), .SlvDataWidth({up}), .MstDataWidth({down}),"
+        " .SlvIdWidth(1), .MstIdWidth(1), .UserWidth(1), .MaxReads(4)) u_dw (\n"
+        f"      .clk_i(clk), .rst_ni(rst_n), {dw_conns}, {users});\nendmodule\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (root / "bag_faxi4.sv").write_text(FAXI4.read_text(encoding="utf-8"), encoding="utf-8")
+    checkers = "".join(
+        f"  bag_faxi4 #(.DesignIsSlave({int(ds)}), .AddrWidth(32), .DataWidth({width}),"
+        f" .IdWidth(1)) u_{p} (.clk_i(clk), .rst_ni(rst_n), {', '.join(conns[p])});\n"
+        for p, (width, ds) in side.items()
+    )
+    (root / "t_props.sv").write_text(
+        f"module t_props (input logic clk, input logic rst_n, "
+        f"{', '.join(x.replace('output', 'input') for x in ports)});\n"
+        "  logic first = 1'b1, was_out = 1'b0;\n"
+        "  always_ff @(posedge clk) begin first <= 1'b0; was_out <= rst_n; end\n"
+        "  always_comb if (first) assume (!rst_n);\n"
+        "  // Out of reset for good: a reset pulse between two clock edges clears the design\n"
+        "  // (asynchronously) unseen by the checkers, which sample at edges, and D51's reset\n"
+        "  // sequence rules it out. A reset in the middle of a transfer is the reset job's.\n"
+        "  always_comb if (was_out) assume (rst_n);\n"
+        "  // Quiet until bag_faxi4 checks (its first edge out of reset), as generated jobs are.\n"
+        "  always_comb if (!(rst_n && was_out))\n"
+        "    assume (!s_awvalid && !s_wvalid && !s_arvalid && !m_bvalid && !m_rvalid);\n"
+        f"{checkers}"
+        f"  always_comb if (rst_n) begin\n{checks}  end\n"
+        "endmodule\n"
+        "bind t t_props u_props (.*);\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return [*files, Path("rtl/t.sv")]
+
+
+def _dw_prove(root: Path, up: int, down: int, checks: str, depth: int = 10,
+              timeout: float = 1200) -> None:  # fmt: skip
+    """CHECKS (statements, out of reset) hold on the _dw_harness to DEPTH, and every cover
+    among them is reached, each task within TIMEOUT seconds."""
+    files = _dw_harness(root, up, down, checks)
+    incdirs = [Path("rtl/vendor/pulp/axi/include"), Path("rtl/vendor/pulp/common_cells/include")]
+    props = [Path("bag_faxi4.sv"), Path("t_props.sv")]
+    modes: tuple[Mode, ...] = ("bmc", "cover")
+    for mode in modes:
+        report = prove(files, "t", root, properties=props, depth=depth, incdirs=incdirs, mode=mode,
+                       timeout=timeout)  # fmt: skip
+        assert report.ok, report.format()
+
+
+@pytest.mark.parametrize(("up", "down"), [(32, 64), (64, 32)])
+def test_a_width_converter_keeps_exclusive_accesses_legal(
+    tmp_path: Path, up: int, down: int
+) -> None:
+    """PULP's axi_dw_upsizer widens every modifiable INCR burst and ignores AxLOCK: an
+    exclusive write of 2 beats of 4 bytes at 0x...08 left it as 1 beat of 64, not aligned
+    to its total (AXI A7.2.4; mixed_wide_to_narrow's protocol bmc, aw_burst_legal on port
+    mem). Its downsizer splits beats the same way: 16 beats of 8 bytes became 32 of 4, over
+    the 16 an exclusive access may have. bag_axi_dw must pass exclusive accesses on legally,
+    both ways; the covers show an exclusive burst of more than one beat gets through."""
+    _dw_prove(tmp_path, up, down,
+              "    exclusive_write_through: cover (m_awvalid && m_awready && m_awlock\n"
+              "                                    && m_awlen != 0);\n"
+              "    exclusive_read_through: cover (m_arvalid && m_arready && m_arlock\n"
+              "                                   && m_arlen != 0);\n")  # fmt: skip
+
+
+@pytest.mark.deep
+def test_a_downsized_write_response_holds_until_taken(tmp_path: Path) -> None:
+    """D88 (owner, 2026-11-14: fix in bag_axi_dw, PULP untouched): PULP's axi_dw_downsizer
+    answers a write with a response it merges for the write its W side is on, so a finished
+    write's B waiting for BREADY changed when the W side moved on, SLVERR to OKAY
+    (mixed_adapters_bridges' protocol bmc on boolector, port dbg, faxil_slave.v:341; upstream
+    pulp-platform/axi issue 289). The same holds for the bursts it refuses (WRAP, multi-beat
+    FIXED) and answers itself. bag_faxi4's b_hold on the slave side checks it, with
+    back-to-back writes of one or two beats; the cover shows an error response held while
+    the next write goes on. Unfixed, b_hold failed at step 18 (single-beat writes hid it at
+    16), so the bmc runs to 19: about 20 minutes, nightly only (deep)."""
+    _dw_prove(tmp_path, 64, 32,
+              "    assume (!s_arvalid);\n"
+              "    if (s_awvalid) assume (s_awlen <= 8'd1);\n"
+              "    error_held_with_a_write_on: cover (s_bvalid && !s_bready && s_bresp[1]\n"
+              "                                      && m_awvalid);\n",
+              depth=19, timeout=3600)  # fmt: skip
+
+
+def test_an_exclusive_write_too_long_to_downsize_changes_no_byte(tmp_path: Path) -> None:
+    """An exclusive write that would leave the downsizer over 16 beats goes on as a normal
+    write with no byte strobe set, so it fails as an exclusive access may (owner,
+    2026-11-12): with the environment sending only such writes, no beat reaching the slave
+    may write a byte, and one does reach it."""
+    _dw_prove(tmp_path, 64, 32,
+              "    assume (!s_arvalid);\n"
+              "    if (s_awvalid) assume (s_awlock && s_awlen == 8'd15 && s_awsize == 3'd3);\n"
+              "    no_byte_written: assert (!m_wvalid || m_wstrb == '0);\n"
+              "    not_exclusive: assert (!m_awvalid || !m_awlock);\n"
+              "    write_reaches_the_slave: cover (m_wvalid && m_wready);\n")  # fmt: skip

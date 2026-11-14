@@ -125,10 +125,165 @@ module bag_axi_dw #(
     $fatal(1, "bag_axi_dw needs the same ID width on both sides");
   end
 
-  slv_req_t  slv_req;
-  slv_resp_t slv_resp;
+  slv_req_t  slv_req_in, slv_req;
+  slv_resp_t slv_resp_out, slv_resp;
+
+  // Exclusive accesses through the PULP converter, which ignores AxLOCK. An in-house
+  // replacement for it must keep exclusive accesses legal itself, and should then carry an
+  // over-long one (below) through as exclusive rather than make it fail.
+  //
+  // Upsizing: axi_dw_upsizer widens every modifiable INCR burst, so an exclusive access could
+  // leave it misaligned to its new total (AXI A7.2.4: 2 beats of 4 bytes at 0x...08 became
+  // 1 beat of 64). Exclusive accesses enter it non-modifiable: it passes them on beat for beat.
+  //
+  // Downsizing: axi_dw_downsizer splits each wide beat, so an exclusive access could leave it
+  // with more than the 16 beats A7.2.4 allows (16 beats of 8 bytes became 32 of 4). Such an
+  // access goes on as a normal one, so it fails as an exclusive access may: a read's OKAY
+  // says so, and a write's beats go with no byte strobe set, so no byte changes and its OKAY
+  // says so too (owner, 2026-11-12). A write still reaches the slave: one acting on any write,
+  // whatever its strobes, sees it.
+  localparam int unsigned MstMaxSize = $clog2(MstDataWidth / 8);
+  localparam bit Downsize = SlvDataWidth > MstDataWidth;
+
+  function automatic logic too_long(input logic [7:0] len, input logic [2:0] size);
+    logic [31:0] beats;
+    beats = 32'(len) + 32'd1;
+    if (int'(size) > int'(MstMaxSize)) beats = beats << (int'(size) - int'(MstMaxSize));
+    return Downsize && beats > 32'd16;
+  endfunction
+
+  // Downsizing, whether each write burst the converter has taken, oldest first, has its
+  // strobes cleared. A burst's W beats wait for its AW (the downsizer's do anyway), so they
+  // follow these in order. Upsizing, nothing waits.
+  localparam int unsigned Open = 4;
+  localparam int unsigned OpenW = $clog2(Open + 1);
+  logic [Open-1:0] zap_q, zap_d;
+  logic [OpenW-1:0] open_q, open_d;
+  logic aw_room, w_known, aw_hs, w_end;
+
   mst_req_t  mst_req;
   mst_resp_t mst_resp;
+
+  // D88 (owner, 2026-11-14): downsized write responses. axi_dw_downsizer answers a write with
+  // a response it merges for the write its W side is on (pulp-platform/axi issue 289): while
+  // a finished write's B waits for BREADY, the W side moving on changes it (SLVERR became
+  // OKAY), and with the W side idle the merge restarts each cycle, so on a write split into
+  // several narrow bursts (over 256 narrow beats) an error on an earlier one could be lost.
+  // Here each write the converter takes gets an entry, in AW order, that merges the narrow
+  // responses the converter absorbs (by ID: the oldest open entry, since one ID's narrow
+  // responses come in order); the B it forwards answers with its entry merged with its own
+  // narrow response, which waits with it, so the answer holds. A burst the downsizer cannot
+  // split (WRAP, or a multi-beat FIXED one: bursts.py, D34) it answers itself from an
+  // internal error slave on the same B path, unseen here; its entry says so and answers
+  // SLVERR, as the error slave does. An in-house downsizer should merge per write itself.
+  typedef struct packed {
+    logic           valid;
+    logic           own;   // the downsizer refuses it and answers it itself
+    slv_id_t        id;
+    axi_pkg::resp_t resp;
+  } b_open_t;
+  b_open_t [Open-1:0] bq_q, bq_d;
+  logic b_absorb, b_done;
+  int unsigned b_at;
+
+  // The oldest open write of ID, or Open if none.
+  function automatic int unsigned oldest(input b_open_t [Open-1:0] q, input slv_id_t id);
+    oldest = Open;
+    for (int unsigned i = Open; i > 0; i--) begin
+      if (q[i-1].valid && q[i-1].id == id) oldest = i - 1;
+    end
+  endfunction
+
+  assign b_absorb = Downsize && mst_resp.b_valid && mst_req.b_ready && !slv_resp.b_valid;
+  assign b_done = Downsize && slv_resp.b_valid && slv_req_in.b_ready;
+  assign b_at = oldest(bq_q, Downsize && slv_resp.b_valid ? slv_resp.b.id : mst_resp.b.id);
+
+  assign aw_room = !Downsize || (open_q != OpenW'(Open) && !bq_q[Open-1].valid);
+  assign w_known = !Downsize || open_q != '0;
+  assign aw_hs = Downsize && slv_req.aw_valid && slv_resp.aw_ready;
+  assign w_end = Downsize && slv_req.w_valid && slv_resp.w_ready && slv_req.w.last;
+
+  always_comb begin
+    slv_req = slv_req_in;
+    if (slv_req_in.aw.lock) begin
+      slv_req.aw.cache[1] = 1'b0;
+      if (too_long(slv_req_in.aw.len, slv_req_in.aw.size)) slv_req.aw.lock = 1'b0;
+    end
+    if (slv_req_in.ar.lock) begin
+      slv_req.ar.cache[1] = 1'b0;
+      if (too_long(slv_req_in.ar.len, slv_req_in.ar.size)) slv_req.ar.lock = 1'b0;
+    end
+    slv_req.aw_valid = slv_req_in.aw_valid && aw_room;
+    slv_req.w_valid = slv_req_in.w_valid && w_known;
+    if (zap_q[0]) slv_req.w.strb = '0;
+    slv_resp_out = slv_resp;
+    slv_resp_out.aw_ready = slv_resp.aw_ready && aw_room;
+    slv_resp_out.w_ready = slv_resp.w_ready && w_known;
+    if (Downsize && slv_resp.b_valid && b_at < Open) begin
+      slv_resp_out.b.resp = bq_q[b_at].own ? bq_q[b_at].resp :
+          axi_pkg::resp_precedence(bq_q[b_at].resp, mst_resp.b.resp);
+    end
+  end
+
+  // Whether the downsizer refuses AW (axi_dw_downsizer: WRAP always; FIXED of more than one
+  // beat; the same rule as bursts.refusing_converter).
+  function automatic logic refused(input axi_pkg::burst_t burst, input axi_pkg::len_t len);
+    return burst == axi_pkg::BURST_WRAP || (burst == axi_pkg::BURST_FIXED && len != '0);
+  endfunction
+
+  always_comb begin
+    bq_d = bq_q;
+    if (b_absorb && b_at < Open && !bq_q[b_at].own)
+      bq_d[b_at].resp = axi_pkg::resp_precedence(bq_q[b_at].resp, mst_resp.b.resp);
+    if (b_done && b_at < Open) begin
+      for (int unsigned i = 0; i < Open - 1; i++) begin
+        if (i >= b_at) bq_d[i] = bq_q[i+1];
+      end
+      bq_d[Open-1] = '0;
+    end
+    if (aw_hs) begin
+      for (int unsigned i = Open; i > 0; i--) begin
+        if (!bq_d[i-1].valid && (i == 1 || bq_d[i-2].valid)) begin
+          bq_d[i-1] = '{
+              valid: 1'b1,
+              own: refused(slv_req.aw.burst, slv_req.aw.len),
+              id: slv_req.aw.id,
+              resp: refused(slv_req.aw.burst, slv_req.aw.len) ? axi_pkg::RESP_SLVERR :
+                  axi_pkg::RESP_EXOKAY
+          };
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) bq_q <= '0;
+    else bq_q <= bq_d;
+  end
+
+  always_comb begin
+    zap_d = zap_q;
+    open_d = open_q;
+    if (w_end) begin
+      zap_d = zap_d >> 1;
+      open_d = open_d - 1'b1;
+    end
+    if (aw_hs) begin
+      zap_d[open_d[$clog2(Open)-1:0]] =
+          slv_req_in.aw.lock && too_long(slv_req_in.aw.len, slv_req_in.aw.size);
+      open_d = open_d + 1'b1;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      zap_q <= '0;
+      open_q <= '0;
+    end else begin
+      zap_q <= zap_d;
+      open_q <= open_d;
+    end
+  end
 
   bag_axi_from_flat #(
       .AddrWidth   (AddrWidth),
@@ -183,8 +338,8 @@ module bag_axi_dw #(
       .ruser_o(s_ruser_o),
       .rvalid_o(s_rvalid_o),
       .rready_i(s_rready_i),
-      .req_o (slv_req),
-      .resp_i(slv_resp)
+      .req_o (slv_req_in),
+      .resp_i(slv_resp_out)
   );
 
   axi_dw_converter #(
