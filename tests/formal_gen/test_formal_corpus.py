@@ -47,8 +47,9 @@ GENERATED_BMC_ENGINE = "bmc: smtbmc bitwuzla"
 # PROTOCOL_DEPTH (16) within DEEP_TIMEOUT_S: the step bitwuzla had reached at 7200 s in
 # nightly 43328525704 (mixed_adapters_bridges': 15, before the D88 fix), each recorded as that
 # config's proof bound in the Phase 5 report. D84's engine trial found none faster.
+# axi_xbar_rules: 12 timed out at step 11 in nightly 43533410868 on a slower runner, so 11.
 BMC_DEPTHS = {
-    "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 12,
+    "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 11,
     "p3/bridges_inhouse": 13, "p3/mixed_ahb_secure": 13, "p3/mixed_shared_chain": 14,
     "p3/mixed_adapters_bridges": 15,
 }  # fmt: skip
@@ -160,16 +161,16 @@ def test_a_design_too_big_for_depth_16_has_its_bmc_bound_pinned(tmp_path: Path) 
     reached (bitwuzla, nightly 43328525704), recorded as its proof bound. The generated job
     keeps 16; only this test changes the depth."""
     assert BMC_DEPTHS == {
-        "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 12,
+        "p3/axi_shared_rr": 10, "p3/axi_xbar_pow2": 10, "p3/axi_xbar_rules": 11,
         "p3/bridges_inhouse": 13, "p3/mixed_ahb_secure": 13, "p3/mixed_shared_chain": 14,
         "p3/mixed_adapters_bridges": 15,
     }  # fmt: skip
     spec = _spec("p3/axi_xbar_rules")
     generate(spec, tmp_path, _path("p3/axi_xbar_rules").parent)
     job = (tmp_path / "formal" / "axi_xbar_rules_protocol.sby").read_text(encoding="utf-8")
-    pinned = with_bmc_depth(job, 12)
-    assert "\nbmc: depth 12\n" in pinned and "\nbmc: depth 16\n" not in pinned
-    assert pinned.replace("bmc: depth 12", "bmc: depth 16") == job
+    pinned = with_bmc_depth(job, 11)
+    assert "\nbmc: depth 11\n" in pinned and "\nbmc: depth 16\n" not in pinned
+    assert pinned.replace("bmc: depth 11", "bmc: depth 16") == job
     assert all(config in {c for c, _, _ in all_tasks()} for config in BMC_DEPTHS)
 
 
