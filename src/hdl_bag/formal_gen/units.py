@@ -899,7 +899,7 @@ def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) ->
             for line in _covers(spec, bus, chk, _Ports()):
                 label, expr = line.removeprefix("  always_comb ").split(": cover ", 1)
                 h.body.append(f"  always @(posedge {h.domains()[d]}) {label}: cover "
-                              f"(bag_live_{d} && {expr.removeprefix('(')}")  # fmt: skip
+                              f"(bag_live_{d} && {expr.removesuffix(';')});")  # fmt: skip
     module = f"bag_{spec.project.name}_unit_{inst.name}"
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,

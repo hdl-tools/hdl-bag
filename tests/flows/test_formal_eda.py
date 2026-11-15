@@ -841,6 +841,22 @@ def test_a_downsized_write_response_holds_until_taken(tmp_path: Path) -> None:
               depth=19, timeout=3600)  # fmt: skip
 
 
+def test_a_downsized_exclusive_access_keeps_its_cache_attributes(tmp_path: Path) -> None:
+    """Review (PR #50): bag_axi_dw cleared AxCACHE[1] (modifiable) on every exclusive access,
+    including the over-long ones it sends on as normal accesses, and on the downsizer, which
+    never reads AxCACHE. Only the upsizer needs exclusive accesses non-modifiable (it widens
+    modifiable bursts), so downsizing, a modifiable access stays modifiable, exclusive or
+    not; the covers show both an exclusive and an over-long one going on so."""
+    _dw_prove(tmp_path, 64, 32,
+              "    if (s_awvalid) assume (s_awcache[1]);\n"
+              "    if (s_arvalid) assume (s_arcache[1]);\n"
+              "    aw_modifiable: assert (!m_awvalid || m_awcache[1]);\n"
+              "    ar_modifiable: assert (!m_arvalid || m_arcache[1]);\n"
+              "    exclusive_read_modifiable: cover (m_arvalid && m_arlock && m_arcache[1]);\n"
+              "    long_write_modifiable: cover (m_awvalid && !m_awlock && m_awcache[1]\n"
+              "                                  && s_awlock);\n")  # fmt: skip
+
+
 def test_an_exclusive_write_too_long_to_downsize_changes_no_byte(tmp_path: Path) -> None:
     """An exclusive write that would leave the downsizer over 16 beats goes on as a normal
     write with no byte strobe set, so it fails as an exclusive access may (owner,

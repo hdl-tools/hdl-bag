@@ -221,7 +221,7 @@ ROUTED = {
         ("proto_read_cpu0", "route_main_xbar",
          "cover_main_xbar_cpu0_cut_2_main_xbar_ar_delivered"),
     ("p3/mixed_wide_to_narrow", "cover_rom_writes"):
-        ("proto_write_rom", "route_ahb", "proto_write_rom"),
+        ("proto_write_rom", "route_ahb", "route_write_rom"),
 }  # fmt: skip
 # The route covers the units do not have yet: (config, route job) -> (port, checker event).
 ROUTE_ADDED = {("p3/mixed_wide_to_narrow", "route_ahb"): ("rom", "write_done")}
@@ -237,7 +237,8 @@ def without_cover(props: str, label: str) -> str:
 
 def with_route_cover(unit: str, port: str, event: str) -> str:
     """UNIT (a route unit's text) with a cover of PORT's checker's EVENT output, at the clock
-    edge out of reset as the unit's own covers, labelled as the protocol job's (D95)."""
+    edge out of reset as the unit's own covers, labelled route_<event>_<port> so no report
+    reads it as the protocol task's cover (D95; review, PR #50)."""
     head = "  bag_fahb #(.DesignIsSlave(0)"
     start = unit.index(f") u_chk_{port} (\n")
     begin = unit.rindex("\n", 0, start) + 1
@@ -250,7 +251,7 @@ def with_route_cover(unit: str, port: str, event: str) -> str:
     assert inst.count(f".{event}_o(),") == 1, f"{port}'s {event} output moved"
     inst = inst.replace(f".{event}_o(),", f".{event}_o({wire}),")
     label = {"write_done": "write", "read_done": "read"}[event]
-    cover = (f"  always @(posedge {clk}) proto_{label}_{port}: cover "
+    cover = (f"  always @(posedge {clk}) route_{label}_{port}: cover "
              f"(bag_live_{domain} && {wire});")  # fmt: skip
     assert unit.endswith("\nendmodule\n") and unit.count("\nendmodule") == 1
     body = f"{unit[:begin]}  logic {wire};\n{inst}{unit[end:]}"
@@ -444,7 +445,7 @@ def test_a_cover_out_of_ci_reach_is_reached_in_its_route_unit(tmp_path: Path) ->
             ("proto_read_cpu0", "route_main_xbar",
              "cover_main_xbar_cpu0_cut_2_main_xbar_ar_delivered"),
         ("p3/mixed_wide_to_narrow", "cover_rom_writes"):
-            ("proto_write_rom", "route_ahb", "proto_write_rom"),
+            ("proto_write_rom", "route_ahb", "route_write_rom"),
     }  # fmt: skip
     assert ROUTE_ADDED == {("p3/mixed_wide_to_narrow", "route_ahb"): ("rom", "write_done")}
     for (config, task), (label, job, there) in ROUTED.items():
@@ -466,7 +467,9 @@ def test_a_cover_out_of_ci_reach_is_reached_in_its_route_unit(tmp_path: Path) ->
     added = with_route_cover(unit, "rom", "write_done")
     assert "      .write_done_o(bag_rom_write_done),\n" in added
     assert "\n  logic bag_rom_write_done;\n  bag_fahb #(.DesignIsSlave(0)" in added
-    assert ("\n  always @(posedge clk_sys) proto_write_rom: cover "
+    # Labelled as the route job's, so no report reads it as the protocol task's cover.
+    assert "proto_write_rom" not in added
+    assert ("\n  always @(posedge clk_sys) route_write_rom: cover "
             "(bag_live_D_SYS && bag_rom_write_done);\nendmodule") in added  # fmt: skip
     # Only rom's checker changed: the other checkers' outputs stay open.
     assert added.count(".write_done_o(),") == unit.count(".write_done_o(),") - 1
@@ -480,6 +483,13 @@ def test_every_generated_task_runs_once() -> None:
     assert len(tasks) == len(set(tasks)) and len(CASES) == len(set(CASES))
     # A split task (D92) stands for the generated one it came from.
     run = {(c, j, f"cover_{p}" if (p := _split_port(c, t)) else t) for c, j, t in CASES}
+    # Review (PR #50): both halves of each split task run, not just one of them.
+    for config, ports in SPLIT.items():
+        for p in ports:
+            for d in DIRECTIONS:
+                assert (config, "protocol", f"cover_{p}_{d}") in CASES, (config, p, d)
+    # And each pinned bmc bound (D89) is a corpus case, not a task another test runs.
+    assert all((c, "protocol", "bmc") in CASES for c in BMC_DEPTHS)
     assert run | set(_SKIP) == set(tasks) and not run & set(_SKIP)
     configs = {c for c, _, _ in tasks}
     assert sorted(set(_configs()) - configs) == ["p3/external_fabric", "p3/external_shared"]

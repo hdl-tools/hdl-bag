@@ -124,6 +124,14 @@ module bag_axi_dw #(
   if (SlvIdWidth != MstIdWidth) begin : gen_bad_id_width
     $fatal(1, "bag_axi_dw needs the same ID width on both sides");
   end
+  // The exclusive-access limit (MstMaxSize) and the strobe widths size from these.
+  if (SlvDataWidth < 8 || MstDataWidth < 8 || (SlvDataWidth & (SlvDataWidth - 1)) != 0
+      || (MstDataWidth & (MstDataWidth - 1)) != 0) begin : gen_bad_data_width
+    $fatal(1, "bag_axi_dw needs power-of-two data widths of at least 8 bits");
+  end
+  if (MaxReads < 1) begin : gen_bad_max_reads
+    $fatal(1, "bag_axi_dw: MaxReads must be at least 1");
+  end
 
   slv_req_t  slv_req_in, slv_req;
   slv_resp_t slv_resp_out, slv_resp;
@@ -154,7 +162,10 @@ module bag_axi_dw #(
 
   // Downsizing, whether each write burst the converter has taken, oldest first, has its
   // strobes cleared. A burst's W beats wait for its AW (the downsizer's do anyway), so they
-  // follow these in order. Upsizing, nothing waits.
+  // follow these in order. Upsizing, nothing waits. Open bounds the writes taken and not yet
+  // answered (aw_room), whatever MaxReads is. PULP's downsizer takes the next AW only once its
+  // W side is idle, so at most one write here has W beats to come and zap_q's shift past its
+  // first entry is unused with it; the depth is for a converter that takes more.
   localparam int unsigned Open = 4;
   localparam int unsigned OpenW = $clog2(Open + 1);
   logic [Open-1:0] zap_q, zap_d;
@@ -205,12 +216,15 @@ module bag_axi_dw #(
 
   always_comb begin
     slv_req = slv_req_in;
+    // Only the upsizer reads AxCACHE (the downsizer splits every burst alike), so only an
+    // exclusive access into the upsizer goes non-modifiable; a downsized one keeps the
+    // attributes its master sent, including an over-long one going on as a normal access.
     if (slv_req_in.aw.lock) begin
-      slv_req.aw.cache[1] = 1'b0;
+      if (!Downsize) slv_req.aw.cache[1] = 1'b0;
       if (too_long(slv_req_in.aw.len, slv_req_in.aw.size)) slv_req.aw.lock = 1'b0;
     end
     if (slv_req_in.ar.lock) begin
-      slv_req.ar.cache[1] = 1'b0;
+      if (!Downsize) slv_req.ar.cache[1] = 1'b0;
       if (too_long(slv_req_in.ar.len, slv_req_in.ar.size)) slv_req.ar.lock = 1'b0;
     end
     slv_req.aw_valid = slv_req_in.aw_valid && aw_room;

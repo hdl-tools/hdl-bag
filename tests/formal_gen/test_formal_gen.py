@@ -19,6 +19,7 @@ from hdl_bag.formal_gen import (
     checkers,
     formal_jobs,
     props_module,
+    render_protocol,
 )
 from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import (
@@ -486,6 +487,38 @@ def test_alias_pins_change_only_in_reset(tmp_path: Path) -> None:
     )
 
 
+def test_an_alias_pin_used_in_two_domains_says_where_it_is_sampled() -> None:
+    """A pin that fabrics in two domains use is sampled on the first domain's clock only. The
+    pin stays free in reset and holds its value from the first release on, so every value out
+    of reset is still possible. What the assumption leaves out is a change in reset after the
+    sampling clock's last edge and before another domain leaves reset. The generated text says
+    so beside the assumption (#52). No corpus config shares a pin across domains."""
+    from types import SimpleNamespace as NS
+
+    from hdl_bag.formal_gen import Domain, _alias_pins, _Ports
+
+    def fabric(domain: str) -> NS:
+        return NS(domain=domain, decode=[NS(aliases=[NS(enable="remap_i")])])
+
+    def dom(clk: str, d: str) -> Domain:
+        return Domain(clk, "", "", f"bag_in_reset_{d}", "", "")
+
+    domains = {"D_A": dom("clk_a", "D_A"), "D_B": dom("clk_b", "D_B")}
+    two = _alias_pins(NS(fabrics=[fabric("D_B"), fabric("D_A")]), domains, _Ports())  # type: ignore[arg-type]
+    assert two == [
+        "  // Alias enable remap_i (D_A, D_B): changes only in reset.",
+        "  // Sampled on clk_a (D_A) only: a change in reset after its last edge, before",
+        "  // another domain leaves reset, is left out; out of reset any value is possible.",
+        "  logic bag_pin_was_remap_i;",
+        "  always_ff @(posedge clk_a) bag_pin_was_remap_i <= remap_i;",
+        "  always_comb if (!(bag_in_reset_D_A && bag_in_reset_D_B)) "
+        "assume (remap_i == bag_pin_was_remap_i);",
+        "",
+    ]
+    one = _alias_pins(NS(fabrics=[fabric("D_A")]), domains, _Ports())  # type: ignore[arg-type]
+    assert not any("Sampled on" in line for line in one)
+
+
 def test_the_protocol_job_reads_the_checkers_then_the_design(tmp_path: Path) -> None:
     """ZipCPU's files are read by Yosys's own frontend, copied once per instance with its
     parameters, and instantiated by the slang-read property module."""
@@ -699,11 +732,38 @@ def test_an_apb_port_behind_a_crossing_bridge_is_covered_by_its_fabric_unit(
         assert f"proto_read_{p}: cover" not in ds, p
         assert f"  // {p}: covers in route_periph_apb (D90)\n" in ds, p
         # At the clock edge, out of reset, as every route property.
+        # The expression keeps its parentheses, so a top-level || cannot escape the gate.
         assert re.search(rf"\n  always @\(posedge \w+\) proto_read_{p}: cover \(bag_live_D_PER "
-                         rf"&& {p}_apb_psel && ", route), p  # fmt: skip
+                         rf"&& \({p}_apb_psel && [^;]*\)\);\n", route), p  # fmt: skip
         assert f"BAG_IDLE_{p}" not in ds, p
     assert "\ncover_wdt0\n" in job and "proto_read_wdt0: cover" in ds
     assert "proto_read_wdt0" not in route
+
+
+def test_every_cover_event_has_a_direction() -> None:
+    """D92: a cover event is a write's, a read's or either's (wait, error, full, burst, kept
+    with the writes). Review (PR #50): an event in no list went to the write group without a
+    word, so a new read-only cover would sit in the write task; now it is an error, and every
+    protocol cover of the corpus has a listed event."""
+    from hdl_bag.formal_gen import _cover_kind
+
+    assert _cover_kind("p", "  always_comb proto_read_p: cover (x);") == "read"
+    assert _cover_kind("p", "  always_comb proto_full_p: cover (x);") == "either"
+    with pytest.raises(ValueError, match="proto_bogus_p: cover event 'bogus' has no direction"):
+        _cover_kind("p", "  always_comb proto_bogus_p: cover (x);")
+    checked = 0
+    for path in [GOLDEN, *sorted(P2.glob("*.ir.yaml")), *sorted(P3.glob("*.ir.yaml"))]:
+        spec = load(path)
+        netlist = build_netlist(spec)
+        lines = (render_protocol(spec, netlist, "top", "") or "").split("\n")
+        # A line's port is the longest port name it ends with (ram and aux_ram both match).
+        names = sorted((b.name for b in netlist.ports), key=len, reverse=True)
+        for line in lines:
+            if m := re.match(r"  always_comb (proto_\w+): cover \(", line):
+                port = next(n for n in names if m[1].endswith(f"_{n}"))
+                _cover_kind(port, line)
+                checked += 1
+    assert checked > 0
 
 
 def test_a_cover_task_holds_the_other_masters_idle(tmp_path: Path) -> None:

@@ -62,6 +62,11 @@ CASES: list[tuple[str, str, str]] = [
     ("bag_axil_shared_bus", ".NoMasters(2), .FixedPrio(1'b1)",
      "fixed-priority masters need distinct Priority values"),
     ("bag_axil_to_axi", ".MstDataWidth(64)", "bag_axil_to_axi needs the same data width on both sides"),
+    # Review (PR #50), appended so the earlier ids keep their numbers: bag_axi_dw's
+    # exclusive-access and B logic size from these.
+    ("bag_axi_dw", ".MstDataWidth(48)", "bag_axi_dw needs power-of-two data widths of at least 8 bits"),
+    ("bag_axi_dw", ".SlvDataWidth(4)", "bag_axi_dw needs power-of-two data widths of at least 8 bits"),
+    ("bag_axi_dw", ".MaxReads(0)", "bag_axi_dw: MaxReads must be at least 1"),
 ]  # fmt: skip
 IDS = [f"{m}-{i}" for i, (m, _, _) in enumerate(CASES)]
 TOOLS = ("slang", "verilator")

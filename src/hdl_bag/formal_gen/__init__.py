@@ -362,7 +362,12 @@ def _alias_pins(spec: Spec, domains: dict[str, Domain], port: "_Ports") -> list[
     quasi-static, or synchronous and stable during a transfer"). Formal takes the strict
     reading: a pin changes only while every domain whose fabric uses it is in reset, and its
     last value is sampled on the first such domain's clock. A pin toggling under a transfer
-    would move the decode mid-access. The guide does not state the requirement yet (Phase 6)."""
+    would move the decode mid-access. The guide does not state the requirement yet (Phase 6).
+
+    With users in several domains, the one sampling clock is a limit (#52), stated beside the
+    assumption: the pin is free in reset and holds from the first release on, so any value is
+    possible out of reset, but a change in reset after the sampling clock's last edge and
+    before another domain's release is left out. No corpus config shares a pin across domains."""
     users: dict[str, set[str]] = {}
     for f in spec.fabrics:
         for d in f.decode:
@@ -374,8 +379,13 @@ def _alias_pins(spec: Spec, domains: dict[str, Domain], port: "_Ports") -> list[
         doms = sorted(users[pin])
         port(pin)
         held = " && ".join(domains[d].in_reset for d in doms)
+        out.append(f"  // Alias enable {pin} ({', '.join(doms)}): changes only in reset.")
+        if len(doms) > 1:
+            out += [f"  // Sampled on {domains[doms[0]].clock} ({doms[0]}) only: a change in "
+                    "reset after its last edge, before",
+                    "  // another domain leaves reset, is left out; out of reset any value is "
+                    "possible."]  # fmt: skip
         out += [
-            f"  // Alias enable {pin} ({', '.join(doms)}): changes only in reset.",
             f"  logic bag_pin_was_{pin};",
             f"  always_ff @(posedge {domains[doms[0]].clock}) bag_pin_was_{pin} <= {pin};",
             f"  always_comb if (!({held})) assume ({pin} == bag_pin_was_{pin});",
@@ -1000,13 +1010,19 @@ def direction_macro(port: str, kind: str) -> str:
 _WRITE_EVENTS = frozenset({"aw_stall", "w_stall", "b_stall", "write", "b_error", "multi_write",
                            "w_first"})  # fmt: skip
 _READ_EVENTS = frozenset({"ar_stall", "r_stall", "read", "r_error", "same_id"})
+_EITHER_EVENTS = frozenset({"wait", "error", "full", "burst"})
 
 
 def _cover_kind(port: str, line: str) -> str:
-    """Whether the cover on LINE, one of PORT's, is a write's, a read's or either's (D92)."""
-    event = line.split(": cover (", 1)[0].split()[-1].removeprefix("proto_")
-    event = event.removesuffix(f"_{port}")
-    return "write" if event in _WRITE_EVENTS else "read" if event in _READ_EVENTS else "either"
+    """Whether the cover on LINE, one of PORT's, is a write's, a read's or either's (D92). An
+    event in none of the lists is an error, so a new cover cannot land in a group unseen."""
+    label = line.split(": cover (", 1)[0].split()[-1]
+    event = label.removeprefix("proto_").removesuffix(f"_{port}")
+    for kind, events in (("write", _WRITE_EVENTS), ("read", _READ_EVENTS),
+                         ("either", _EITHER_EVENTS)):  # fmt: skip
+        if event in events:
+            return kind
+    raise ValueError(f"{label}: cover event {event!r} has no direction (formal_gen D92 lists)")
 
 
 def _both_ways(bus: Bus, lines: list[str]) -> bool:
