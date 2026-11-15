@@ -213,6 +213,50 @@ def alone_timeout(config: str, task: str) -> int:
     return ALONE_LONGER.get((config, task), ALONE_TIMEOUT_S)
 
 
+# D95 (owner, 2026-11-15): the covers the protocol cover tasks did not reach in CI's time, each
+# reached in a route job instead: (config, protocol task) -> (the dropped cover, the route
+# job, its cover there). cpu0's is one axi_cut downstream of cpu0, on the unit's port.
+ROUTED = {
+    ("golden/demo_ss", "cover_cpu0_reads"):
+        ("proto_read_cpu0", "route_main_xbar",
+         "cover_main_xbar_cpu0_cut_2_main_xbar_ar_delivered"),
+    ("p3/mixed_wide_to_narrow", "cover_rom_writes"):
+        ("proto_write_rom", "route_ahb", "proto_write_rom"),
+}  # fmt: skip
+# The route covers the units do not have yet: (config, route job) -> (port, checker event).
+ROUTE_ADDED = {("p3/mixed_wide_to_narrow", "route_ahb"): ("rom", "write_done")}
+
+
+def without_cover(props: str, label: str) -> str:
+    """PROPS (a protocol property file's text) without the cover LABEL (D95)."""
+    lines = props.split("\n")
+    found = [ln for ln in lines if ln.startswith(f"  always_comb {label}: cover (")]
+    assert len(found) == 1, f"{label}'s cover moved"
+    return "\n".join(ln for ln in lines if ln != found[0])
+
+
+def with_route_cover(unit: str, port: str, event: str) -> str:
+    """UNIT (a route unit's text) with a cover of PORT's checker's EVENT output, at the clock
+    edge out of reset as the unit's own covers, labelled as the protocol job's (D95)."""
+    head = "  bag_fahb #(.DesignIsSlave(0)"
+    start = unit.index(f") u_chk_{port} (\n")
+    begin = unit.rindex("\n", 0, start) + 1
+    assert unit[begin:].startswith(head), f"{port}'s checker is not a bag_fahb on a slave port"
+    end = unit.index("\n  );\n", start)
+    inst = unit[begin:end]
+    clk = inst.split(".clk_i(", 1)[1].split(")", 1)[0]
+    domain = inst.split(".rst_ni(!bag_in_reset_", 1)[1].split(")", 1)[0]
+    wire = f"bag_{port}_{event}"
+    assert inst.count(f".{event}_o(),") == 1, f"{port}'s {event} output moved"
+    inst = inst.replace(f".{event}_o(),", f".{event}_o({wire}),")
+    label = {"write_done": "write", "read_done": "read"}[event]
+    cover = (f"  always @(posedge {clk}) proto_{label}_{port}: cover "
+             f"(bag_live_{domain} && {wire});")  # fmt: skip
+    assert unit.endswith("\nendmodule\n") and unit.count("\nendmodule") == 1
+    body = f"{unit[:begin]}  logic {wire};\n{inst}{unit[end:]}"
+    return body.removesuffix("endmodule\n") + f"{cover}\nendmodule\n"
+
+
 _SKIP = elsewhere()
 _MEASURED = _measured()
 CASES = [(c, j, s) for c, j, t in all_tasks() if (c, j, t) not in _SKIP
@@ -249,6 +293,14 @@ def test_the_formal_corpus_holds(tmp_path: Path, config: str, job: str, task: st
     if job == "protocol" and (port := _split_port(config, task)):
         text = with_direction_split(sby.read_text(encoding="utf-8"), port, _zipcpu(spec, port))
         sby.write_text(text, encoding="utf-8", newline="\n")
+    if job == "protocol" and (config, task) in ROUTED:
+        props = tmp_path / "formal" / f"{spec.project.name}_protocol.sv"
+        text = without_cover(props.read_text(encoding="utf-8"), ROUTED[config, task][0])
+        props.write_text(text, encoding="utf-8", newline="\n")
+    if task == "cover" and (config, job) in ROUTE_ADDED:
+        unit = tmp_path / "formal" / f"{spec.project.name}_{job}.sv"
+        text = with_route_cover(unit.read_text(encoding="utf-8"), *ROUTE_ADDED[config, job])
+        unit.write_text(text, encoding="utf-8", newline="\n")
     report = run_sby(sby, tmp_path, timeout=timeout, task=task)
     assert report.ok, report.format()
 
@@ -378,6 +430,46 @@ def test_a_split_task_still_short_runs_alone_for_four_hours() -> None:
     assert "workers: '1'\n" in alone and "timeout-minutes: 340\n" in alone
     # The two-at-a-time shards leave them out, unless a dispatch selects tests by name.
     assert "&& 'eda' || 'eda and not alone') || 'eda and not deep') }}" in flow
+
+
+def test_a_cover_out_of_ci_reach_is_reached_in_its_route_unit(tmp_path: Path) -> None:
+    """D95 (owner, 2026-11-15): in nightly 43648153614, demo_ss cover_cpu0_reads lacked only
+    its completed read after 18000 s alone (step 30, the third run without it), and
+    mixed_wide_to_narrow cover_rom_writes only its completed write after 14400 s (step 20). The
+    corpus drops each from its protocol task, and the route job reaches it instead: rom's in
+    route_ahb, on the same bag_fahb checker of the same port; cpu0's is route_main_xbar's
+    ar_delivered, one axi_cut downstream of cpu0 (the unit's port is the cut's output)."""
+    assert ROUTED == {
+        ("golden/demo_ss", "cover_cpu0_reads"):
+            ("proto_read_cpu0", "route_main_xbar",
+             "cover_main_xbar_cpu0_cut_2_main_xbar_ar_delivered"),
+        ("p3/mixed_wide_to_narrow", "cover_rom_writes"):
+            ("proto_write_rom", "route_ahb", "proto_write_rom"),
+    }  # fmt: skip
+    assert ROUTE_ADDED == {("p3/mixed_wide_to_narrow", "route_ahb"): ("rom", "write_done")}
+    for (config, task), (label, job, there) in ROUTED.items():
+        assert (config, "protocol", task) in CASES and (config, job, "cover") in CASES
+        spec = _spec(config)
+        out = tmp_path / config
+        generate(spec, out, _path(config).parent)
+        props = (out / "formal" / f"{spec.project.name}_protocol.sv").read_text(encoding="utf-8")
+        dropped = without_cover(props, label)
+        assert f" {label}: cover " in props and f" {label}: cover " not in dropped
+        assert len(dropped.split("\n")) == len(props.split("\n")) - 1
+        unit = (out / "formal" / f"{spec.project.name}_{job}.sv").read_text(encoding="utf-8")
+        if (config, job) in ROUTE_ADDED:
+            unit = with_route_cover(unit, *ROUTE_ADDED[config, job])
+        assert f" {there}: cover (" in unit, there
+    spec = _spec("p3/mixed_wide_to_narrow")
+    unit = (tmp_path / "p3/mixed_wide_to_narrow" / "formal"
+            / "mixed_wide_to_narrow_route_ahb.sv").read_text(encoding="utf-8")  # fmt: skip
+    added = with_route_cover(unit, "rom", "write_done")
+    assert "      .write_done_o(bag_rom_write_done),\n" in added
+    assert "\n  logic bag_rom_write_done;\n  bag_fahb #(.DesignIsSlave(0)" in added
+    assert ("\n  always @(posedge clk_sys) proto_write_rom: cover "
+            "(bag_live_D_SYS && bag_rom_write_done);\nendmodule") in added  # fmt: skip
+    # Only rom's checker changed: the other checkers' outputs stay open.
+    assert added.count(".write_done_o(),") == unit.count(".write_done_o(),") - 1
 
 
 def test_every_generated_task_runs_once() -> None:
