@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
+from hdl_bag.gen.package import CUT_STAGES
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
 from hdl_bag.ir.model import Fabric, Spec
@@ -58,16 +59,30 @@ ROUTE_DEPTH_PER_HALVING = 6
 # mixed_cdc_chain's reached only edge 10 in 20 minutes.
 ROUTE_CYCLES = 8
 ROUTE_CYCLES_PER_HALVING = 2
-# A bridge with a FIFO holds the request and the response an edge each: mixed_lite_shared's
-# br_ahb (AXI4-Lite to AHB-Lite, same width, FIFO depth 2) reached its upstream B handshake at
-# step 9 (nightly 43207958073 left it unreached at 8).
-ROUTE_CYCLES_PER_FIFO = 2
+# A bridge with a FIFO holds the request and the response: mixed_lite_shared's br_ahb
+# (AXI4-Lite to AHB-Lite, same width, FIFO depth 2) reached its upstream B handshake at step 9
+# (nightly 43207958073 left it unreached at 8); bridges_inhouse's br_ahb (AXI4 64 bits to
+# AHB-Lite 32, FIFO depth 2) raised R with RREADY held low at step 12 (D38; nightly
+# 43857522665 left it unreached at 12).
+ROUTE_CYCLES_PER_FIFO = 3
+# A fabric's mid-point FIFO and cuts each delay W behind AW by an edge: axi_shared_fixed's bus
+# (FIFO depth 2, then multicut-3) raised W at a slave with WREADY held low at step 8 (D38;
+# nightly 43857522665 left it unreached at 8), while two stages (mixed_shared_chain: a FIFO
+# and a cut) reached every cover in 8. Each stage past the first two adds an edge.
+ROUTE_MIDPOINT_FREE_STAGES = 2
+ROUTE_CYCLES_PER_MIDPOINT_STAGE = 1
 # An AXI4-Lite bridge with a FIFO across domains (axi_lite_dw_converter, axi_fifo, axi_cdc,
 # axi_lite_to_apb) answers later: bridges_pulp_cdc's br_per (64 to 32 bits) and
 # mixed_narrow_apb's br_c8 (64 to 8) reached their upstream B and R handshakes at step 33
 # (bridges_pulp_cdc's left unreached at 24 in nightlies 43047322627 and 43328525704). Such a
 # unit gets at least this many steps.
 ROUTE_DEPTH_LITE_FIFO = 34
+# A bridge across domains whose data path widens (axi_dw upsizer on the far side of the
+# crossing) answers later still: bridges_inhouse_cdc's br_ahb (AXI4 32 bits to AHB-Lite 64)
+# raised B and R with READY held low at step 31 (D38; nightly 43857522665 left them, and
+# bridges_pulp_cdc's br_aon, AXI4 32 to AXI4-Lite 64, unreached at 24). Such a unit gets at
+# least this many steps.
+ROUTE_DEPTH_UPSIZE = 32
 # Scoreboard entries per master and request channel (D71): an AXI4 master keeps at most 4
 # transactions open (bag_faxi4's tables, D66), and the environment keeps the others within
 # the same bound; an AHB-Lite master has one address phase beyond its data phase; the APB
@@ -115,12 +130,19 @@ def route_depth(unit: Unit) -> tuple[bool, int]:
     halvings = max(ratio, 1).bit_length() - 1  # data widths are powers of two
     if len(unit.clocks) == 1:
         fifo = unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0
+        mid = unit.inst.fabric.midpoint if unit.inst.fabric is not None else None
+        stages = (mid.fifo_depth > 0) + CUT_STAGES[mid.slice] if mid is not None else 0
         return False, (ROUTE_CYCLES + ROUTE_CYCLES_PER_HALVING * halvings
-                       + ROUTE_CYCLES_PER_FIFO * fifo)  # fmt: skip
+                       + ROUTE_CYCLES_PER_FIFO * fifo + ROUTE_CYCLES_PER_MIDPOINT_STAGE
+                       * max(stages - ROUTE_MIDPOINT_FREE_STAGES, 0))  # fmt: skip
     depth = ROUTE_DEPTH + ROUTE_DEPTH_PER_HALVING * max(halvings - 1, 0)
     lite_fifo = (up is not None and up.protocol is Protocol.AXI4_LITE
                  and unit.inst.bridge is not None and unit.inst.bridge.fifo_depth > 0)  # fmt: skip
-    return True, max(depth, ROUTE_DEPTH_LITE_FIFO) if lite_fifo else depth
+    if lite_fifo:
+        depth = max(depth, ROUTE_DEPTH_LITE_FIFO)
+    if up is not None and down is not None and up.data_width < down.data_width:
+        depth = max(depth, ROUTE_DEPTH_UPSIZE)
+    return True, depth
 
 
 def id_prefixes(fab: Fabric) -> list[int]:
