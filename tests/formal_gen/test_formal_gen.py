@@ -740,6 +740,34 @@ def test_an_apb_port_behind_a_crossing_bridge_is_covered_by_its_fabric_unit(
     assert "proto_read_wdt0" not in route
 
 
+def test_a_route_unit_shows_valid_rising_while_ready_is_held_low(tmp_path: Path) -> None:
+    """D38 (#56): the checkers already assert that VALID and its payload hold until READY on
+    every channel a unit drives. What no cover showed is that VALID does not wait for READY:
+    a one-edge stall (valid && !ready) is reachable by a design that waits for a registered
+    READY. Each route unit's AXI4 and AXI4-Lite port now has, per channel the unit drives,
+    a cover of VALID rising while READY was low at this edge and the one before: B and R
+    where the unit is the slave, AW, W and AR where it is the master, for the accesses the
+    IR sends there (s1 takes only reads)."""
+    for config, proto in (("axi_shared_rr", "axi"), ("axil_shared_rr", "axil")):
+        generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        text = (tmp_path / config / "formal" / f"{config}_route_bus.sv").read_text(encoding="utf-8")
+        drives = {"m0": ("b", "r"), "s0": ("aw", "w", "ar"), "s1": ("ar",)}
+        for port, chans in drives.items():
+            for ch in ("aw", "w", "ar", "b", "r"):
+                label = f"cover_bus_{port}_{ch}_valid_before_ready"
+                if ch not in chans:
+                    assert label not in text, (config, label)
+                    continue
+                v, r = f"{port}_{proto}_{ch}valid", f"{port}_{proto}_{ch}ready"
+                assert (
+                    f"  logic bag_{port}_{ch}_was_valid = 1'b0, bag_{port}_{ch}_was_ready = 1'b0;\n"
+                    f"  always_ff @(posedge clk_sys) begin bag_{port}_{ch}_was_valid <= {v}; "
+                    f"bag_{port}_{ch}_was_ready <= {r}; end\n"
+                    f"  always @(posedge clk_sys) {label}: cover (bag_live_D_SYS && {v} && "
+                    f"!bag_{port}_{ch}_was_valid && !{r} && !bag_{port}_{ch}_was_ready);\n"
+                ) in text, (config, label)
+
+
 def test_every_cover_event_has_a_direction() -> None:
     """D92: a cover event is a write's, a read's or either's (wait, error, full, burst, kept
     with the writes). Review (PR #50): an event in no list went to the write group without a

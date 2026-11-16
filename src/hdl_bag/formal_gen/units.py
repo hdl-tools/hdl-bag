@@ -299,6 +299,36 @@ class _Harness:
         lines[-1] = lines[-1].rstrip(",")
         self.body += [*lines, "  );"]
 
+    def valid_first(self, a: Attach) -> None:
+        """D38 (#56): on each AXI4 or AXI4-Lite channel the unit drives on A, a cover of VALID
+        rising while READY was low at this edge and the one before. The checker asserts VALID
+        and its payload hold until READY; this shows VALID does not wait for READY, which a
+        one-edge stall cover cannot (a design waiting for a registered READY reaches that).
+        The unit drives B and R where it is the slave, AW, W and AR where it is the master;
+        on a fabric slave port, only for the accesses the IR sends there."""
+        bus, d = a.bus, a.bus.domain
+        if bus.protocol not in (Protocol.AXI4, Protocol.AXI4_LITE):
+            return
+        clk = self.domains()[d]
+        can = self.slave_can(a)
+        kinds = {"aw": "write", "w": "write", "ar": "read", "b": "write", "r": "read"}
+        chans = ("b", "r") if a.unit_is_slave else ("aw", "w", "ar")
+        for ch in chans:
+            valid, ready = f"{ch}valid", f"{ch}ready"
+            if can is not None and kinds[ch] not in can:
+                continue
+            if any(s not in bus.signals or s in bus.ties for s in (valid, ready)):
+                continue
+            v, r = self.v(bus, valid), self.v(bus, ready)
+            was = f"bag_{bus.name}_{ch}_was"
+            label = f"cover_{self.inst.name}_{bus.name}_{ch}_valid_before_ready"
+            self.body += [
+                f"  logic {was}_valid = 1'b0, {was}_ready = 1'b0;",
+                f"  always_ff @(posedge {clk}) begin {was}_valid <= {v}; {was}_ready <= {r}; end",
+                f"  always @(posedge {clk}) {label}: cover (bag_live_{d} && {v} && "
+                f"!{was}_valid && !{r} && !{was}_ready);",
+            ]
+
     def slave_can(self, a: Attach) -> frozenset[str] | None:
         """On a fabric's slave port, what the fabric reference sends there (as the protocol
         job's checkers have it); None elsewhere (the environment may send anything)."""
@@ -881,6 +911,7 @@ def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) ->
     for a in atts:
         h.quiet(a)
         h.checker(a)
+        h.valid_first(a)
     if inst.kind == "fabric":
         h.fabric_edge()
         h.arbitration()
