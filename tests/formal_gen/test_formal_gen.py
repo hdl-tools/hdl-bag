@@ -766,6 +766,21 @@ def test_a_route_unit_shows_valid_rising_while_ready_is_held_low(tmp_path: Path)
                     f"  always @(posedge clk_sys) {label}: cover (bag_live_D_SYS && {v} && "
                     f"!bag_{port}_{ch}_was_valid && !{r} && !bag_{port}_{ch}_was_ready);\n"
                 ) in text, (config, label)
+    # A bridge across domains (review, #107): its AXI4-Lite down side has the covers, sampled
+    # on that bus's clock but only once every domain of the unit is out of reset, as the
+    # crossing covers are (else a side that has not seen reset could raise VALID). Its APB up
+    # side has none.
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path / "cdc", P3)
+    br = (tmp_path / "cdc" / "formal" / "bridges_inhouse_cdc_route_br_lite.sv").read_text(
+        encoding="utf-8"
+    )
+    for ch in ("aw", "w", "ar"):
+        v = f"br_lite_2_lite_axil_{ch}valid"
+        assert (
+            f"  always @(posedge clk_sys) cover_br_lite_br_lite_2_lite_{ch}_valid_before_ready: "
+            f"cover (bag_live_D_AON && bag_live_D_SYS && {v} && "
+        ) in br, ch
+    assert br.count("_valid_before_ready: cover") == 3
 
 
 def test_every_cover_event_has_a_direction() -> None:

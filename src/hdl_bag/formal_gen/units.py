@@ -305,11 +305,14 @@ class _Harness:
         and its payload hold until READY; this shows VALID does not wait for READY, which a
         one-edge stall cover cannot (a design waiting for a registered READY reaches that).
         The unit drives B and R where it is the slave, AW, W and AR where it is the master;
-        on a fabric slave port, only for the accesses the IR sends there."""
+        on a fabric slave port, only for the accesses the IR sends there. Sampled on the
+        bus's clock once every domain of the unit is out of reset, as the crossing covers
+        are: a side of a CDC that has not seen reset could otherwise raise VALID."""
         bus, d = a.bus, a.bus.domain
         if bus.protocol not in (Protocol.AXI4, Protocol.AXI4_LITE):
             return
         clk = self.domains()[d]
+        live = " && ".join(f"bag_live_{x}" for x in sorted(self.domains()))
         can = self.slave_can(a)
         kinds = {"aw": "write", "w": "write", "ar": "read", "b": "write", "r": "read"}
         chans = ("b", "r") if a.unit_is_slave else ("aw", "w", "ar")
@@ -325,7 +328,7 @@ class _Harness:
             self.body += [
                 f"  logic {was}_valid = 1'b0, {was}_ready = 1'b0;",
                 f"  always_ff @(posedge {clk}) begin {was}_valid <= {v}; {was}_ready <= {r}; end",
-                f"  always @(posedge {clk}) {label}: cover (bag_live_{d} && {v} && "
+                f"  always @(posedge {clk}) {label}: cover ({live} && {v} && "
                 f"!{was}_valid && !{r} && !{was}_ready);",
             ]
 
