@@ -297,6 +297,14 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Address_Decode row 14: dma0 already has a row (6) (DEC-DUPLICATE)"]),
     ("DEC-MISSING-ROW", [("Address_Decode", 6, "Master", None), ("Address_Decode", 6, "Miss response", None)],
      ["Address_Decode: master port dma0 on main_xbar has no row (DEC-MISSING-ROW)"]),
+    # br_main2cfg pass-through N: cfg_bus decodes its offsets, but sec0 sends system addresses.
+    ("DEC-MIXED-TRANSLATION", [("Bridges", 8, "Pass-through address", "N")],
+     ["Fabrics row 6: the masters of cfg_bus see different addresses (br_main2cfg: offsets from 0x4100_0000; sec0: system addresses), but one decoder serves them all: give them separate fabrics, or set Pass-through address to Y on the bridges (DEC-MIXED-TRANSLATION)"]),
+    # br_ahb2main pass-through N: main_xbar mixes it with direct masters, and br_main2cfg,
+    # pass-through Y behind it, carries its offset on into cfg_bus beside sec0.
+    ("DEC-MIXED-TRANSLATION", [("Bridges", 7, "Pass-through address", "N")],
+     ["Fabrics row 5: the masters of main_xbar see different addresses (cpu0: system addresses; dma0: system addresses; dbg0: system addresses; br_ahb2main: offsets from 0x1000_0000), but one decoder serves them all: give them separate fabrics, or set Pass-through address to Y on the bridges (DEC-MIXED-TRANSLATION)",
+      "Fabrics row 6: the masters of cfg_bus see different addresses (br_main2cfg: offsets from 0x1000_0000; sec0: system addresses), but one decoder serves them all: give them separate fabrics, or set Pass-through address to Y on the bridges (DEC-MIXED-TRANSLATION)"]),
     ("DEC-MISS-RESP", [("Address_Decode", 6, "Miss response", "PSLVERR")],
      ["Address_Decode row 6: PSLVERR does not suit AXI4 fabric main_xbar (DECERR, SLVERR, default-slave) (DEC-MISS-RESP)"]),
     ("DEC-DEFAULT-SLAVE", [("Address_Decode", 6, "Miss response", "default-slave")],

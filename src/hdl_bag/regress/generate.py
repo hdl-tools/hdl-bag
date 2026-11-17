@@ -140,8 +140,8 @@ def random_config(seed: int) -> Cfg:
     if rng.random() < 0.2:
         _feeder(d, bridges)
     for fab in list(d.fabrics.values()):
-        # A direct master beside a pass-through N bridge would see other addresses, which
-        # bag generate refuses (gen/decode.py fabric_offset).
+        # A direct master beside a pass-through N bridge would see other addresses
+        # (DEC-MIXED-TRANSLATION).
         if (fab.proto not in ("APB4", "APB3") and not d.offset.get(fab.name, False)
                 and len(fab.masters) < 3 and rng.random() < 0.25):  # fmt: skip
             _master(d, fab)

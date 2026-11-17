@@ -14,7 +14,6 @@ from hypothesis import strategies as st
 
 from hdl_bag.checks import run_checks
 from hdl_bag.gen import generate
-from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import dumps, resolve
 from hdl_bag.ir.to_workbook import to_workbook
 from hdl_bag.reader import read_workbook
@@ -224,8 +223,8 @@ def test_the_rules_the_generator_restates_still_hold(tmp_path: Path) -> None:
     c.option("m0", **APB3_NA).option("s0", **APB3_NA)
     _, result = check(c, tmp_path / "prot")
     assert [f.rule for f in result.errors] == ["SEC-PROT-TIED"]
-    # A direct master beside a pass-through N bridge on one fabric: bag check accepts it,
-    # bag generate refuses it (gen/decode.py fabric_offset; an open question for a check).
+    # A direct master beside a pass-through N bridge on one fabric (DEC-MIXED-TRANSLATION;
+    # bag generate refuses it too, gen/decode.py fabric_offset).
     c = _small("r_offset")
     c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
     c.fabric("b", "AXI4-Lite", 32, 32, "D0", "round-robin")
@@ -239,9 +238,7 @@ def test_the_rules_the_generator_restates_still_hold(tmp_path: Path) -> None:
     for port in ("m1", "s0", "br"):
         c.option(port, **AXIL_NA)
     _, result = check(c, tmp_path / "offset")
-    assert [f.message for f in result.errors] == []
-    with pytest.raises(GenerateError, match="its masters see different address translations"):
-        generate(resolve(result), tmp_path / "offset" / "out", tmp_path / "offset")
+    assert [f.rule for f in result.errors] == ["DEC-MIXED-TRANSLATION"]
 
 
 def test_the_file_header_is_systemverilog_comments() -> None:

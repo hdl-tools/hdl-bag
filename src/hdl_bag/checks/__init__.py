@@ -45,6 +45,7 @@ def run_checks(raw: RawSpec, base_dir: Path, registry: Registry | None = None) -
         memory.check_bridge_windows(ctx, regions)
         memory.check_access_rules(ctx)
         memory.check_address_decode(ctx, regions)
+        memory.check_mixed_translation(ctx)
         memory.check_secure_prot(ctx, regions)
         wrapper.check_hierarchy(ctx)
         wrapper.check_wrapper_ports(ctx)

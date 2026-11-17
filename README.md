@@ -14,7 +14,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 90 validation checks | AXI4 and AHB-Lite protocol properties, decode properties, and nightly random regression (Phase 5) |
+| Spec workbook template, reader and 92 validation checks | AXI4 and AHB-Lite protocol properties, decode properties, and nightly random regression (Phase 5) |
 | Canonical YAML IR, byte-identical across runs | CDC constraints, user guide and v1.0 release (Phase 6) |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
