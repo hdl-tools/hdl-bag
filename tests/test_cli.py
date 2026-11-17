@@ -154,6 +154,8 @@ def test_lint_uses_the_project_lint_tools(tmp_path: Path, monkeypatch: pytest.Mo
     (None, "no bag_outputs.json here: give the output directory that bag generate wrote"),
     ("{not json", "bag_outputs.json cannot be read: run bag generate again"),
     ('{"top": null, "files": [], "filelist": ""}', "no RTL was generated (see bag_outputs.json)"),
+    ('{"top": "x"}', "bag_outputs.json cannot be read: run bag generate again"),
+    ('{"top": "x", "files": {}, "filelist": 3}', "bag_outputs.json cannot be read: run bag generate again"),
 ])  # fmt: skip
 def test_a_folder_that_is_not_an_output_directory_is_an_error_not_a_traceback(
     tmp_path: Path, command: str, manifest: str | None, message: str

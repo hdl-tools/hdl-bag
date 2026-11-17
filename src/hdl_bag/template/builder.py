@@ -40,6 +40,8 @@ THIN = Side(style="thin", color="BFBFBF")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 WRAP = Alignment(wrap_text=True, vertical="top")
 HDR_ROW, FIRST = 4, 5
+# Wrapper > Adapter instance naming, read by the Adapter instances formulas.
+WRAPPER_NAMING_ROW = HDR_ROW + 9
 MAXR = 60  # rows covered by validation / formula ranges on most sheets
 TMAX = 200  # Topology rows covered by lookups
 SW_LAST = 12  # Hierarchy sub-wrapper rows 5..12
@@ -400,9 +402,12 @@ class _Builder:
         d1, d2 = ("H{r}", "Q{r}") if direction == "in" else ("Q{r}", "H{r}")
         frm, to = ("A{r}", "C{r}") if direction == "in" else ("C{r}", "A{r}")
 
-        # Names from Wrapper > Adapter instance naming (Wrapper!B13), as resolve gives them.
+        # Names from Wrapper > Adapter instance naming, as resolve gives them. The row is
+        # pinned by tests/template/test_builder.py, like the validations of the Wrapper sheet.
+        pattern = f"Wrapper!$B${WRAPPER_NAMING_ROW}"
+
         def name(kind: str) -> str:
-            return (f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(Wrapper!$B$13,"{{from}}",{frm}),'
+            return (f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({pattern},"{{from}}",{frm}),'
                     f'"{{type}}","{kind}"),"{{to}}",{to})')  # fmt: skip
 
         inst = (
@@ -537,6 +542,7 @@ class _Builder:
             f'IF(COUNTIFS({_rng("A")},A{{r}},{_rng("B")},B{{r}})>1,"DUPLICATE",'
             f'IF(AND(F{{r}}<>"fabric",COUNTIF({_rng("A")},A{{r}})>1),"MULTI-ATTACH",'
             f'IF(AND(G{{r}}<>"fabric",COUNTIF({_rng("B")},B{{r}})>1),"MULTI-ATTACH",'
+            'IF(C{r}="","INDEX MISSING",'  # before the range test: "" > any number in Excel
             f'IF({idx_bad},"INDEX NOT INTEGER",'
             'IF(J{r}>=K{r},"INDEX OUT OF RANGE",'
             f'IF(COUNTIFS({_rng("H")},H{{r}},{_rng("I")},I{{r}},{_rng("J")},J{{r}})>1,"INDEX REPEATED",'
@@ -544,7 +550,7 @@ class _Builder:
             f'IF(AND(I{{r}}="master port",{arb}="fixed-priority",D{{r}}=""),"PRIORITY MISSING",'
             f'IF(AND(I{{r}}="master port",{arb}="fixed-priority",'
             f'COUNTIFS({_rng("H")},H{{r}},{_rng("I")},"master port",{_rng("D")},D{{r}})>1),"PRIORITY REPEATED",'
-            '"ok")))))))))))'
+            '"ok"))))))))))))'
         )  # fmt: skip
         res_idx = '=IF(C{r}<>"",C{r},"")'  # a blank Port index is an error, not row order
         n_side = f"=COUNTIFS({_rng('H')},H{{r}},{_rng('I')},I{{r}})"
@@ -565,7 +571,7 @@ class _Builder:
             _drv("Resolved index", 9, "Port index used for generation: the Port index (a blank is an error).", res_idx),
             _drv("Ports on side", 9, "Number of links on this fabric side; legal indices are 0 .. this - 1.", n_side),
             _drv("Check", 20,
-                 "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
+                 "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX MISSING | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
                  "INDEX REPEATED | PRIORITY NOT INTEGER | PRIORITY MISSING | PRIORITY REPEATED", topo_check),
         ], "topology", spare=30)  # fmt: skip
         self.check_format(ws, "L", last=TMAX)

@@ -283,10 +283,12 @@ Setting & What it switches \\
   generated. \\
 \setting{Generate C header} & \file{sw/<project>_memmap.h}. \\
 \setting{Generate memory-map doc} & All of \file{doc/}: the memory map in Markdown and
-  HTML, the port map, the tie-off report and the reset sequence. \\
+  HTML, the port map, the reset sequence, and the tie-off report (with \setting{Generate RTL}
+  = \code{Y}). \\
 \setting{Generate cocotb unit tests} & All of \file{tests/}: the tests, the copy of the
-  IR and the READY shim. \\
-\setting{Generate formal (SymbiYosys)} & All of \file{formal/}. \\
+  IR and the READY shim (with \setting{Generate RTL} = \code{Y}). \\
+\setting{Generate formal (SymbiYosys)} & All of \file{formal/} (with \setting{Generate RTL}
+  = \code{Y}). \\
 \setting{Lint tools} & No file: the tools that \cmd{bag lint} runs, recorded in the
   manifest. \\
 \setting{Simulator} & No file: the simulator of \cmd{bag sim}, recorded in the manifest.
@@ -295,8 +297,9 @@ Setting & What it switches \\
 \end{tabularx}
 \end{center}
 
-The parameter package, the top wrapper, the sub-wrappers, the copied RTL, the file list
-and the manifest are always written. Wrapper > \setting{Port style} and Wrapper >
+With \setting{Generate RTL} = \code{Y}, the parameter package, the top wrapper, the
+sub-wrappers, the copied RTL and the file list are always written; the manifest always
+is. Wrapper > \setting{Port style} and Wrapper >
 \setting{File header} change what the RTL looks like, but not which parts are written.
 
 \section{A user-supplied fabric}

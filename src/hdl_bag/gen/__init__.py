@@ -238,6 +238,9 @@ def load_outputs(root: Path) -> Outputs:
         raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
+    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
+            and isinstance(data.get("files"), dict | list)):  # fmt: skip
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     defaults = Outputs(root, (), "", "")
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
@@ -268,10 +271,15 @@ def _manifest(
 ) -> None:
     # Remove files a previous run wrote that this run did not (e.g. after a style change).
     old = root / MANIFEST
-    if old.is_file():
-        for rel in json.loads(old.read_text(encoding="utf-8")).get("files", {}):
-            if rel not in written:
-                (root / rel).unlink(missing_ok=True)
+    try:
+        listed = (
+            json.loads(old.read_text(encoding="utf-8")).get("files", {}) if old.is_file() else {}
+        )
+    except (OSError, UnicodeDecodeError, ValueError, AttributeError):
+        listed = {}  # an unreadable manifest lists nothing to clean up; this run replaces it
+    for rel in listed if isinstance(listed, dict | list) else ():
+        if isinstance(rel, str) and rel not in written:
+            (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
     data = {
         "files": entries,

@@ -256,3 +256,25 @@ def test_bag_generate_and_flow_say_there_is_no_rtl(tmp_path: Path) -> None:
     got = CliRunner().invoke(main, ["flow", str(ir_path), "-o", str(tmp_path / "flow")])
     assert got.exit_code == 0, got.output
     assert got.output.splitlines()[-1] == note
+
+
+def test_generate_rtl_n_after_y_removes_the_rtl_of_the_earlier_run(tmp_path: Path) -> None:
+    """D100 review: generating with Generate RTL = N into a directory that holds an earlier
+    run's RTL leaves only this run's files (the manifest removes the rest)."""
+    ir_path = _no_rtl(tmp_path)
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert (out / "rtl").is_dir()
+    done = generate(load(ir_path), out, tmp_path)
+    left = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    assert left == sorted([*done.files, MANIFEST])
+
+
+def test_generate_over_a_corrupt_manifest_writes_a_fresh_one(tmp_path: Path) -> None:
+    """A broken bag_outputs.json from an earlier run is no reason to stop: running bag
+    generate again is the remedy the error line names (cleanup review)."""
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / MANIFEST).write_text("{not json", encoding="utf-8")
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert load_outputs(out).top
