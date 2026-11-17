@@ -1,0 +1,126 @@
+\documentclass[11pt,a4paper,oneside]{report}
+
+% Only packages that TeX Live (CI) and MiKTeX both ship. tests/manual/test_manual.py checks the list.
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{microtype}
+\DisableLigatures[-]{encoding = T1, family = tt*}
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage{parskip}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{upquote}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\input{version}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlist[description]{font=\bfseries,leftmargin=1.5em,labelindent=0pt}
+\emergencystretch=3em
+\raggedright
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+\raggedbottom
+
+\hypersetup{pdftitle={BAG user manual},pdfauthor={hdl-bag}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small BAG \bagversion}
+\fancyhead[R]{\small\nouppercase{\leftmark}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% Listings: every example of the manual is a file under examples/, shown with \lstinputlisting.
+\definecolor{ruleblue}{RGB}{70,90,140}
+\definecolor{notegray}{RGB}{110,110,110}
+\lstdefinelanguage{transcript}{morecomment=[l]{\$\ }}
+\lstdefinestyle{base}{%
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  breakatwhitespace=true,
+  postbreak=\mbox{\textcolor{notegray}{\(\hookrightarrow\)}\space},
+  keepspaces=true,
+  columns=fullflexible,
+  upquote=true,
+  showstringspaces=false,
+  frame=leftline,
+  framerule=1.2pt,
+  rulecolor=\color{ruleblue},
+  xleftmargin=1.2em,
+  xrightmargin=0pt,
+  aboveskip=0.8em,
+  belowskip=0.8em,
+  extendedchars=false}
+\lstdefinestyle{console}{style=base,language=transcript,commentstyle=\bfseries}
+\lstdefinestyle{source}{style=base,commentstyle=\color{notegray}\itshape,morecomment=[l]{//}}
+\lstdefinestyle{yaml}{style=base,commentstyle=\color{notegray}\itshape,morecomment=[l]{\#}}
+\lstset{style=base}
+% The file name stands above each listing and stays with it.
+\let\lstinputlistingorig\lstinputlisting
+\renewcommand{\lstinputlisting}[2][]{%
+  \par
+  \ifdim\pagegoal=\maxdimen\else\ifdim\dimexpr\pagegoal-\pagetotal\relax<7\baselineskip\newpage\fi\fi
+  \addvspace{0.9em}\noindent
+  {\footnotesize\bfseries\ttfamily\detokenize{#2}}\par\nobreak\vskip0.2em
+  \lstinputlistingorig[#1,aboveskip=0pt]{#2}}
+\captionsetup{font=small,labelfont=bf}
+
+% Names in running text. \sheet, \col and \setting name the workbook's sheets, input
+% columns and settings; the manual test checks that every one of them is described.
+\newcommand{\cmd}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\opt}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\file}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\term}[1]{\emph{#1}}
+\newcommand{\sheet}[1]{\textsf{\detokenize{#1}}}
+\newcommand{\col}[1]{\textsf{\detokenize{#1}}}
+\newcommand{\setting}[1]{\textsf{\detokenize{#1}}}
+\newcommand{\ruleid}[1]{\texttt{\detokenize{#1}}}
+
+% The check reference (checks.tex, generated): one \checkrule per rule ID.
+\newcommand{\checkrule}[3]{\ruleid{#1} & #2 & \raggedright\footnotesize\ttfamily #3\tabularnewline}
+
+% One reference entry: a name, then labelled points.
+\definecolor{headbg}{RGB}{226,231,244}
+\makeatletter
+\newenvironment{entry}[1]{%
+  \par\addvspace{1.8ex}\noindent
+  \colorbox{headbg}{\begin{minipage}{\dimexpr\linewidth-2\fboxsep\relax}\raggedright\bfseries #1\end{minipage}}%
+  \par\nobreak\vskip0.4ex
+  \@beginparpenalty=10000
+  \begin{description}[leftmargin=2.2em,labelindent=0.4em,itemsep=1pt,topsep=2pt]}%
+  {\end{description}}
+\makeatother
+
+\title{BAG: Bus Architecture Generator\\[0.4em]\large User manual}
+\author{Version \bagversion}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\input{chapters/intro}
+\input{chapters/install}
+\input{chapters/first}
+\input{chapters/workbook}
+\input{chapters/checks}
+\input{chapters/ir}
+\input{chapters/outputs}
+\input{chapters/flows}
+\input{chapters/cli}
+\input{chapters/limits}
+
+\end{document}

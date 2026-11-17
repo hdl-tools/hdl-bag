@@ -1,0 +1,79 @@
+\chapter{Checks}
+\label{ch:checks}
+
+\cmd{bag check} reads the workbook and runs every check before anything is written.
+\cmd{bag ir}, \cmd{bag generate} and \cmd{bag flow} run the same checks first, on a
+workbook and on an IR alike (chapter~\ref{ch:ir}).
+
+\section{How a finding reads}
+
+Each problem the checks find is a \term{finding}. It is one line:
+
+\begin{center}
+\code{<severity>: <Sheet> row <n>: <what is wrong> (<RULE-ID>)}
+\end{center}
+
+\begin{description}
+\item[severity] \code{error} or \code{warning}. An error stops BAG: \cmd{bag check}
+  exits with status 1, and nothing is generated. A warning is printed and BAG goes on.
+\item[sheet and row] Where to look in the workbook. The row is the Excel row number.
+  A finding about something that is missing has no row, for example
+  \code{Address_Decode: master port dma0 on main_xbar has no row}.
+\item[what is wrong] The value, and what to do about it where that is not obvious.
+\item[rule ID] A stable name for the check, such as \ruleid{TOPO-INDEX-RANGE}. Its
+  first word names the area: \ruleid{TOPO} the Topology sheet, \ruleid{MM} the memory
+  map, \ruleid{DEC} address decode, and so on. Use the rule ID to find the check in the
+  table below.
+\end{description}
+
+After the findings, \cmd{bag check} prints one summary line, for example
+\code{spec.xlsx: 0 error(s), 2 warning(s)}.
+
+Findings come in the order of the sheets and rows, so fix the first ones first: one
+mistake can cause later findings. For example, a misspelt fabric name on the Topology
+sheet also leaves ports unconnected.
+
+\section{Two kinds of check}
+
+Most checks look at one sheet, or compare sheets: that a name is defined, that a value
+is legal, that two regions do not overlap. A few checks need the resolved design, for
+example to know which adapters BAG inserts. They run only when the others find no error.
+The WRAP warnings of the sample (section~\ref{ch:first}) are of this kind: they follow
+the path from a master through its adapters.
+
+A few problems are found only by \cmd{bag generate}. It then stops with \code{error:}
+and a message that names the fabric, instance or name, and writes no RTL. These are:
+
+\begin{itemize}
+\item two names that become the same name in the generated files: two entries of the
+  parameter package (\code{package names collide}), two C macros, a generated net and
+  a wrapper port, or a sub-wrapper with the name of the top wrapper. Rename one of them.
+\item two user-supplied fabrics that share an External module but would need different
+  ports, for example through different ID widths.
+\item a fabric whose masters see different address translations: a pass-through N
+  bridge on the same fabric as a direct master, or as a bridge with another window. One
+  decoder serves all the masters of a fabric, so give them separate fabrics.
+\end{itemize}
+
+\section{Every check}
+
+The table lists every rule, in alphabetical order, with its severity and the message it
+gives on a broken copy of the sample workbook. The table is generated from the checks
+themselves, so it is complete. Your message names your own sheet rows, ports and values.
+
+\begingroup
+\footnotesize
+\begin{longtable}{@{}>{\raggedright}p{0.28\linewidth}>{\raggedright}p{0.08\linewidth}p{0.58\linewidth}@{}}
+\toprule
+Rule ID & Severity & Example message \tabularnewline
+\midrule
+\endfirsthead
+\toprule
+Rule ID & Severity & Example message \tabularnewline
+\midrule
+\endhead
+% \input cannot run inside a table (it leaves \bottomrule misplaced); the primitive can.
+\csname @@input\endcsname checks.tex
+\bottomrule
+\end{longtable}
+\endgroup

@@ -27,6 +27,9 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
 | `bag formal`: SymbiYosys jobs per design: quiet-in-reset, and AXI4-Lite and APB port protocol (ZipCPU checkers) | |
 
+The user manual is LaTeX in [docs/manual](docs/manual) (`latexmk -pdf hdl-bag.tex` there);
+the `manual` workflow builds the PDF as the artifact `hdl-bag-manual`.
+
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
 
 ## Quick start

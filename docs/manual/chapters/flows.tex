@@ -1,0 +1,475 @@
+\chapter{Lint, simulation and formal}
+\label{ch:flows}
+
+After \cmd{bag generate}, three commands check the generated design with EDA tools:
+\cmd{bag lint}, \cmd{bag sim} and \cmd{bag formal}. Each takes the output directory as
+its only argument and reads \file{bag_outputs.json} to find the files, the top module
+and the settings (section~\ref{sec:manifest}). \cmd{bag flow} runs the whole chain from
+the spec. The tools must be installed at the versions of section~\ref{sec:eda}; the
+tools image has all of them.
+
+\section{How a report reads}
+\label{sec:report}
+
+Every flow prints a \term{report}. A report has one line per \term{finding}, then a
+summary line, then any notes. A finding line reads:
+
+\begin{center}
+\code{TOOL: FILE:LINE: SEVERITY: MESSAGE [RULE]}
+\end{center}
+
+\code{TOOL} is the tool that reported it. \code{FILE} is relative to the output
+directory; a finding that has no place leaves out \code{FILE:LINE:}. \code{SEVERITY} is
+\code{error} or \code{warning}. \code{RULE} is the tool's own name for the finding, or
+one of BAG's rule IDs below. A finding that a waiver covers ends with
+\code{(waived)}.
+
+The summary line names the flow and its tools, and counts the findings:
+\code{N unwaived finding(s), M waived}. A flow passes when it has no unwaived finding,
+error or warning. Then the command exits with status 0. Otherwise it exits with status
+1. A note (\code{note: ...}) is information for you, for example that a tool is not the
+pinned version. A note never makes a flow fail.
+
+Two rule IDs can come from any tool:
+
+\begin{description}
+\item[\ruleid{TOOL-MISSING}] The tool's program is not on your \code{PATH}. Install it,
+  or run BAG in the tools image.
+\item[\ruleid{TOOL-FAILED}] The tool ended with a non-zero exit status but reported no
+  finding that BAG could read. The message gives the exit status and the tool's last
+  line of output.
+\end{description}
+
+\section{Lint}
+\label{sec:lint}
+
+\cmd{bag lint} checks the generated RTL with static tools. It runs the tools of Project >
+\setting{Lint tools}, in that order, on every file of the file list, with the top of the
+manifest as the top module. The default is all three tools:
+
+\begin{description}
+\item[slang] \code{slang --quiet -Weverything}, plus the options of BAG's
+  \file{slang.flags} (below). It elaborates the whole design.
+\item[Verilator] \code{verilator --lint-only -Wall}. It elaborates the whole design.
+\item[Verible] \code{verible-verilog-lint} with Verible's default rules. It checks style,
+  one file at a time, and skips the vendored files.
+\end{description}
+
+The lint passes when no tool reports a finding that is not waived. A warning counts as
+much as an error. Verilator reports an elaboration-time \code{$error} or \code{$fatal}
+in the RTL (\code{USERERROR}, \code{USERFATAL}) as a warning; BAG judges it as an error,
+because it is the design's own check of an illegal parameter.
+
+\lstinputlisting[style=console]{examples/console/eda/flow-lint.txt}
+
+\subsection{Third-party RTL}
+
+The files under \file{rtl/vendor/} are \term{third-party} RTL: the PULP files and the
+files BAG derives from them. slang and Verilator still read them, so that every
+instantiation of a vendored module is checked. But BAG does not judge the warnings in
+those files: it counts them in one line, \code{N third-party warning(s) in rtl/vendor/ not
+judged}, and the lint still passes. An error in a vendored file still fails the lint.
+
+A Verilator \code{UNOPTFLAT} warning (combinational logic that loops) is reported at one
+signal of the loop. When the rest of the loop is in vendored files or in BAG's
+in-house wrappers around them, BAG moves the warning to the first vendored file on the
+loop and counts it as third-party. A loop that runs through any other generated signal
+stays where it is and is judged: that is where a generator error could wire a READY
+back into a VALID.
+
+\subsection{Built-in configuration and waivers}
+
+BAG ships its lint configuration. Each option and each waiver carries its reason.
+A \term{waiver} accepts one kind of finding at the places it names, so that the finding
+does not fail the lint.
+
+The options that \file{slang.flags} adds to \code{-Weverything}:
+
+\begin{description}
+\item[\code{-Wno-unused-def}] The file list holds whole libraries, so some modules in it
+  are not used by this design.
+\item[\code{-Wno-case-redundant-default}] Every \code{case} lists its enum values and
+  keeps a \code{default} for X and reset safety.
+\item[\code{-Wno-useless-cast}] A width cast in parameterised RTL is an identity for some
+  parameter values.
+\item[\code{-Wno-unused-but-set-variable}] The \code{unused} sink idiom; Verilator's
+  \code{UNUSED} warnings check unused signals instead.
+\end{description}
+
+Verible runs its default rules with no change. The built-in waivers are:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Tool & Rule & Files \\
+\midrule
+slang & \code{unused-package-parameter} & \file{rtl/pkg/*.sv} \\
+Verilator & \code{UNUSEDPARAM} & \file{rtl/pkg/*.sv} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both waivers have the same reason. The parameter package exports every fabric table and
+the whole memory map for the SoC that instantiates the wrapper; the wrapper itself reads
+only the tables that its templates need. So most designs show some waived findings in
+the package. There is no Verible waiver.
+
+A built-in waiver whose files are in the design but that waives nothing is itself an
+error, \ruleid{WAIVER-UNUSED}, so that stale waivers cannot pile up. BAG reports it only when the tool ran to the end (no
+error stopped it early) and is the pinned version that the waivers were written for.
+With another version it is a note (section~\ref{sec:versions}).
+
+You cannot add waivers of your own from the command line.
+
+\section{Compile}
+\label{sec:compile}
+
+The compile step elaborates the design with Verilator as a simulator would: \code{verilator
+--cc} with the file list and the top of the manifest. Lint warnings are switched off here,
+because they are the lint step's job; only errors count. The model goes to
+\file{obj/<top>/} in the output directory.
+
+There is no command of its own for this step: \cmd{bag flow} runs it after the lint. When
+the design has generated tests, it only elaborates (\code{verilator-elaborate} in the
+report), because \cmd{bag sim} builds the simulation model itself. Without generated
+tests, it also builds the C++ model (\code{verilator-build}), so that the design is
+compiled at least once.
+
+\section{Simulation}
+\label{sec:sim}
+
+\cmd{bag sim} runs the generated cocotb tests (section~\ref{sec:tests}) with Verilator. It
+needs the \code{sim} extra of BAG, which installs cocotb and cocotbext-axi
+(chapter~\ref{ch:install}). It builds the model in \file{sim/} of the output directory,
+runs every test of \file{tests/<project>_tests.py}, and reads the results that cocotb
+writes (\file{sim/results.xml}).
+
+\cmd{bag sim} stops with an error, before it runs anything, when:
+
+\begin{itemize}
+\item the output directory has no generated tests (Project > \setting{Generate cocotb unit
+  tests} is N, or the design has a user-supplied fabric);
+\item Project > \setting{Simulator} is not \code{verilator};
+\item cocotb is not installed.
+\end{itemize}
+
+The run also fails when the output directory was generated by another version of BAG:
+generate it again with the version you run.
+
+\lstinputlisting[style=console]{examples/console/eda/flow-sim.txt}
+
+\subsection{What the tests check}
+
+The tests drive the top through bus models: one model per master port and one per slave
+port. A \term{reference model} in BAG computes, from the IR, what every access must do:
+which slave it reaches and at which address, or which error it gets. Each test compares
+what the design does with the reference model. Every test also counts what it checked,
+and fails if it checked nothing.
+
+BAG writes only the tests that can check something on your design. The full list, in the
+order they run:
+
+\begin{description}
+\item[\code{every_master_reaches_what_the_model_says}] Every master writes and reads the
+  first, middle and last words of every region, the words around it, and both edges of
+  every alias window, with each setting of the alias pins and, where there are secure
+  regions, both security states. Each access reaches the slave and address that the
+  model names, or gets the error it names. Every design has this test.
+\item[\code{arbitration_follows_the_fabric_policy}] AHB-Lite fabrics with contention: the
+  arbiter grants in the order of the fabric's policy.
+\item[\code{concurrent_traffic_keeps_every_masters_data}] All masters at once, with
+  several transactions in flight: every write lands, and every read returns that
+  master's own data.
+\item[\code{traffic_survives_back_pressure_on_every_channel}] The same traffic, single
+  beats and then bursts, with random stalls on every channel: at the slaves, then at the
+  masters, then at both.
+\item[\code{reset_during_traffic_leaves_nothing_behind}] Every reset is asserted while a
+  request to each slave is in its handshake. While reset is held, nothing asks a model
+  to act. After it, nothing left over appears, and fresh traffic returns the right data.
+\item[\code{traffic_crosses_clock_domains_at_every_ratio}] Designs with clock-domain
+  crossings: traffic at several clock ratios (equal periods out of phase, 1:3, 3:1, 10:7
+  and 7:10).
+\item[\code{shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not}] With one
+  slave stalled, a second master's access waits on a shared bus and completes on a
+  crossbar.
+\item[\code{slave_decerr_returns_as_the_model_says}] An AXI slave answers DECERR: each
+  master gets the response that its path gives it, and the same word works afterwards.
+\item[\code{exclusive_accesses_carry_lock_and_exokay_unchanged}] AXI4 exclusive accesses:
+  AxLOCK reaches the slave and EXOKAY reaches the master. BAG does not implement
+  exclusive accesses; it must not disturb them.
+\item[\code{axi_arbitration_rounds_starvation_and_lock}] AXI fabrics with several masters
+  on one slave: the order of grants per round, starvation, and that a grant does not
+  change before its handshake.
+\item[\code{axi_shared_bus_midpoint_buffers_reads}] An AXI shared bus with a mid-point
+  FIFO or register slices: a master can issue exactly as many reads as the mid-point
+  holds.
+\item[\code{axi4_bursts_reach_slaves_and_error_paths}] AXI4 INCR bursts reach their slave,
+  and a burst to an unmapped or denied address gets the error on every beat.
+\item[\code{axi4_crossbars_admit_max_mst_trans_per_id}] AXI4 crossbars admit
+  Fabrics > \col{Max mst trans} reads on one ID.
+\item[\code{narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors}] APB slaves narrower
+  than 32 bits behind \code{bag_axi2apb}: addresses, byte lanes, strobes, and an error on
+  any beat.
+\item[\code{unaligned_axi_writes_store_only_their_bytes}] A write that starts 1, 2 or 3
+  bytes into a word stores exactly its bytes.
+\item[\code{an_error_on_any_beat_of_a_split_access_reaches_the_master}] A word split into
+  several beats for a narrow slave: an error on any beat reaches the master.
+\item[\code{axi4_burst_shapes_match_the_model}] Every AXI4 burst shape that the model
+  knows, written and read back; where a converter on the path refuses the burst, the
+  master gets SLVERR and nothing is stored.
+\item[\code{single_bytes_reach_both_ends_of_every_region}] AXI4 and AHB-Lite masters:
+  single bytes at the first and last byte of every region, and just outside it.
+\item[\code{apb_byte_writes_carry_pstrb}] A byte write to an APB4 slave carries the right
+  PSTRB, and the other bytes keep their value.
+\item[\code{axi_ports_take_every_handshake_ordering}] On every AXI channel that a model
+  answers: READY before VALID, after VALID, and in the same cycle. A design whose VALID
+  waits for READY times out.
+\end{description}
+
+A test fails when the design does something else, or when it runs out of time; each test
+has a time limit, so a design that deadlocks fails instead of hanging. The rule IDs of
+\cmd{bag sim}, each an error:
+
+\begin{description}
+\item[\ruleid{TEST-FAILED}] A test failed. The message names it.
+\item[\ruleid{TEST-SKIPPED}] A test was skipped. A generated test must run.
+\item[\ruleid{TEST-SET}] The tests that ran are not the tests that were expected.
+\item[\ruleid{SIM-EXIT}] Every test passed, but the simulator then exited with a non-zero
+  status.
+\end{description}
+
+\subsection{The seed}
+
+The tests make random choices, for example the stall patterns. They take them from one
+fixed \term{seed}, \code{20261031}, so a run gives the same result every time and a
+failure can be repeated. Every finding of \cmd{bag sim} names the seed. To try another seed, set the
+environment variable \code{BAG_COCOTB_SEED} to a number before you run \cmd{bag sim}.
+One seed is a limit of the tests (chapter~\ref{ch:limits}).
+
+\subsection{Running some of the tests}
+
+\opt{--filter} takes a regular expression and runs only the tests whose name it finds.
+The name it searches is \code{<project>_tests.<test>}, for example
+\code{lite_ss_tests.every_master_reaches_what_the_model_says}. An expression that finds
+no test is an error.
+
+\subsection{The READY shim}
+
+\opt{--ready-shim} runs the test \code{traffic_survives_back_pressure_on_every_channel}
+through the READY shim of \file{tests/} instead of the top (section~\ref{sec:tests}). The
+shim drives each AXI READY into the design from that channel's VALID. If the design
+waits for READY before it raises VALID, the loop does not settle and the test fails. The
+build goes to \file{sim_ready_shim/}. The option cannot be used with \opt{--filter}, and
+it is an error when the design has no shim.
+
+\lstinputlisting[style=console]{examples/console/eda/flow-ready-shim.txt}
+
+\subsection{The coverage report}
+
+\cmd{bag sim} writes a \term{functional coverage} report, \file{sim/coverage.md}, and the
+counts it is made from, \file{sim/coverage.json}. A \term{bin} is one thing the spec says
+the design does. The report has four kinds of bins:
+
+\begin{description}
+\item[path] each master reaches each slave, by read and by write;
+\item[response] each response kind a master gets from each slave: OKAY, a slave error, or
+  a miss;
+\item[secure] each master's accesses to each secure-only region, secure and non-secure,
+  allowed or refused;
+\item[burst] each AXI4 master's burst shapes, and whether a converter on the path
+  refuses them.
+\end{description}
+
+The report of \cmd{bag sim} ends with one note per kind, \code{coverage: KIND COVERED/BINS},
+and a note with the path of the coverage report. A test records a bin only after it has checked that
+access. So a run with \opt{--filter}, or a test that fails, leaves bins uncovered.
+
+The coverage report is a report only. It has no closure target, and it never makes
+\cmd{bag sim} fail. Its bins come from the same addresses and burst shapes that the
+tests use, so a full passing run always reads 100\%: the report shows what a run
+exercised, not what the tests never try (chapter~\ref{ch:limits}).
+
+The transcript in section~\ref{sec:sim} ends with the coverage report of the
+\code{lite_ss} run.
+
+\section{Formal}
+\label{sec:formal}
+
+\cmd{bag formal} runs the SymbiYosys jobs that \cmd{bag generate} wrote into
+\file{formal/} (section~\ref{sec:jobs}), one job after the other, and prints one report
+for all of them. A job runs in \file{formal/}; each of its tasks gets a work folder there,
+\file{formal/<job>_<task>/}, which the next run replaces.
+
+\subsection{Jobs, tasks and modes}
+
+A \term{job} is one \file{.sby} file. It has one or more \term{tasks}; SymbiYosys names
+each task \code{<job>_<task>}, for example \code{lite_ss_reset_prove}. Each task runs in
+one of three \term{modes}, to a \term{depth} counted in \term{solver steps}:
+
+\begin{description}
+\item[\code{bmc}] A \term{bounded} check. The solver tries every input sequence of up to
+  \emph{depth} steps from the start, and looks for one that makes an assertion fail. A
+  pass means that no assertion fails within that many steps. It says nothing about a
+  later step. The report adds a note for each bmc task:
+  \code{<task>: bounded check to depth N (bmc), not a proof}.
+\item[\code{prove}] A proof by induction (k-induction with \emph{depth} as k). A pass
+  means that the assertions hold in every state the design can reach, however long it
+  runs.
+\item[\code{cover}] The solver looks for an input sequence of up to \emph{depth} steps
+  that reaches each \code{cover} statement. A cover shows that the state an assertion
+  checks really happens. A cover that is not reached means the assertion may hold only
+  because its condition never occurs (it holds \term{vacuously}). That is a finding.
+\end{description}
+
+The clocks of a design with several clock domains are free inputs, so every clock ratio
+and phase is checked. Then each clock edge takes about two solver steps. A design or
+unit with one clock domain runs on one clock, and each solver step is one edge.
+
+\subsection{The jobs}
+
+\begin{description}
+\item[\file{<project>_reset}] Quiet in reset: while a domain's reset is held, the design
+  asks nothing of the masters and slaves in that domain. No request VALID, PSEL or
+  HTRANS goes to a slave, no response VALID to an AXI master, and HREADY is high towards
+  an AHB-Lite master. Tasks: \code{prove} (depth 6) and \code{cover} (depth 40). This
+  is a proof: it holds in every reachable state.
+\item[\file{<project>_protocol}] Port protocol: each port of the top follows the rules of
+  its protocol. On a port where the design is the slave, the checker asserts the rules
+  for what the design drives and assumes them for what the environment drives; on a
+  port where the design is the master, the other way round. AXI4-Lite and APB ports use
+  the ZipCPU checkers, AXI4 ports \file{bag_faxi4.sv} and AHB-Lite ports
+  \file{bag_fahb.sv}. The checks that a response comes within a bounded time are off,
+  because a port waits as long as the slaves beyond it stall. Tasks: \code{bmc} (depth
+  16), and a \code{cover_<port>} task for each port, at a depth that fits the path from
+  that port to a peer (at least 16). A port whose covers its fabric's route job already
+  holds has no cover task here. This is a bounded check: a cover reached after step
+  16 shows that the check can fire there, not that the bmc checked that far.
+\item[\file{<project>_decode}] Address decode: for every fabric that BAG generates, the
+  address decoder with the fabric's tables from the parameter package is compared with a
+  reference that BAG writes from the IR: the aliases, the regions with their access and
+  secure-only flags, the \sheet{Access_Rules} sheet, the miss policy and the fabric's address
+  window. The reference does not read the package, so a wrong table entry shows as a
+  difference. The inputs are free: the master, the address, read or write, the secure bit
+  and the alias-enable pins. Task:
+  \code{prove} at depth 1: the check is combinational, so one step covers every input,
+  and the result holds for every address, master, direction and secure bit.
+\item[\file{<project>_route_<unit>}] One job per fabric and per bridge, checked on its own
+  with free inputs. For a fabric: every request at a slave port is one that a master made
+  and that the reference sends to that port; a miss or a denied access reaches no slave
+  port; and a master gets a response only for a request that a slave took or that the
+  fabric answers itself. For a fixed-priority shared bus or AHB-Lite bus: of two
+  requests that start at the same edge, the one with the lower Priority value goes first.
+  For a bridge: every downstream request lies in the window of the upstream address.
+  Tasks: \code{bmc} and \code{cover}, both to a depth that depends on the unit (its clock
+  domains, width conversions, FIFOs and register slices). This is a bounded check.
+\end{description}
+
+\subsection{What the jobs assume}
+
+A formal check holds under the \term{environment} that it assumes: the rules that the
+masters, slaves, clocks and resets outside the design follow. The generated jobs assume
+the following.
+
+\begin{itemize}
+\item \textbf{Resets.} Every reset is asserted at the start. A reset asserts only together
+  with the rest of its reset group, and the resets of a group release in any order. A
+  reset is released only after it has taken effect. This is the reset sequence of
+  \file{doc/reset.md}. In a route job, each domain starts in reset and is then released
+  for good.
+\item \textbf{Quiet in reset.} While their domain is in reset, the masters and slaves
+  drive no VALID (AXI) and no PSEL (APB), and drive HTRANS IDLE and HREADYOUT high
+  (AHB-Lite). They stay quiet until the clock edge after the reset is released, as AMBA
+  requires of an AXI master, and until every domain of the reset group has left reset.
+\item \textbf{Handshakes.} What the environment drives into a port follows the rules of
+  that port's protocol. The protocol checkers assume it.
+\item \textbf{Alias pins.} An alias-enable pin (\sheet{Address_Decode} > \col{Alias enable})
+  changes only while the design is in reset.
+\end{itemize}
+
+If your SoC breaks one of these rules, the results do not apply to it. Alias pins that
+must not change outside reset are a limit of the design (chapter~\ref{ch:limits}).
+
+\lstinputlisting[style=console]{examples/console/eda/flow-formal.txt}
+
+\subsection{What the findings mean}
+
+Every formal finding is an error.
+
+\begin{description}
+\item[\ruleid{FORMAL-ASSERT}] An assertion fails. The finding names the assertion, its
+  file and line, and the counterexample trace: a waveform file in the task's work folder
+  that shows the input sequence that breaks it.
+\item[\ruleid{FORMAL-INDUCTION}] In a \code{prove} task, an assertion holds to the depth
+  but the induction does not close: the solver found a state, maybe not reachable, from
+  which the assertion fails. The finding names the trace. An assertion that fails
+  outright is reported as \ruleid{FORMAL-ASSERT} only.
+\item[\ruleid{FORMAL-COVER}] A cover is not reached within the depth, so the assertion
+  that it guards may hold only vacuously.
+\item[\ruleid{FORMAL-TIMEOUT}] The job gave no verdict within the time that
+  \opt{--timeout} allows. The finding names the last solver step reached, if the tool
+  printed one. For a cover
+  task, a note lists the covers reached before the limit.
+\item[\ruleid{FORMAL-ERROR}] The tool stopped on an error: a parse or elaboration error,
+  or assumptions that allow no input sequence at all. In that last case nothing was
+  checked, and the message says so.
+\item[\ruleid{FORMAL-UNKNOWN}] The task ended without a verdict, or failed without naming
+  a property.
+\item[\ruleid{TOOL-FAILED}] SymbiYosys exited with an error and printed nothing that BAG
+  could read, or a task of the job printed no verdict at all.
+\item[\ruleid{TOOL-MISSING}] \code{sby} is not on your \code{PATH}.
+\end{description}
+
+\subsection{Time limits}
+
+Formal checks can take long. On a large design, a job can take many minutes, and the
+cover tasks the longest. Without \opt{--timeout}, \cmd{bag formal} waits for each job as
+long as it takes. \opt{--timeout} sets the seconds allowed for each job (at least 1),
+with all its tasks. When the time is up, BAG stops the job, reports \ruleid{FORMAL-TIMEOUT}, and goes on with the next job.
+
+\cmd{bag formal} stops with an error, before it runs anything, when the output directory
+has no formal jobs (Project > \setting{Generate formal (SymbiYosys)} is N, or the design
+has a user-supplied fabric), or when a job file that the manifest lists is missing.
+
+\section{The whole flow}
+\label{sec:flow}
+
+\cmd{bag flow} takes a spec, not an output directory, and runs every step in turn:
+
+\begin{enumerate}
+\item check and generate, as \cmd{bag generate} (with its \opt{-o} and \opt{--style});
+\item lint, as \cmd{bag lint};
+\item compile (section~\ref{sec:compile});
+\item the generated tests, as \cmd{bag sim}, if the design has them; otherwise a line
+  says why there are none;
+\item with \opt{--formal}, the formal jobs, as \cmd{bag formal}; again a line says so when
+  there are none.
+\end{enumerate}
+
+Each step prints its report. The flow stops at the first step that fails, with exit
+status 1. Formal is left out unless you give \opt{--formal}, because the proofs of a
+large design can take many minutes; you can run \cmd{bag formal} on the output directory
+later instead. \opt{--formal-timeout} is the \opt{--timeout} of the formal step, and needs
+\opt{--formal}.
+
+\lstinputlisting[style=console]{examples/console/eda/flow-flow.txt}
+
+\section{Tool versions}
+\label{sec:versions}
+
+BAG is tested with one version of each tool, the version pinned in \file{tools.lock}
+(section~\ref{sec:eda}). The built-in waivers and the way BAG reads each tool's output
+are written for those versions. BAG asks each tool for its version, and says so in the
+report when it is not the pinned one:
+
+\begin{itemize}
+\item \cmd{bag formal} adds a note when \code{sby} is not v0.69:
+  \code{sby <version> is not the pinned v0.69}.
+\item \cmd{bag lint} adds a note when a built-in waiver waived nothing and the tool is
+  not the pinned version: the note names the tool, its version, the pinned version and
+  the waivers. With the pinned version the same waiver is the error
+  \ruleid{WAIVER-UNUSED}.
+\end{itemize}
+
+The simulation and compile steps do not check the version of Verilator. Another version
+of a tool can also report findings that the pinned version does not. If you see a
+finding that CI does not, compare the versions first.

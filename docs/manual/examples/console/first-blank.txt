@@ -1,0 +1,14 @@
+$ bag template -o blank.xlsx
+wrote blank.xlsx
+$ bag check blank.xlsx
+error: Project row 5: Project name is required (VALUE-MISSING)
+error: Project row 10: Output directory is required (VALUE-MISSING)
+error: Project row 11: Generate RTL is required (VALUE-MISSING)
+error: Project row 12: Generate C header is required (VALUE-MISSING)
+error: Project row 13: Generate memory-map doc is required (VALUE-MISSING)
+error: Project row 14: Generate cocotb unit tests is required (VALUE-MISSING)
+error: Project row 15: Generate formal (SymbiYosys) is required (VALUE-MISSING)
+error: Wrapper row 5: Top module name is required (VALUE-MISSING)
+error: Wrapper row 9: Parameter package is required (VALUE-MISSING)
+blank.xlsx: 9 error(s), 0 warning(s)
+[exit status 1]

@@ -2,7 +2,8 @@
 # Copyright 2026 The hdl-bag Authors
 """Shared test setup: the cocotb helpers in tests/rtl (BFMs, runner) and the config DSL in
 tests/configs, the mutation catalogue and controls in tests/mutation, and the formal tests in
-tests/flows are importable (the formal corpus reads which jobs those run)."""
+tests/flows are importable (the formal corpus reads which jobs those run), and so are the
+manual's transcript replayer and the broken-workbook cases it tabulates."""
 
 import sys
 from pathlib import Path
@@ -11,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent / "rtl"))
 sys.path.insert(0, str(Path(__file__).parent / "configs"))
 sys.path.insert(0, str(Path(__file__).parent / "mutation"))
 sys.path.insert(0, str(Path(__file__).parent / "flows"))
+sys.path.insert(0, str(Path(__file__).parent / "manual"))  # the transcript replayer
+sys.path.insert(0, str(Path(__file__).parent / "checks"))  # the broken-workbook cases
 sys.path.insert(0, str(Path(__file__).parent))
 
 

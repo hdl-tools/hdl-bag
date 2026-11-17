@@ -1,0 +1,26 @@
+$ cp files/apb4_min.ir.yaml apb4_min.ir.yaml
+$ cp files/header.txt header.txt
+$ bag flow apb4_min.ir.yaml -o out --formal
+apb4_min.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 27 file(s) to out (top apb4_min_top)
+slang: rtl/pkg/apb4_min_pkg.sv:14: warning: unused package parameter 'ApbAddrWidth' [unused-package-parameter] (waived)
+slang: rtl/pkg/apb4_min_pkg.sv:15: warning: unused package parameter 'ApbNoMasters' [unused-package-parameter] (waived)
+slang: rtl/pkg/apb4_min_pkg.sv:30: warning: unused package parameter 'ApbPriority' [unused-package-parameter] (waived)
+slang: rtl/pkg/apb4_min_pkg.sv:31: warning: unused package parameter 'ApbAliasMaster' [unused-package-parameter] (waived)
+slang: rtl/pkg/apb4_min_pkg.sv:37: warning: unused package parameter 'S0RegsBase' [unused-package-parameter] (waived)
+slang: rtl/pkg/apb4_min_pkg.sv:38: warning: unused package parameter 'S0RegsSize' [unused-package-parameter] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:14: warning: Parameter is not used: 'ApbAddrWidth' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:15: warning: Parameter is not used: 'ApbNoMasters' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:30: warning: Parameter is not used: 'ApbPriority' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:31: warning: Parameter is not used: 'ApbAliasMaster' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:37: warning: Parameter is not used: 'S0RegsBase' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/apb4_min_pkg.sv:38: warning: Parameter is not used: 'S0RegsSize' [UNUSEDPARAM] (waived)
+lint (slang, verilator, verible): 0 unwaived finding(s), 12 waived
+compile (verilator-elaborate): 0 unwaived finding(s), 0 waived
+sim (verilator, cocotb): 0 unwaived finding(s), 0 waived
+note: coverage: path 2/2
+note: coverage: response 3/3
+note: coverage report (report only, gates nothing): <examples>/out/sim/coverage.md
+formal (sby): 0 unwaived finding(s), 0 waived
+note: apb4_min_protocol_bmc: bounded check to depth 16 (bmc), not a proof
+note: apb4_min_route_apb_bmc: bounded check to depth 8 (bmc), not a proof

@@ -1,0 +1,16 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ bag lint out
+slang: rtl/pkg/lite_ss_pkg.sv:10: warning: unused package parameter 'BusAddrWidth' [unused-package-parameter] (waived)
+slang: rtl/pkg/lite_ss_pkg.sv:39: warning: unused package parameter 'SramMemBase' [unused-package-parameter] (waived)
+slang: rtl/pkg/lite_ss_pkg.sv:40: warning: unused package parameter 'SramMemSize' [unused-package-parameter] (waived)
+slang: rtl/pkg/lite_ss_pkg.sv:41: warning: unused package parameter 'UartRegsBase' [unused-package-parameter] (waived)
+slang: rtl/pkg/lite_ss_pkg.sv:42: warning: unused package parameter 'UartRegsSize' [unused-package-parameter] (waived)
+verilator: rtl/pkg/lite_ss_pkg.sv:10: warning: Parameter is not used: 'BusAddrWidth' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/lite_ss_pkg.sv:39: warning: Parameter is not used: 'SramMemBase' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/lite_ss_pkg.sv:40: warning: Parameter is not used: 'SramMemSize' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/lite_ss_pkg.sv:41: warning: Parameter is not used: 'UartRegsBase' [UNUSEDPARAM] (waived)
+verilator: rtl/pkg/lite_ss_pkg.sv:42: warning: Parameter is not used: 'UartRegsSize' [UNUSEDPARAM] (waived)
+lint (slang, verilator, verible): 0 unwaived finding(s), 10 waived
+100 third-party warning(s) in rtl/vendor/ not judged

@@ -1,0 +1,73 @@
+\chapter{Installing}
+\label{ch:install}
+
+BAG needs Python 3.11 or newer. It runs on Linux and Windows. Reading, checking and
+generating need nothing else. Lint, simulation and formal need the EDA tools of
+section~\ref{sec:eda}.
+
+BAG is not on a package index yet. Install it from its repository or from a checkout,
+in a virtual environment.
+
+\section{Installing BAG}
+
+\begin{enumerate}
+\item Create and enter a virtual environment: \cmd{python -m venv .venv}, then
+  activate it as your shell requires.
+\item Install BAG from the repository:\\
+  \cmd{pip install git+https://github.com/hdl-tools/hdl-bag.git}\\
+  or, from a checkout, go to the folder that holds \file{pyproject.toml} and run
+  \cmd{pip install .}
+\item For \cmd{bag sim}, add the \code{sim} extra, which installs cocotb and
+  cocotbext-axi at the versions the generated tests are written for:
+  \cmd{pip install ".[sim]"} from a checkout.
+\end{enumerate}
+
+\section{Check the installation}
+
+\cmd{bag --version} prints the program name and the version:
+
+\lstinputlisting[style=console]{examples/console/version.txt}
+
+The commands \cmd{bag} and \cmd{hdl-bag} are the same program.
+
+\section{The EDA tools}
+\label{sec:eda}
+
+\begin{description}
+\item[Lint and compile] slang, Verilator and Verible. \cmd{bag lint} runs the tools
+  named in Project > \setting{Lint tools}; Verilator also builds the simulation model.
+\item[Simulation] Verilator, with cocotb from the \code{sim} extra.
+\item[Formal] SymbiYosys and Yosys with the yosys-slang plugin, from the OSS CAD Suite.
+\end{description}
+
+BAG is tested with one version of each tool, listed in the file \file{tools.lock} of
+the repository:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Tool & Version \\
+\midrule
+Verilator & v5.052 \\
+slang & v12.0 \\
+Verible & v0.0-4296-g0f262651 \\
+OSS CAD Suite (SymbiYosys, Yosys) & build of 2026-10-01 (SymbiYosys v0.69) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+BAG also runs another version, but it was not tested with it:
+
+\begin{itemize}
+\item \cmd{bag formal} adds a note to its report, for example
+  \code{note: sby 0.70 is not the pinned v0.69}.
+\item \cmd{bag lint} treats a built-in waiver that waives nothing as an error
+  (\ruleid{WAIVER-UNUSED}) only with the pinned version of the tool; with another
+  version it is a note. Another version can also report findings the pinned one does
+  not.
+\end{itemize}
+
+The simplest way to get every tool at its pinned version is the container image
+\code{ghcr.io/hdl-tools/hdl-bag-tools}, built from \file{tools/Dockerfile} in the
+repository. It also holds Python and BAG's dependencies. Run BAG inside it with your
+work folder mounted.

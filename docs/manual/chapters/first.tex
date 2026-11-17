@@ -1,0 +1,90 @@
+\chapter{A first design}
+\label{ch:first}
+
+This chapter takes the sample design of BAG from an empty folder to generated RTL. Then
+it runs lint, simulation and formal on a smaller design. Run the commands in an empty
+folder.
+
+\section{The sample workbook}
+
+\cmd{bag template --sample} writes the sample workbook, \code{demo_ss}, and the file
+header it names. \cmd{bag check} reads it and runs every check. \cmd{bag generate}
+writes the design into the folder you give with \opt{-o}:
+
+\lstinputlisting[style=console]{examples/console/first.txt}
+
+The sample is a small subsystem with five fabrics:
+
+\begin{itemize}
+\item \code{main_xbar}, an AXI4 crossbar. Its masters are \code{cpu0}, \code{dma0} and
+  \code{dbg0}, and the bridge \code{br_ahb2main} from the AHB-Lite bus. Its slaves are
+  the memories \code{ddr0} and \code{sram0} and two bridges.
+\item \code{cfg_bus}, an AXI4-Lite fabric behind the bridge \code{br_main2cfg}, with a
+  second master \code{sec0}.
+\item \code{periph_apb}, an APB4 fabric behind \code{br_main2per}.
+\item \code{ahb_bus}, an AHB-Lite bus with the microcontroller \code{mcu0}, and
+  \code{aon_apb}, an APB4 fabric behind it in its own clock domain.
+\end{itemize}
+
+Open \file{spec.xlsx} in Excel or LibreOffice to see how each sheet describes this.
+Chapter~\ref{ch:workbook} explains every sheet.
+
+\subsection{The two warnings}
+
+The check gives no error and two warnings, so generation goes ahead. A
+\term{warning} is a finding that does not stop BAG; an \term{error} does
+(chapter~\ref{ch:checks}). Both warnings say the same thing for one master each:
+\code{cpu0} has a 128-bit data path and \code{main_xbar} has 64 bits, so BAG puts a
+width converter (\code{cpu0_dw_2_main_xbar}) between them. That converter cannot split a
+WRAP burst, so it answers one with the error response SLVERR. The warning lists every
+slave the master reaches through it. If your master sends WRAP bursts (a cache line
+fill often does), give it the width of the fabric, or have it send INCR bursts.
+
+\subsection{What was written}
+
+\cmd{bag generate} wrote 132 files. The top level of \file{out} holds:
+
+\begin{description}
+\item[\file{rtl/}] the SystemVerilog: the wrapper \code{demo_ss_bus_top} and its
+  sub-wrappers, the parameter package in \file{rtl/pkg/}, the BAG blocks in
+  \file{rtl/inhouse/}, and the PULP blocks in \file{rtl/vendor/}.
+\item[\file{demo_ss.f}] the file list, in compile order, for your own tools.
+\item[\file{sw/}] the C header with the address map.
+\item[\file{doc/}] the memory map (Markdown and HTML), the port map, the tie-off report
+  and the reset sequence.
+\item[\file{tests/}] the generated cocotb tests and a copy of the IR they read.
+\item[\file{formal/}] the SymbiYosys jobs and their property files.
+\item[\file{bag_outputs.json}] the list of what was written, which \cmd{bag lint},
+  \cmd{bag sim} and \cmd{bag formal} read.
+\end{description}
+
+Chapter~\ref{ch:outputs} describes every file. Run \cmd{bag generate} again and you get
+the same bytes.
+
+\section{A blank workbook}
+
+Without \opt{--sample}, \cmd{bag template} writes a blank workbook. Checking it shows
+what errors look like: each names the sheet, the row and the rule ID. With an error,
+\cmd{bag check} exits with status 1, and \cmd{bag generate} writes nothing.
+
+\lstinputlisting[style=console]{examples/console/first-blank.txt}
+
+Fill in the sheets in the order of chapter~\ref{ch:workbook}, and run \cmd{bag check}
+after each sheet.
+
+\section{Lint, simulation and formal}
+
+The rest of this chapter needs the EDA tools (section~\ref{sec:eda}). Proving the
+sample design takes many hours of processor time, so the example uses a smaller design:
+one APB4 fabric with one master and one slave. Its IR,
+\file{apb4_min.ir.yaml}, is in \file{files/} of the examples, and chapter~\ref{ch:ir}
+shows it. An IR is accepted wherever a workbook is.
+
+\cmd{bag flow} runs every step in turn: check, generate, lint, compile, the generated
+tests and, with \opt{--formal}, the formal jobs. It stops at the first step that fails.
+
+\lstinputlisting[style=console]{examples/console/eda/first-flow.txt}
+
+Each step prints a report and ends with a summary line. Lint must report no finding
+that is not waived; the tests must all pass; every formal job must hold its assertions
+and reach its covers. Chapter~\ref{ch:flows} explains each report.

@@ -1,0 +1,1176 @@
+\chapter{The spec workbook}
+\label{ch:workbook}
+
+This chapter is the reference for everything you type into the spec workbook: every
+sheet, every column and every setting. For each one it says whether you must fill it,
+which values are legal, and what the value means. Where a check compares rows with each
+other, the text names the rule ID of that check. Chapter~\ref{ch:checks} explains how a
+finding reads and lists every rule.
+
+The workbook described here is schema 0.6.
+
+% Column tables of this chapter: column (or setting), required, values, meaning.
+\newenvironment{wbtable}[1]{%
+  \par\small
+  \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.3cm}%
+      >{\raggedright\arraybackslash}p{1.7cm}%
+      >{\raggedright\arraybackslash}p{4.1cm}%
+      >{\raggedright\arraybackslash}p{5.6cm}@{}}
+  \toprule
+  \textbf{#1} & \textbf{Required} & \textbf{Values} & \textbf{Meaning}\\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot}%
+  {\end{longtable}\par}
+
+\section{How the workbook is laid out}
+
+\subsection{One sheet per topic}
+
+The \term{spec workbook} is an Excel file (\file{.xlsx}). It describes one subsystem:
+its clocks, its bus fabrics, the ports on them, the address map and the wrapper around
+them. \cmd{bag template} writes a blank workbook, and \cmd{bag template --sample}
+writes the \code{demo_ss} sample of chapter~\ref{ch:first}. Excel and LibreOffice can
+open it.
+
+The workbook has one sheet per topic, in this order:
+
+\begin{center}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Sheet} & \textbf{What it holds}\\
+\midrule
+\sheet{README} & A legend and a short guide. BAG does not read it.\\
+\sheet{Project} & Project-wide settings and the outputs to generate.\\
+\sheet{Clocks} & One row per clock, and so per clock domain.\\
+\sheet{Resets} & One row per reset.\\
+\sheet{Fabrics} & One row per bus fabric.\\
+\sheet{Masters} & One row per external master port.\\
+\sheet{Slaves} & One row per external slave port.\\
+\sheet{Bridges} & One row per bridge between two fabrics.\\
+\sheet{Topology} & One row per link: what attaches to which fabric.\\
+\sheet{Access_Rules} & Exceptions to the default access of masters to slaves.\\
+\sheet{Memory_Map} & One row per address region.\\
+\sheet{Address_Decode} & One row per master port: its miss response and alias.\\
+\sheet{Port_Options} & Buffering and optional signals of a port.\\
+\sheet{User_Ports} & Extra ports of a fabric that you write yourself.\\
+\sheet{Hierarchy} & Sub-wrappers, and which instance goes in each.\\
+\sheet{Wrapper} & The top-level wrapper and its exposed ports.\\
+\sheet{Lists} & The values of the dropdown lists. BAG does not read it.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Some terms are used through the whole chapter:
+
+\begin{description}
+\item[Fabric] One bus instance: a crossbar, a shared bus, an AHB-Lite bus or an APB
+  decoder.
+\item[Master] A port that issues transactions into a fabric, such as a CPU or a DMA
+  engine.
+\item[Slave] A port that receives transactions from a fabric, such as a memory or a
+  peripheral.
+\item[Bridge] A link from one fabric to another. It is a slave on its
+  \term{upstream} fabric and a master on its \term{downstream} fabric.
+\item[Port] A master, a slave, or one end of a bridge.
+\item[Clock domain] A group of logic on one clock. Every fabric and every master and
+  slave is in exactly one domain.
+\item[Adapter] A small block that BAG puts between a port and its fabric: a protocol
+  adapter, a width converter, a clock-domain crossing (CDC), an ID-width converter, a
+  FIFO or a register slice.
+\end{description}
+
+\subsection{Input columns and derived columns}
+
+Each sheet has a title in row~1 and a short description in row~2. Row~4 holds the
+column headers, and data starts in row~5. Leave rows 1 to 3 as they are.
+
+There are two kinds of column:
+
+\begin{itemize}
+\item An \term{input column} has a blue header and yellow cells. You type into it. Many
+  input cells have a dropdown list. The comment on a header gives the meaning and the
+  legal values.
+\item A \term{derived column} has a grey header and grey cells. It holds a formula that
+  shows what BAG will work out, for example the fabric a master is on, or the adapters
+  BAG will insert. Do not type into it. BAG ignores derived columns and computes every
+  derived value again itself.
+\end{itemize}
+
+BAG finds each input column by its header text, not by its position. You can move
+columns, and you can add columns of your own: BAG ignores a column whose header it does
+not know. A header must be spelled exactly as in this chapter. A missing or repeated
+input column stops \cmd{bag check} with a message such as
+\code{Fabrics: missing column 'Topology' in row 4 (READ-COLUMN)}. A missing sheet
+gives \code{READ-SHEET}.
+
+BAG reads a row when at least one of its input cells has a value. Empty rows, and rows
+that only hold derived formulas, are skipped. BAG reads what is typed in a cell, not the
+result of a formula: type values, not formulas, into input cells.
+
+The template fills the grey formulas a few rows below the last data row, and its lookups
+and dropdowns cover rows 5 to 60 (5 to 200 on \sheet{Topology}). If you add rows
+beyond those, copy the formulas down and widen the ranges. BAG reads and checks every
+row in any case.
+
+\subsection{Check columns}
+
+Some sheets have a derived \textsf{Check} column. It reads \code{ok} in green, or the name
+of the first problem in red, for example \code{OVERLAP}. It is a preview in the
+spreadsheet. \cmd{bag check} runs the same checks and many more, and only its result
+counts.
+
+\subsection{Notes columns}
+
+Most tables end with a \col{Notes} column, and \sheet{Masters} and \sheet{Slaves} also
+have \col{Description}. Type anything you like there. BAG reads these cells but does not
+use them, and they are not part of the IR. A workbook that BAG writes back from an IR
+(chapter~\ref{ch:ir}) has empty Notes.
+
+\subsection{How to type values}
+
+\begin{description}
+\item[Names] Instance, port and region names are lowercase SystemVerilog identifiers: a
+  lowercase letter, then lowercase letters, digits and \code{_}. For example
+  \code{main_xbar} or \code{cpu0}. A name that does not have this form gives
+  \ruleid{NAME-IDENT}. Clock, reset and domain names are SystemVerilog identifiers that
+  may also use capitals, such as \code{D_SYS}.
+\item[Unique names] The names of masters, slaves, bridges, fabrics and sub-wrappers
+  share one name space: each name may be used once (\ruleid{NAME-UNIQUE}).
+\item[Hex] Addresses and sizes are hex text with a \code{0x} prefix. You may group the
+  digits with \code{_}, for example \code{0x4000_0000}.
+\item[Integers] Widths, depths and counts are whole numbers. Widths are in bits and
+  frequencies in MHz.
+\item[Y and N] Yes or no is a capital \code{Y} or \code{N}.
+\item[Blank and n/a] A blank cell means \emph{not given}. Some columns also accept
+  \code{n/a} for a value that does not apply, for example \col{Latency mode} on a fabric
+  that is not a crossbar.
+\end{description}
+
+A required cell that is empty gives \ruleid{VALUE-MISSING}. A value that is not legal
+for its column gives \ruleid{VALUE-ILLEGAL}.
+
+\subsection{The order to fill the sheets}
+
+Later sheets refer to names that earlier sheets define, so fill them in this order:
+
+\begin{enumerate}
+\item \sheet{Project}: name the subsystem and choose the outputs.
+\item \sheet{Clocks} and \sheet{Resets}: every clock domain and its reset.
+\item \sheet{Fabrics}, \sheet{Masters}, \sheet{Slaves} and \sheet{Bridges}: define every
+  fabric and port by name. Their grey fabric columns read \code{NOT CONNECTED} or
+  \code{?} until the next step.
+\item \sheet{Topology}: connect everything, one link per row.
+\item \sheet{Access_Rules}: only the exceptions, if you have any.
+\item \sheet{Memory_Map}: the regions of every slave and bridge.
+\item \sheet{Address_Decode}: the miss response of every master port, and any alias.
+\item \sheet{Port_Options}: FIFOs, register slices and optional signals, if needed.
+\item \sheet{User_Ports}: only for a fabric you write yourself.
+\item \sheet{Hierarchy}: sub-wrappers, if you want them.
+\item \sheet{Wrapper}: the top module and its ports.
+\end{enumerate}
+
+Then run \cmd{bag check} and fix every error before you run \cmd{bag generate}.
+
+\section{README}
+
+The \sheet{README} sheet holds the title of the workbook, a legend of the cell colours
+and one line about each sheet. It is for people. BAG does not read it, so you may change
+it freely.
+
+\section{Project}
+
+The \sheet{Project} sheet is a list of settings. Each row has a \code{Setting}, a
+\code{Value} and a \code{Notes} cell; you type only into \code{Value}. BAG reads the
+settings from row~5 down to the first empty \code{Setting} cell. Every setting must be
+present (\ruleid{VALUE-MISSING}) and each may appear once.
+
+\begin{wbtable}{Setting}
+\setting{Project name} & Yes & lowercase name, e.g.\ \code{demo_ss} &
+  The name of the subsystem. It starts the names of several generated files, such as
+  \file{<project>.f} and \file{sw/<project>_memmap.h}.\\
+\setting{Spec schema version} & Yes & \code{0.6} &
+  The schema of the workbook. The template fills it in.\\
+\setting{Spec revision} & No & any text, e.g.\ \code{r4} &
+  Printed in the header of every generated file and in the memory-map document.\\
+\setting{Author} & No & any text &
+  Kept in the IR.\\
+\setting{SystemVerilog standard} & Yes & \code{IEEE 1800-2017} &
+  The language standard of the generated RTL. It is the only legal value.\\
+\setting{Output directory} & Yes & a path, e.g.\ \code{out/demo_ss} &
+  Where \cmd{bag generate} writes. A relative path starts at the folder of the
+  workbook.\\
+\setting{Generate RTL} & Yes & \code{Y}, \code{N} &
+  Kept in the IR. See below.\\
+\setting{Generate C header} & Yes & \code{Y}, \code{N} &
+  \code{Y} writes a C header with the base address and size of every region.\\
+\setting{Generate memory-map doc} & Yes & \code{Y}, \code{N} &
+  \code{Y} writes the memory map (Markdown and HTML), the port map, the tie-offs and the
+  reset sequence documents.\\
+\setting{Generate cocotb unit tests} & Yes & \code{Y}, \code{N} &
+  \code{Y} writes cocotb tests for this design.\\
+\setting{Generate formal (SymbiYosys)} & Yes & \code{Y}, \code{N} &
+  \code{Y} writes SymbiYosys formal jobs.\\
+\setting{Lint tools} & Yes & a comma-separated list of \code{slang}, \code{verilator},
+  \code{verible} &
+  The tools \cmd{bag lint} runs. Name each tool once.\\
+\setting{Simulator} & Yes & \code{verilator} &
+  The simulator of \cmd{bag sim}. It is the only legal value.\\
+\end{wbtable}
+
+If \setting{Spec schema version} is not \code{0.6}, \cmd{bag check} reports
+\ruleid{PROJ-SCHEMA-VERSION} and checks nothing else: a workbook of another schema has
+other columns. Make a new template with \cmd{bag template} and copy your rows into it.
+
+\setting{Generate RTL} is checked and kept in the IR, but \cmd{bag generate} writes the
+RTL whatever its value. The option \opt{-o} of \cmd{bag generate} replaces
+\setting{Output directory} for one run. Chapter~\ref{ch:outputs} lists every file that
+the \code{Generate} settings control.
+
+A design with a fabric that you write yourself (template \code{bag_external}) gets no
+generated tests and no formal jobs, whatever the settings say: BAG does not know how
+that fabric behaves.
+
+\section{Clocks and Resets}
+
+Each clock defines one clock domain, and each domain has exactly one reset. Every clock
+and every reset becomes a port of the top-level wrapper, with the name you give it.
+
+\subsection{Clocks}
+
+The \sheet{Clocks} sheet has one row per clock.
+
+\begin{wbtable}{Column}
+\col{Clock} & Yes & identifier, e.g.\ \code{clk_sys} & The name of the top-level clock
+  port.\\
+\col{Freq (MHz)} & Yes & a number above 0 & The nominal frequency. BAG keeps it in the
+  IR; it does not use it.\\
+\col{Source} & No & any text & Where the clock comes from, for example a PLL.\\
+\col{Domain} & Yes & identifier, e.g.\ \code{D_SYS} & The name of the clock domain.
+  Other sheets refer to it.\\
+\col{Reset} & Yes & a reset of \sheet{Resets} & The reset of this domain.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+Each domain has one clock: a second clock for the same domain gives
+\ruleid{CLK-DOMAIN-TWO-CLOCKS}. A reset that is not on \sheet{Resets} gives
+\ruleid{REF-UNKNOWN}. A reset whose own \col{Domain} names another domain gives
+\ruleid{CLK-RESET-DOMAIN}. Clock and reset names must differ from each other
+(\ruleid{NAME-UNIQUE}).
+
+\subsection{Resets}
+
+The \sheet{Resets} sheet has one row per reset.
+
+\begin{wbtable}{Column}
+\col{Reset} & Yes & identifier, e.g.\ \code{rst_sys_n} & The name of the top-level
+  reset port.\\
+\col{Polarity} & Yes & \code{active-low}, \code{active-high} & The level that resets.\\
+\col{Assertion} & Yes & \code{async}, \code{sync} & How the reset asserts. See
+  below.\\
+\col{Deassertion} & Yes & \code{async}, \code{sync} & How the reset deasserts. See
+  below.\\
+\col{Domain} & Yes & a domain of \sheet{Clocks} & The domain this reset belongs to.\\
+\col{Source} & No & any text & Where the reset comes from.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+Inside the wrapper, every domain gets one active-low reset. With \col{Deassertion}
+\code{sync}, BAG puts a two-stage reset synchronizer on the domain's clock. Then
+\col{Assertion} \code{async} asserts the reset at once, and \code{sync} asserts it on
+the clock, after the two stages. With \col{Deassertion} \code{async}, BAG uses the reset
+input as it is (inverted if it is active-high).
+
+Rules across rows: a domain that is not on \sheet{Clocks} gives \ruleid{REF-UNKNOWN}; a
+second reset for one domain gives \ruleid{CLK-RESET-DOMAIN}; a domain without a reset
+gives \ruleid{CLK-DOMAIN-NO-RESET}.
+
+A clock-domain crossing has logic in both domains, which must be reset together. So the
+resets on both sides of every crossing (a CDC adapter, or a bridge between fabrics in
+different domains) must have \col{Assertion} \code{async} and \col{Deassertion}
+\code{sync} (\ruleid{CLK-CDC-RESET}). That the two resets really assert at the same time
+is your job: the workbook cannot show it.
+
+\section{Fabrics}
+
+The \sheet{Fabrics} sheet has one row per fabric. The \term{backing template} names the
+BAG template that implements the fabric. You do not type the number of ports: BAG counts
+the links of the fabric on \sheet{Topology}.
+
+\begin{wbtable}{Column}
+\col{Fabric} & Yes & lowercase name, e.g.\ \code{main_xbar} & The instance name.\\
+\col{Protocol} & Yes & \code{AXI4}, \code{AXI4-Lite}, \code{AHB-Lite}, \code{APB4},
+  \code{APB3} & The protocol inside the fabric.\\
+\col{Topology} & Yes & \code{crossbar}, \code{shared-bus}, \code{single-layer},
+  \code{decoder-mux} & The structure of the fabric. See below.\\
+\col{Data width (bits)} & Yes & AXI4: 32 to 1024, a power of 2. AXI4-Lite, AHB-Lite: 32
+  or 64. APB: 8, 16 or 32 & The data width inside the fabric.\\
+\col{Addr width (bits)} & Yes & 12 to 64 & The address width inside the fabric.\\
+\col{Clock domain} & Yes & a domain of \sheet{Clocks} & The domain of the fabric.\\
+\col{Arbitration} & Yes & \code{round-robin}, \code{fixed-priority},
+  \code{single-master} & How the fabric chooses between masters. See below.\\
+\col{Latency mode} & Crossbar & \code{NO_LATENCY}, \code{CUT_SLV_AX}, \code{CUT_MST_AX},
+  \code{CUT_ALL_AX}, \code{CUT_SLV_PORTS}, \code{CUT_MST_PORTS}, \code{CUT_ALL_PORTS};
+  \code{n/a} otherwise & Where the crossbar has spill registers.\\
+\col{Max mst trans} & AXI & integer, 1 or more; \code{n/a} otherwise & Limits the
+  transactions in flight from each master. See below.\\
+\col{Max slv trans} & AXI & integer, 1 or more; \code{n/a} otherwise & Limits the
+  transactions in flight towards slaves. See below.\\
+\col{Backing template} & Yes & a fabric template, see the table below & The template
+  that implements the fabric.\\
+\col{Backing IP} & No & any text & For you: the IP behind the template.\\
+\col{Mid-point FIFO depth} & Shared bus & integer, 0 or more; \code{n/a} otherwise & The
+  FIFO between the mux and the demux of a shared bus.\\
+\col{Mid-point register slice} & Shared bus & \code{none}, \code{cut},
+  \code{multicut-2}, \code{multicut-3}; \code{n/a} otherwise & Register stages between
+  the mux and the demux of a shared bus.\\
+\col{Notes} & No & any text & For you.\\
+\col{External module} & No & identifier, or blank or \code{n/a} & Only for
+  \code{bag_external}: the name of your module. See section~\ref{sec:wb-user-ports}.\\
+\end{wbtable}
+
+A setting that does not apply to the fabric must be blank or \code{n/a}. If it holds a
+value, \cmd{bag check} warns with \ruleid{FAB-NA-SETTING}: set it to \code{n/a}. This
+covers \col{Latency mode} outside a crossbar, \col{Max mst trans} and
+\col{Max slv trans} on AHB-Lite and APB, the two mid-point settings outside a shared bus,
+and \col{External module} on a template other than \code{bag_external}. Where one of the
+other settings applies, it is required.
+
+The grey columns show \textsf{\# master ports} and \textsf{\# slave ports} (the links
+into and out of the fabric on \sheet{Topology}), the master-side and slave-side ID
+widths of an AXI4 fabric, and \textsf{Max parallel transfers}. These are explained
+below.
+
+\subsection{Fabric templates}
+
+Each fabric template supports some protocols, topologies and arbitration modes:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll>{\raggedright\arraybackslash}p{4.8cm}@{}}
+\toprule
+\textbf{Template} & \textbf{Protocol} & \textbf{Topology} & \textbf{Arbitration}\\
+\midrule
+\code{bag_axi_xbar} & AXI4 & crossbar & round-robin\\
+\code{bag_axil_xbar} & AXI4-Lite & crossbar & round-robin\\
+\code{bag_axi_shared_bus} & AXI4 & shared-bus & round-robin, fixed-priority\\
+\code{bag_axil_shared_bus} & AXI4-Lite & shared-bus & round-robin, fixed-priority\\
+\code{bag_ahb_lite_bus} & AHB-Lite & single-layer & single-master, round-robin,
+  fixed-priority\\
+\code{bag_apb_mux} & APB4, APB3 & decoder-mux & single-master\\
+\code{bag_external} & any & any & any\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The AXI fabrics use the PULP \code{axi} library. The AHB-Lite bus and the APB decoder
+are written for BAG. \code{bag_external} is a fabric that you write yourself
+(section~\ref{sec:wb-user-ports}).
+
+The rules:
+
+\begin{itemize}
+\item The \col{Topology} must suit the \col{Protocol}: \code{crossbar} or
+  \code{shared-bus} for AXI4 and AXI4-Lite, \code{single-layer} for AHB-Lite,
+  \code{decoder-mux} for APB (\ruleid{FAB-TOPOLOGY}).
+\item The template must be a fabric template that supports the protocol and the
+  topology (\ruleid{TMPL-FABRIC}), and the arbitration (\ruleid{FAB-ARBITRATION}).
+\item \code{single-master} allows one master port. An APB fabric always allows only one
+  (\ruleid{FAB-SINGLE-MASTER}).
+\item Every fabric needs at least one master port and one slave port on
+  \sheet{Topology} (\ruleid{FAB-EMPTY-SIDE}).
+\item The data width must be legal for the protocol (\ruleid{WIDTH-DATA}) and the
+  address width must be 12 to 64 (\ruleid{WIDTH-ADDR}).
+\end{itemize}
+
+\subsection{Crossbar or shared bus}
+
+For AXI4 and AXI4-Lite you choose between two topologies.
+
+A \term{crossbar} has a path from every master to every slave. Transfers between
+different masters and slaves run at the same time: up to the smaller of the number of
+master ports and slave ports, which the grey column \textsf{Max parallel transfers}
+shows. A slow slave stalls only the masters that use it. The logic grows with the number
+of masters times the number of slaves. Use a crossbar for the main system interconnect.
+
+A \term{shared bus} takes all masters through one mux into a single mid-point, then
+through one demux to the slaves. One transfer moves at a time
+(\textsf{Max parallel transfers} is 1). The logic grows with the number of masters plus
+the number of slaves, so it is smaller. A slow slave can hold up every master. Use a
+shared bus for low-bandwidth configuration and register buses, or where area matters
+more than bandwidth. \col{Mid-point FIFO depth} sets a FIFO at the mid-point (0: none),
+and \col{Mid-point register slice} adds register stages there, which break the timing
+path from the mux to the demux. Both serve every master.
+
+\subsection{Arbitration and latency}
+
+\begin{description}
+\item[round-robin] Masters that wait take turns.
+\item[fixed-priority] The master with the best \col{Priority} on \sheet{Topology} wins.
+  0 is the highest priority.
+\item[single-master] The fabric has one master port and needs no arbiter.
+\end{description}
+
+\col{Latency mode} is a setting of the PULP crossbar. It places spill registers, each
+of which adds a clock of latency and breaks a timing path. In PULP names, the slave
+ports of the crossbar face the masters, and its master ports face the slaves.
+\code{NO_LATENCY} has no spill registers. \code{CUT_SLV_AX}, \code{CUT_MST_AX} and
+\code{CUT_ALL_AX} put them on the address channels (AW and AR) of the slave ports, of
+the master ports, or of both. \code{CUT_SLV_PORTS}, \code{CUT_MST_PORTS} and
+\code{CUT_ALL_PORTS} put them on all five channels. The sample uses \code{CUT_ALL_AX}.
+
+\col{Max mst trans} limits the transactions in flight from each master:
+
+\begin{itemize}
+\item AXI4 crossbar: at least this many per ID, not in total (PULP \code{MaxMstTrans}).
+\item AXI4-Lite: this many per master (a FIFO depth).
+\item AXI4 shared bus: at least this many per ID at each master, and the depth of the
+  write FIFO of the mux, shared by all masters.
+\end{itemize}
+
+It also sizes the adapters on master ports.
+
+\col{Max slv trans} limits the transactions towards slaves:
+
+\begin{itemize}
+\item AXI4 crossbar: the writes per slave whose data has not finished; reads are not
+  limited (PULP \code{MaxSlvTrans}).
+\item AXI4-Lite: this many per slave, reads and writes (a FIFO depth).
+\item AXI4 shared bus: at least this many per ID, across all slaves.
+\end{itemize}
+
+It also limits the reads and writes through a \code{bag_axi2apb} or \code{bag_axi2axil}
+bridge on this fabric and the reads through a \code{bag_axi2ahb} bridge, and it sizes
+the adapters on slave ports.
+
+\subsection{ID widths}
+
+On an AXI4 fabric, BAG works out two ID widths, shown in grey:
+
+\begin{itemize}
+\item The \term{master-side ID width} is the widest \col{ID width (bits)} of the AXI4
+  masters on the fabric. A bridge into an AXI4 fabric counts as 1 bit.
+\item The \term{slave-side ID width} is the master-side width plus enough bits to
+  number the master ports: $\lceil\log_2 n\rceil$ for $n$ master ports.
+\end{itemize}
+
+\cmd{bag check} warns when the slave-side width is above 16 bits
+(\ruleid{FAB-ID-GROWTH}). On \code{bag_axi_xbar} and \code{bag_axi_shared_bus}, a guard
+in front of each master port keeps one counter of transactions in flight per ID, so it
+keeps $2^w$ counters per channel for a master-side width $w$. \cmd{bag check} warns when
+$w$ is above 8 bits (\ruleid{FAB-GUARD-ID-WIDTH}). That is a cost in area, not a limit.
+
+\section{Masters and Slaves}
+\label{sec:wb-ports}
+
+The \sheet{Masters} and \sheet{Slaves} sheets have one row per external port: a port
+that leaves the wrapper. The two sheets share most columns. \sheet{Masters} has
+\col{Max outstanding rd} and \col{Max outstanding wr}; \sheet{Slaves} has
+\col{Error response} and \col{Wait states} in their place.
+
+\begin{wbtable}{Column}
+\col{Master}, \col{Slave} & Yes & lowercase name, e.g.\ \code{cpu0} & The port name.
+  It also starts the names of the port's wrapper signals.\\
+\col{Protocol} & Yes & \code{AXI4}, \code{AXI4-Lite}, \code{AHB-Lite}, \code{APB4},
+  \code{APB3} & The protocol of the port.\\
+\col{Data width (bits)} & Yes & as on \sheet{Fabrics}, for the port's protocol & The
+  data width of the port.\\
+\col{Addr width (bits)} & Yes & 1 to 64, not wider than its fabric & The address width
+  of the port.\\
+\col{ID width (bits)} & AXI4 & integer, 1 or more; on \sheet{Slaves} also \code{auto};
+  blank for other protocols & The AXI ID width.\\
+\col{User width (bits)} & No & integer, 0 or more; or \code{n/a} & The width of the
+  AXI4 USER signals. Blank or 0: none.\\
+\col{Clock domain} & Yes & a domain of \sheet{Clocks} & The domain of the port.\\
+\col{Max outstanding rd} & AXI (\sheet{Masters}) & integer, 1 or more & Kept in the
+  IR.\\
+\col{Max outstanding wr} & AXI (\sheet{Masters}) & integer, 1 or more & Kept in the
+  IR.\\
+\col{Error response} & Yes (\sheet{Slaves}) & AXI: \code{SLVERR}, \code{DECERR}.
+  AHB-Lite: \code{HRESP_ERROR}. APB: \code{PSLVERR} & How the slave reports an error.\\
+\col{Wait states} & No (\sheet{Slaves}) & integer, 0 or more; or \code{variable} &
+  Kept in the IR.\\
+\col{Description} & No & any text & For you.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+Notes on the columns:
+
+\begin{itemize}
+\item The data width must be legal for the port's protocol (\ruleid{WIDTH-DATA}). The
+  address width must be 1 to 64 and not wider than the fabric's
+  (\ruleid{WIDTH-ADDR}). A narrower slave, such as a 12-bit APB peripheral, sees only
+  the low address bits.
+\item \col{ID width (bits)} is required on AXI4 ports and must be blank (or
+  \code{n/a}) on others (\ruleid{WIDTH-ID}). A slave with \code{auto} gets the
+  slave-side ID width of its fabric. A slave with a number that differs from it gets an
+  ID-width converter.
+\item \col{User width (bits)} above 0 is legal only on AXI4 (\ruleid{WIDTH-USER}).
+\item \col{Max outstanding rd}, \col{Max outstanding wr} and \col{Wait states} are
+  checked and kept in the IR. The generator does not use them today.
+\item \col{Error response} must suit the protocol of the slave
+  (\ruleid{VALUE-ILLEGAL}).
+\end{itemize}
+
+You do not type the fabric of a port. The grey \textsf{Fabric} column finds it on
+\sheet{Topology} and reads \code{NOT CONNECTED} until the port has a link. Every master
+and slave needs a link (\ruleid{TOPO-NOT-CONNECTED}).
+
+\subsection{Adapters}
+
+When a port and its fabric differ, BAG puts adapters between them. Adapters exist only
+inside the AXI family: between AXI4 or AXI4-Lite ports and AXI4 or AXI4-Lite fabrics.
+
+\begin{itemize}
+\item a different clock domain gives a CDC adapter (\code{cdc});
+\item a different protocol, AXI4 against AXI4-Lite, gives a protocol adapter
+  (\code{pc});
+\item a different data width gives a width converter (\code{dw});
+\item an AXI4 slave whose ID width differs from the fabric's slave-side ID width gives
+  an ID-width converter (\code{iw});
+\item a FIFO (\code{fifo}) or a register slice (\code{cut}) comes from
+  \sheet{Port_Options}.
+\end{itemize}
+
+An AHB-Lite or APB port must have the protocol, data width and clock domain of its
+fabric, and an AXI port cannot sit on an AHB-Lite or APB fabric: to cross protocol
+families, use a bridge. A mismatch gives \ruleid{PORT-ADAPTER}.
+
+Each adapter has an instance name made from \setting{Adapter instance naming} on
+\sheet{Wrapper}: by default \code{<from>_<type>_2_<to>}, for example
+\code{cpu0_cdc_2_main_xbar} for a master and \code{main_xbar_dw_2_ddr0} for a slave. Use
+these names on \sheet{Hierarchy} to move or rename an adapter. The grey columns on
+\sheet{Masters} and \sheet{Slaves} preview the protocol adapter, the width converter and
+the CDC with the default pattern. They do not show the ID-width converter, the FIFO or
+the register slice, and they do not know the AXI-family rule above. The IR
+(chapter~\ref{ch:ir}) lists every adapter BAG inserts.
+
+A width converter cannot split an AXI4 WRAP burst: it answers one with SLVERR. When a
+width converter on a master's path refuses its WRAP bursts, \cmd{bag check} warns on
+the master's row and names the slaves it concerns (\ruleid{AXI-WRAP-REFUSED}). Chapter~\ref{ch:first} shows the two
+warnings of the sample.
+
+\section{Bridges}
+
+The \sheet{Bridges} sheet has one row per bridge. A bridge connects two fabrics. It
+appears twice on \sheet{Topology}: once as a destination of its upstream fabric, where
+it is a slave, and once as a source into its downstream fabric, where it is a master. So
+it needs a region (its \term{window}) on \sheet{Memory_Map}, and a row on
+\sheet{Address_Decode} for its downstream end.
+
+\begin{wbtable}{Column}
+\col{Bridge} & Yes & lowercase name, e.g.\ \code{br_main2per} & The instance name.\\
+\col{Template} & Yes & a bridge template, see the table below & The template that
+  implements the bridge.\\
+\col{Window base (hex)} & Yes & hex & The lowest base address of the bridge's regions on
+  \sheet{Memory_Map}.\\
+\col{Pass-through address} & Yes & \code{Y}, \code{N} & \code{Y}: the downstream fabric
+  sees the full system address. \code{N}: it sees the offset from the window base.\\
+\col{FIFO depth} & No & integer, 0 or more & Requests buffered inside the bridge. Blank
+  or 0: none. See below.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+The grey columns show the upstream and downstream fabric (from \sheet{Topology}), their
+protocols and domains, and whether the bridge crosses clock domains.
+
+\subsection{Bridge templates}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lllc@{}}
+\toprule
+\textbf{Template} & \textbf{Upstream fabric} & \textbf{Downstream fabric} &
+  \textbf{FIFO depth}\\
+\midrule
+\code{bag_axi2apb} & AXI4, AXI4-Lite & APB4, APB3 & used\\
+\code{bag_axi2ahb} & AXI4, AXI4-Lite & AHB-Lite & used\\
+\code{bag_axi2axil} & AXI4 & AXI4-Lite & used\\
+\code{bag_ahb2axi} & AHB-Lite & AXI4, AXI4-Lite & ignored\\
+\code{bag_ahb2apb} & AHB-Lite & APB4, APB3 & ignored\\
+\code{bag_apb2axi} & APB4, APB3 & AXI4, AXI4-Lite & ignored\\
+\code{bag_apb2ahb} & APB4, APB3 & AHB-Lite & ignored\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The template must be a bridge template, and the protocols of the upstream and
+downstream fabrics must be ones it supports (\ruleid{TMPL-BRIDGE}).
+
+A bridge does its own width conversion and clock-domain crossing inside, so one bridge
+row covers the protocol, the width and the clock. BAG puts no adapters around a bridge,
+except a FIFO or register slice from \sheet{Port_Options} on its downstream end. An
+error passes back across the bridge in the form of the upstream protocol; for example,
+PSLVERR becomes SLVERR on an AXI upstream fabric.
+
+In short, the bridges behave like this:
+
+\begin{itemize}
+\item \code{bag_axi2apb} and \code{bag_axi2axil} split bursts into single transfers.
+  \code{bag_axi2apb} makes one APB transfer at a time.
+\item \code{bag_axi2ahb} takes one AXI transaction at a time (responses in order) and
+  maps INCR bursts to AHB INCR bursts.
+\item \code{bag_ahb2axi} has one transfer outstanding and issues AXI ID 0 (ID width
+  1).
+\item \code{bag_ahb2apb}, \code{bag_apb2axi} and \code{bag_apb2ahb} move one transfer
+  at a time.
+\end{itemize}
+
+The bridges built on PULP blocks refuse some AXI bursts with SLVERR, for example WRAP
+bursts. Chapter~\ref{ch:limits} lists these limits.
+
+\subsection{FIFO depth}
+
+\col{FIFO depth} is the depth of a FIFO on every AXI channel inside the bridge. It sits
+on the upstream side, after the width conversion and before the clock-domain crossing,
+and runs on the upstream clock. With 0 there is no FIFO.
+
+Only \code{bag_axi2apb}, \code{bag_axi2ahb} and \code{bag_axi2axil} have this FIFO. The
+other bridges move one transfer at a time through a handshake and ignore the value: a
+depth above 0 on them gives the warning \ruleid{BRIDGE-FIFO-IGNORED}.
+
+\subsection{Pass-through address}
+
+\sheet{Memory_Map} always holds full system addresses, on every fabric. The
+\col{Pass-through address} setting decides what addresses the downstream fabric decodes.
+
+\begin{itemize}
+\item With \code{Y}, the bridge passes the address on as it is. The downstream fabric
+  decodes the same system addresses. Its address width must hold them.
+\item With \code{N}, the bridge subtracts the window base. The downstream fabric decodes
+  offsets from 0, so it can have a small address width. Its regions are still typed as
+  system addresses on \sheet{Memory_Map}. They must not lie below the window base, and
+  their offsets must fit in the downstream fabric's address width
+  (\ruleid{MM-ADDR-RANGE}).
+\end{itemize}
+
+A chain of bridges works the same way: a pass-through \code{Y} bridge keeps the offset of
+its upstream fabric.
+
+\textbf{One address view per fabric.} A fabric has one decoder, so all of its masters
+must send the same kind of address. A fabric fed by a pass-through \code{N} bridge cannot
+also have a master that sends other addresses: a direct master, a pass-through \code{Y}
+bridge from a fabric without an offset, or a pass-through \code{N} bridge with another
+window base. Give them separate fabrics. \cmd{bag check} does
+not report this case yet; \cmd{bag generate} stops with the error
+\code{fabric <name>: its masters see different address translations}.
+
+\subsection{Rules across rows}
+
+\begin{itemize}
+\item Every bridge needs an upstream link and a downstream link
+  (\ruleid{TOPO-NOT-CONNECTED}).
+\item Bridges must not link fabrics in a loop (\ruleid{TOPO-BRIDGE-CYCLE}). So two
+  fabrics are never bridged in both directions.
+\item A bridge needs at least one region on \sheet{Memory_Map}, and
+  \col{Window base (hex)} must equal the lowest base of its regions
+  (\ruleid{BRIDGE-WINDOW-BASE}).
+\item Each region of a bridge must reach at least one region on its downstream fabric
+  (\ruleid{BRIDGE-WINDOW-EMPTY}).
+\end{itemize}
+
+\section{Topology}
+
+The \sheet{Topology} sheet says what attaches where. It has one row per link, read as
+\col{Source} to \col{Destination}. It is the only place where you type an attachment:
+every grey \col{Fabric} column on other sheets is derived from it.
+
+\begin{wbtable}{Column}
+\col{Source} & Yes & a master, fabric or bridge & Where the link starts.\\
+\col{Destination} & Yes & a fabric, slave or bridge & Where the link ends.\\
+\col{Port index} & Yes & integer, 0 to (ports on that side $-$ 1) & The port number on
+  the fabric side of the link.\\
+\col{Priority} & Fixed-priority & integer, 0 or more; 0 is highest & The priority of a
+  master port on a fixed-priority fabric.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+Only four kinds of link are legal:
+
+\begin{center}
+\small
+\begin{tabular}{@{}ll>{\raggedright\arraybackslash}p{6cm}@{}}
+\toprule
+\textbf{Link} & \textbf{Example} & \textbf{Meaning}\\
+\midrule
+master to fabric & \code{cpu0 -> main_xbar} & The master issues into the fabric.\\
+fabric to slave & \code{main_xbar -> ddr0} & The fabric serves the slave.\\
+fabric to bridge & \code{main_xbar -> br_main2per} & The bridge is a slave on its
+  upstream fabric.\\
+bridge to fabric & \code{br_main2per -> periph_apb} & The bridge is a master on its
+  downstream fabric.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A link into a fabric is a \term{master port} of that fabric; a link out of it is a
+\term{slave port}. \col{Port index} numbers the master ports of a fabric from 0, and its
+slave ports from 0. It sets the port numbers of the RTL and the order of the decode
+tables. Because every link has an explicit index, sorting the sheet never renumbers a
+port. The port map document lists the ports of each fabric, so a change shows in a
+diff.
+
+The rules:
+
+\begin{itemize}
+\item Source and Destination must be defined on \sheet{Masters}, \sheet{Slaves},
+  \sheet{Bridges} or \sheet{Fabrics} (\ruleid{TOPO-UNKNOWN-NAME}).
+\item The link must be one of the four kinds above (\ruleid{TOPO-ILLEGAL-LINK}). A master
+  wired straight to a slave is illegal: it needs a fabric between them.
+\item A link may appear once (\ruleid{TOPO-DUPLICATE}).
+\item Each master, slave and bridge end attaches once (\ruleid{TOPO-MULTI-ATTACH}).
+\item \col{Port index} is required (\ruleid{TOPO-INDEX-MISSING}). It must be a whole
+  number, 0 or more (\ruleid{TOPO-INDEX-NOT-INTEGER}), below the number of ports on that
+  side of the fabric (\ruleid{TOPO-INDEX-OUT-OF-RANGE}), and used once on that side
+  (\ruleid{TOPO-INDEX-REPEATED}).
+\item A \col{Priority} must be a whole number, 0 or more
+  (\ruleid{TOPO-PRIORITY-NOT-INTEGER}). On a fabric with \code{fixed-priority}
+  arbitration, every master port needs one (\ruleid{TOPO-PRIORITY-MISSING}), and no two
+  master ports of the fabric may share one (\ruleid{TOPO-PRIORITY-REPEATED}). On other
+  links, BAG ignores the priority.
+\end{itemize}
+
+The grey \textsf{Check} column shows the same problems by name, such as
+\code{INDEX OUT OF RANGE}. The grey \textsf{Resolved index} column uses the row order for
+a blank \col{Port index}, but \cmd{bag check} refuses a blank index.
+
+\section{Access\_Rules}
+
+By default every master on a fabric can reach every slave on that fabric, limited only
+by the \col{Access} of each region on \sheet{Memory_Map}. The \sheet{Access_Rules}
+sheet lists only the exceptions. Leave it empty if you have none.
+
+\begin{wbtable}{Column}
+\col{Master} & Yes & a master, or a bridge (its downstream end) & The master side of the
+  rule.\\
+\col{Slave / bridge} & Yes & a slave, or a bridge (its upstream end) & The slave side.
+  It must be on the same fabric as the master.\\
+\col{Access} & Yes & \code{RO}, \code{WO}, \code{-} & \code{RO}: reads only.
+  \code{WO}: writes only. \code{-}: no access at all.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+An access that a rule blocks gets the master's miss response from
+\sheet{Address_Decode}. With \code{-}, \code{bag_axi_xbar} also leaves that path out of
+the crossbar.
+
+The rules: both names must be connected ports (\ruleid{ACC-UNKNOWN-NAME}) on the same
+fabric (\ruleid{ACC-NOT-SAME-FABRIC}), and a pair may have one rule
+(\ruleid{ACC-DUPLICATE}). If every master of a fabric is blocked from a slave,
+\cmd{bag check} warns (\ruleid{ACC-UNREACHABLE-SLAVE}).
+
+\section{Memory\_Map}
+
+The \sheet{Memory_Map} sheet has one row per address \term{region}. All addresses are
+full system addresses, so a peripheral behind a bridge has the same address on every
+fabric. A slave may have several regions. A bridge needs at least one: its window on the
+upstream fabric.
+
+\begin{wbtable}{Column}
+\col{Slave / bridge} & Yes & a slave or bridge & The owner of the region. It must be
+  connected on \sheet{Topology}.\\
+\col{Region} & Yes & lowercase name, e.g.\ \code{regs} & The region name, unique per
+  slave. The C header names it \code{<SLAVE>_<REGION>_BASE}.\\
+\col{Base (hex)} & Yes & hex, e.g.\ \code{0x4000_0000} & The first address. It must be
+  a multiple of the size.\\
+\col{Size (hex)} & Yes & hex, a power of 2, e.g.\ \code{0x0000_1000} & The size in
+  bytes.\\
+\col{Access} & Yes & \code{RW}, \code{RO}, \code{WO} & The access every master gets.
+  \sheet{Access_Rules} can narrow it per master.\\
+\col{Secure only} & Yes & \code{Y}, \code{N} & \code{Y}: a non-secure access gets the
+  miss response.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+You do not type the fabric of a region: it is the fabric of the slave or bridge, from
+\sheet{Topology}. It still matters. It decides which decoder holds the region, and it
+scopes the overlap check: a bridge window and the slaves behind it share addresses, but
+on different fabrics. The grey columns show the end address, the fabric, decimal helpers
+and a \textsf{Check}.
+
+The rules for each region:
+
+\begin{itemize}
+\item The owner must be on \sheet{Slaves} or \sheet{Bridges} (\ruleid{MM-UNKNOWN-SLAVE})
+  and have a link as a destination (\ruleid{MM-NOT-CONNECTED}).
+\item A slave may use a region name once (\ruleid{NAME-UNIQUE}).
+\item The size must be a power of 2 (\ruleid{MM-SIZE-NOT-POW2}), and the base a
+  multiple of the size (\ruleid{MM-MISALIGNED}).
+\item The region must fit in the address space of its fabric (after the offset of a
+  pass-through \code{N} bridge), and its size must fit in the address width of its
+  slave (\ruleid{MM-ADDR-RANGE}).
+\item A slave narrower than its fabric sees only its low address bits. So all regions of
+  that slave must lie in one aligned block of $2^w$ bytes, for an address width $w$
+  (\ruleid{MM-SLAVE-ALIGN}). Otherwise two regions would look the same to the slave.
+\item Two regions on one fabric must not overlap (\ruleid{MM-OVERLAP}).
+\item On an AXI4 or AXI4-Lite fabric, a region smaller than 4~KB gives a warning
+  (\ruleid{MM-SMALL-AXI}): AXI bursts must not cross a 4~KB boundary, and small regions
+  make that easy to break.
+\item A connected slave without any region gives a warning (\ruleid{MM-PATH-NO-REGION}).
+\end{itemize}
+
+\textbf{Secure only.} A port marks an access as non-secure with AxPROT[1] on AXI, HNONSEC
+on AHB-Lite and PPROT[1] on APB4. A secure-only region must not be reachable from a
+master port that cannot drive that bit: one whose \col{PROT} is tied on
+\sheet{Port_Options}, or an APB3 port, which has no PPROT
+(\ruleid{SEC-PROT-TIED}). A tied PROT always marks accesses as non-secure.
+
+\section{Address\_Decode}
+
+The \sheet{Address_Decode} sheet has one row for every master port: every master, and
+the downstream end of every bridge. It says what a master gets for an address that it
+may not use, and it can add one alias.
+
+\begin{wbtable}{Column}
+\col{Master} & Yes & a master, or a bridge (its downstream end) & The master port.\\
+\col{Miss response} & Yes & \code{DECERR}, \code{SLVERR}, \code{HRESP_ERROR},
+  \code{PSLVERR}, \code{default-slave} & What a miss returns. It must suit the fabric's
+  protocol.\\
+\col{Default slave} & With default slave & a slave on the same fabric & The slave
+  that receives every miss.\\
+\col{Alias base (hex)} & For an alias & hex & The address the master issues.\\
+\col{Alias size (hex)} & For an alias & hex, a power of 2 & The size of the alias
+  window.\\
+\col{Alias maps to (hex)} & For an alias & hex & The address decoded instead.\\
+\col{Alias enable} & For an alias & \code{always}, or an extra top-level input & When the
+  alias is active.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+The fabric is derived and shown in grey.
+
+\subsection{Miss response}
+
+A \term{miss} is an access that no region accepts: the address is outside every region
+of the fabric, or an access rule or the region's \col{Access} blocks it, or it is
+non-secure and the region is secure only. The miss response must suit the protocol of
+the master's fabric (\ruleid{DEC-MISS-RESP}):
+
+\begin{itemize}
+\item AXI4 and AXI4-Lite: \code{DECERR}, \code{SLVERR} or \code{default-slave};
+\item AHB-Lite: \code{HRESP_ERROR} or \code{default-slave};
+\item APB: \code{PSLVERR} or \code{default-slave}.
+\end{itemize}
+
+For a bridge, it is the protocol of the downstream fabric. The bridge carries the error
+back to its upstream master in the upstream protocol.
+
+With an error response, the fabric answers the miss itself. With \code{default-slave},
+the miss goes to the slave you name in \col{Default slave} instead, and that slave
+answers. Use it when a real slave should see stray accesses, for example to log them.
+The default slave must be a slave on the same fabric, and \col{Default slave} must be
+blank with any other miss response (\ruleid{DEC-DEFAULT-SLAVE}).
+
+Every master port needs exactly one row (\ruleid{DEC-MISSING-ROW},
+\ruleid{DEC-DUPLICATE}), and the name must be a connected master or bridge
+(\ruleid{DEC-UNKNOWN-MASTER}).
+
+\subsection{Aliases}
+
+An \term{alias} makes a master see a window of addresses as another window. For example,
+in the sample, \code{cpu0} sees \code{sram0} (at \code{0x1000_0000}) also at
+\code{0x0000_0000} while the input \code{boot_remap_i} is 1. An alias applies only to
+the master of its row; other masters do not see it. A master can have one alias.
+
+Fill all four alias columns, or none (\ruleid{VALUE-MISSING}). The rules:
+
+\begin{itemize}
+\item The size must be a power of 2, and the alias base and the target must be
+  multiples of it (\ruleid{DEC-ALIAS-SIZE}).
+\item The alias window must not overlap a region on the fabric
+  (\ruleid{DEC-ALIAS-OVERLAP}).
+\item The target window must lie inside one region on the fabric
+  (\ruleid{DEC-ALIAS-TARGET}).
+\item \col{Alias enable} is \code{always}, or the name of an input listed in
+  \setting{Extra top-level inputs} on \sheet{Wrapper} (\ruleid{DEC-ALIAS-ENABLE}).
+\end{itemize}
+
+An \term{alias pin} is an enable input of the wrapper. Use one when software or a boot
+strap must turn the alias on and off, for example a boot remap that ends after reset.
+Use \code{always} for an alias that is fixed.
+
+\section{Port\_Options}
+
+The \sheet{Port_Options} sheet changes the defaults of a port. List only the ports that
+need it. A port that is not listed gets no FIFO, no register slice, and every optional
+signal of its protocol on the wrapper.
+
+\begin{wbtable}{Column}
+\col{Port} & Yes & a master, slave or bridge & The port. For a bridge, the options apply
+  to its downstream end.\\
+\col{FIFO depth} & No & integer, 0 or more & A FIFO on every channel of the port. Blank
+  or 0: none.\\
+\col{Register slice} & No & \code{none}, \code{cut}, \code{multicut-2},
+  \code{multicut-3}, \code{n/a} & Register stages on the port: 1, 2 or 3. Each stage
+  adds a clock of latency.\\
+\col{PROT} & No & see below & AxPROT (AXI), HPROT and HNONSEC (AHB-Lite), PPROT (APB4).\\
+\col{QOS} & No & see below & AxQOS (AXI4).\\
+\col{REGION} & No & see below & AxREGION (AXI4).\\
+\col{CACHE} & No & see below & AxCACHE (AXI4).\\
+\col{LOCK / excl} & No & see below & AxLOCK (AXI4), HMASTLOCK (AHB-Lite masters).\\
+\col{PSTRB} & No & see below & PSTRB (APB4).\\
+\col{PSLVERR} & No & see below & PSLVERR (APB3, APB4).\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+\col{FIFO depth} and \col{Register slice} add the adapters \code{fifo} and \code{cut}
+between the port and its fabric. They exist only on AXI4 and AXI4-Lite ports
+(\ruleid{PORT-ADAPTER}). \col{FIFO depth} adds buffering. It is not the same as
+\col{Max mst trans} on \sheet{Fabrics}, which only limits the transactions in flight.
+
+Each optional-signal column takes one of four values. Blank means \code{drive} for a
+signal the port has, and \code{n/a} for one it does not have.
+
+\begin{description}
+\item[drive] The signal exists and is a port of the wrapper.
+\item[tie-0] The signal is not a port of the wrapper; BAG drives 0 inside.
+\item[tie-default] The signal is not a port of the wrapper; BAG drives the AMBA default
+  inside: AxCACHE and HPROT \code{0b0011}, and PSTRB all ones on writes and 0 on reads.
+  Other signals get 0.
+\item[n/a] The signal does not exist in the port's protocol.
+\end{description}
+
+A tied security bit fails closed: with \code{tie-0} or \code{tie-default} on
+\col{PROT}, AxPROT[1] and PPROT[1] are 1 and HNONSEC is 1, so every access is
+non-secure.
+
+The rules: the port must be a connected master, slave or bridge
+(\ruleid{PORTOPT-UNKNOWN-PORT}), listed once (\ruleid{PORTOPT-DUPLICATE}). Use
+\code{n/a} exactly for the signals that the port's protocol lacks, and a real value for
+the others (\ruleid{PORTOPT-SIGNAL}). HMASTLOCK goes to AHB-Lite masters only, so
+\col{LOCK / excl} is \code{n/a} on an AHB-Lite slave. A tied PSLVERR on a master port
+of an APB fabric gives a warning (\ruleid{PORTOPT-ERROR-MASKED}): no error reaches that
+master, its own miss response included.
+
+\section{User\_Ports}
+\label{sec:wb-user-ports}
+
+A fabric with the backing template \code{bag_external} is one that you write yourself.
+BAG puts your module into the wrapper where a generated fabric would be, and connects
+its bus ports. It also writes a \term{stub} of the module, \file{rtl/ext/<module>.sv},
+with the same ports and every output tied to 0, so that the design lints and elaborates.
+Replace the stub with your RTL. BAG writes no RTL, no tests and no formal jobs for such
+a fabric; it still writes the memory map and the decode tables.
+
+The module and its bus ports are named like this:
+
+\begin{itemize}
+\item With \col{External module} blank, the module is \code{<project>_<fabric>}. Its
+  bus ports are named by \setting{Signal naming pattern} with \code{<fabric>_<port>} as
+  the port name, for example \code{noc_cpu0_axi_awaddr}.
+\item With \col{External module} set, the module has that name, and its bus ports are
+  named by position: \code{s<k>} for the k-th master port of the fabric and \code{m<k>}
+  for the k-th slave port, for example \code{s0_axi_awaddr}. So fabrics of the same
+  shape can share one module.
+\item Every such module also has \code{clk_i} and \code{rst_ni}: the fabric's clock and
+  its active-low reset.
+\end{itemize}
+
+\col{External module} must be a SystemVerilog identifier and not a keyword, and must not
+clash with a module BAG generates, start with \code{bag_}, or differ from another
+external module only in case (\ruleid{EXT-MODULE-NAME}). Fabrics that share a module
+must have the same protocol, widths, number of attachments and user ports
+(\ruleid{EXT-MODULE-SHARED}).
+
+The \sheet{User_Ports} sheet declares the other ports of your module: interrupts,
+status outputs, configuration inputs, a test mode, extra clocks. It has one row per
+port.
+
+\begin{wbtable}{Column}
+\col{Instance} & Yes & a fabric with template \code{bag_external} & The fabric whose
+  module has the port.\\
+\col{Port} & Yes & lowercase name & The port name on your module.\\
+\col{Direction} & Yes & \code{input}, \code{output} & As your module sees it.\\
+\col{Width (bits)} & Yes & integer, 1 or more & The width of the port.\\
+\col{Connection} & Yes & see below & How BAG connects the port.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+\begin{center}
+\small
+\begin{tabular}{@{}ll>{\raggedright\arraybackslash}p{6.5cm}@{}}
+\toprule
+\textbf{Connection} & \textbf{Direction} & \textbf{Meaning}\\
+\midrule
+\code{expose} & input or output & A port \code{<instance>_<port>} of the top wrapper.\\
+\code{extra input <name>} & input & An input from \setting{Extra top-level inputs}.\\
+\code{tie-0}, \code{tie-1}, \code{0x<hex>} & input & A constant. \code{tie-1} sets every
+  bit.\\
+\code{clock <domain>} & input & The clock of the domain.\\
+\code{reset <domain>} & input & The active-low reset of the domain, as BAG's own blocks
+  get it.\\
+\code{open} & output & Left unconnected.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The rules: the instance must be a \code{bag_external} fabric
+(\ruleid{USERPORT-INSTANCE}); a port may be declared once per instance
+(\ruleid{USERPORT-DUPLICATE}) and must not be one of the bus, clock or reset ports that
+BAG already connects (\ruleid{USERPORT-NAME}). The connection must be one of the forms
+above and legal for the direction; an extra input or a domain must exist; a clock, a
+reset or an extra input is 1 bit wide; and a constant must fit in the width
+(\ruleid{USERPORT-CONNECTION}). An exposed name must not clash with another top-level
+port (\ruleid{WRAP-NAME-COLLISION}).
+
+A port of your module that is a whole bus, such as an APB configuration port, is
+declared here signal by signal.
+
+\section{Hierarchy}
+
+\term{Sub-wrappers} are modules between the top wrapper and the instances. They group
+fabrics, bridges and adapters, for example for a power domain or a floorplan partition.
+The \sheet{Hierarchy} sheet has two tables: the sub-wrappers, then the placement of
+instances in them. You need neither: without them, everything is in the top wrapper.
+
+\subsection{Sub-wrappers}
+
+\begin{wbtable}{Column}
+\col{Sub-wrapper} & Yes & lowercase name, e.g.\ \code{main_wrapper} & The module name.
+  Row~5 is the top wrapper; its name comes from \setting{Top module name}.\\
+\col{Parent} & Yes & \code{-} for the top; a sub-wrapper otherwise & The module that
+  contains this one. Sub-wrappers can nest.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+The template has rows 5 to 12 for this table. The table ends at the label
+\code{Placement} in column A.
+
+The rules: only row~5 has the parent \code{-} (\ruleid{HIER-TOP}); a parent must be a
+sub-wrapper or the top (\ruleid{HIER-UNKNOWN-PARENT}), not the sub-wrapper itself
+(\ruleid{HIER-SELF-PARENT}); and parents must not form a loop
+(\ruleid{HIER-PARENT-LOOP}). A sub-wrapper name must not be the name of another module
+of the design (\ruleid{HIER-RESERVED-NAME}). A sub-wrapper that contains no instance,
+directly or below it, gives a warning (\ruleid{HIER-EMPTY}).
+
+\subsection{Placement}
+
+The placement table starts below the label \code{Placement}, with its own header row.
+
+\begin{wbtable}{Column}
+\col{Instance} & Yes & a fabric, bridge or adapter instance & The instance to place.\\
+\col{Sub-wrapper} & Yes & a sub-wrapper, or the top & Where the instance goes.\\
+\col{RTL instance name} & No & lowercase name & The instance name in the RTL. Blank:
+  \code{u_<instance>}.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+List only what you want to move or rename. The defaults are:
+
+\begin{itemize}
+\item Fabrics and bridges go in the top wrapper.
+\item Adapters follow \setting{Adapter placement} on \sheet{Wrapper}: with
+  \code{with fabric}, an adapter goes where its fabric is.
+\end{itemize}
+
+Adapter names are those of section~\ref{sec:wb-ports}, for example
+\code{main_xbar_dw_2_ddr0}. Where a link crosses a sub-wrapper boundary, BAG makes
+ports named by \setting{Sub-wrapper port naming}. An adapter or a bridge is one
+instance, so a clock-domain crossing is always generated whole inside one wrapper.
+
+The rules: the instance must exist (\ruleid{HIER-UNKNOWN-INSTANCE}) and be placed once
+(\ruleid{HIER-PLACED-TWICE}); the sub-wrapper must be in the sub-wrapper table
+(\ruleid{HIER-UNKNOWN-SUBWRAPPER}); and instance names must be unique in each wrapper
+(\ruleid{HIER-RTL-NAME}).
+
+\section{Wrapper}
+
+The \sheet{Wrapper} sheet describes the top module that your SoC instantiates. It has a
+list of settings, like \sheet{Project}, and then the \code{Exposed ports} table.
+
+\subsection{Settings}
+
+\begin{wbtable}{Setting}
+\setting{Top module name} & Yes & lowercase name, e.g.\ \code{demo_ss_bus_top} & The
+  top module. Row~5 of \sheet{Hierarchy} shows it.\\
+\setting{Port style} & Yes & \code{flat}, \code{sv-interface} & \code{flat}: one port per
+  signal. \code{sv-interface}: one SystemVerilog interface per bus port.\\
+\setting{Signal naming pattern} & Yes & a pattern with \code{{port}}, \code{{proto}},
+  \code{{signal}} & The names of the flat ports, e.g.\ \code{cpu0_axi_awaddr}.\\
+\setting{Clock/reset ports} & Yes & \code{one per domain} & One clock and one reset port
+  per domain, named as on \sheet{Clocks} and \sheet{Resets}.\\
+\setting{Parameter package} & Yes & lowercase name, e.g.\ \code{demo_ss_bus_pkg} & The
+  package with the widths, base addresses and region sizes as localparams.\\
+\setting{File header} & No & a file name, e.g.\ \code{header.txt} & A text file, such as
+  a licence, that starts each generated file.\\
+\setting{Extra top-level inputs} & No & comma-separated identifiers, e.g.\
+  \code{boot_remap_i} & 1-bit inputs of the top wrapper, for alias enables and user
+  ports.\\
+\setting{Adapter placement} & Yes & \code{with fabric}, \code{with port}, \code{top} &
+  The default wrapper of the adapters.\\
+\setting{Adapter instance naming} & Yes & a pattern with \code{{from}}, \code{{type}},
+  \code{{to}} & The names of the adapter instances.\\
+\setting{Sub-wrapper port naming} & Yes & a pattern with \code{{instance}},
+  \code{{proto}}, \code{{signal}} & The names of the ports where a link crosses a
+  sub-wrapper boundary.\\
+\end{wbtable}
+
+The template fills in the defaults: \code{flat}, \code{{port}_{proto}_{signal}},
+\code{one per domain}, \code{with fabric}, \code{{from}_{type}_2_{to}} and
+\code{{instance}_{proto}_{signal}}.
+
+\begin{description}
+\item[Patterns] A pattern must use each of its placeholders exactly once, and no other
+  (\ruleid{WRAP-PATTERN}). In \setting{Signal naming pattern}, \code{{port}} is the port
+  name, \code{{proto}} is \code{axi}, \code{axil}, \code{ahb}, \code{apb4} or
+  \code{apb3}, and \code{{signal}} is the lowercase AMBA signal name. In
+  \setting{Adapter instance naming}, \code{{type}} is \code{pc}, \code{dw}, \code{cdc},
+  \code{iw}, \code{fifo} or \code{cut}. In \setting{Sub-wrapper port naming},
+  \code{{instance}} is the name of the link: an exposed port's name, or
+  \code{<from>_2_<to>} for a link between two instances.
+\item[Port style] \code{flat} works with every tool. \code{sv-interface} is more
+  compact. With it, BAG also writes one interface per protocol and a flat module around
+  the wrapper, \code{<top>_flat}, which lint and compile use as the top. The option
+  \opt{--style} of \cmd{bag generate} replaces this setting for one run.
+\item[File header] The path starts at the folder of the workbook, and the file must
+  exist (\ruleid{WRAP-FILE-HEADER}). BAG copies its text as it is to the top of the RTL,
+  documents, tests and formal files it generates, above its own header lines. Copies of
+  library RTL keep their own headers.
+\item[Extra top-level inputs] Each name must be a SystemVerilog identifier
+  (\ruleid{NAME-IDENT}). The inputs are used by \col{Alias enable} on
+  \sheet{Address_Decode} and by \code{extra input} on \sheet{User_Ports}.
+\item[Adapter placement] \code{with fabric} puts an adapter in the same wrapper as its
+  fabric. \code{with port} and \code{top} both put it in the top wrapper. \sheet{Hierarchy} can place any adapter elsewhere.
+\end{description}
+
+\subsection{Exposed ports}
+
+The \code{Exposed ports} table starts below the settings, with its own header row. It
+lists every master, slave and bridge, one per row.
+
+\begin{wbtable}{Column}
+\col{Port} & Yes & a master, slave or bridge & The port.\\
+\col{Exposed at top} & Yes & \code{Y}, \code{N} & \code{Y} for masters and slaves;
+  \code{N} for bridges.\\
+\col{Top-level prefix} & No & lowercase name, e.g.\ \code{cpu0_axi} & Replaces
+  \code{{port}_{proto}} in the signal naming pattern for this port.\\
+\col{If not exposed} & No & \code{internal}, or blank & For you. Only bridges are
+  internal.\\
+\col{Notes} & No & any text & For you.\\
+\end{wbtable}
+
+In this release every master and slave is a port of the top wrapper, and every bridge is
+internal (\ruleid{WRAP-INTERNAL-PORT}). A \col{Top-level prefix} takes effect only when
+the pattern contains \code{{port}_{proto}}: then \code{cpu0_axi} gives
+\code{cpu0_axi_awaddr}, whatever the protocol token.
+
+The rules: every master, slave and bridge must be listed (\ruleid{WRAP-PORT-NOT-LISTED}),
+once (\ruleid{WRAP-DUPLICATE-PORT}), and only those (\ruleid{WRAP-UNKNOWN-PORT}). No two
+ports of the top wrapper may get the same name, counting clocks, resets, extra inputs
+and exposed user ports (\ruleid{WRAP-NAME-COLLISION}). A signal that
+\sheet{Port_Options} ties is not a port of the wrapper.
+
+\section{Lists}
+
+The \sheet{Lists} sheet holds the values of the dropdown lists, one list per column:
+\code{Protocol}, \code{Topology}, \code{Arbitration}, \code{LatencyMode},
+\code{Polarity}, \code{Assertion}, \code{Access}, \code{RuleAccess}, \code{YesNo},
+\code{MissResp}, \code{RegSlice}, \code{PortStyle}, \code{Template}, \code{SigDrive},
+\code{AdapterPlace} and \code{Direction}. The input cells of the other sheets take their
+dropdowns from here.
+
+BAG does not read this sheet. You can add a value below a list and widen the range of the
+dropdown, but \cmd{bag check} still refuses a value that BAG does not support. The legal
+values are the ones in this chapter.

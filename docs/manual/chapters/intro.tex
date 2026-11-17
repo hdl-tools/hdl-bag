@@ -1,0 +1,94 @@
+\chapter{Introduction}
+\label{ch:intro}
+
+\section{What BAG is for}
+
+A system on chip connects its processors, DMA engines and peripherals through bus
+fabrics: crossbars, shared buses, bridges between protocols, and small adapters that
+change a data width or cross a clock domain. Writing that interconnect by hand takes
+time, and every change to the address map or the list of ports means more hand edits.
+
+BAG, the Bus Architecture Generator, writes the interconnect for you. You describe it in
+a \term{spec workbook}: an Excel file with one sheet per topic (masters, slaves, fabrics,
+bridges, the memory map, and so on). BAG reads the workbook, checks it, and writes:
+
+\begin{itemize}
+\item the SystemVerilog of every fabric, bridge and adapter, inside a top-level
+  \term{wrapper} module that your SoC instantiates;
+\item a parameter package with the address map, a C header, and documents (memory map,
+  port map, tie-offs, reset sequence);
+\item cocotb tests that drive traffic through the generated design and check every
+  route, response and arbitration rule;
+\item SymbiYosys formal jobs that prove address decode and check the bus protocol on
+  every port.
+\end{itemize}
+
+BAG supports four AMBA protocols: AXI4, AXI4-Lite, AHB-Lite and APB (APB3 and APB4).
+The AXI fabrics are built on the open-source PULP \code{axi} library; the AHB-Lite and
+APB fabrics, the bridges between protocol families and some adapters are written for
+BAG.
+
+\section{How BAG works}
+
+BAG works in steps. Each step has its own command, and \cmd{bag flow} runs them in turn
+(chapter~\ref{ch:cli}).
+
+\begin{enumerate}
+\item \textbf{Read and check.} \cmd{bag check} reads the workbook and runs every check
+  (chapter~\ref{ch:checks}). An error stops here: no file is written.
+\item \textbf{Resolve.} BAG derives everything you do not type: which fabric each port
+  is on, the port counts, ID widths, the adapters to insert, the address decode tables.
+  The result is the \term{IR} (intermediate representation), a YAML file that holds the
+  whole design (chapter~\ref{ch:ir}). \cmd{bag ir} writes it.
+\item \textbf{Generate.} \cmd{bag generate} writes the RTL, the collateral, the tests and
+  the formal jobs into an \term{output directory} (chapter~\ref{ch:outputs}).
+\item \textbf{Lint and compile.} \cmd{bag lint} runs slang, Verilator and Verible on the
+  generated RTL; the design must have no finding that is not waived. A compile with
+  Verilator follows.
+\item \textbf{Simulate.} \cmd{bag sim} runs the generated cocotb tests with Verilator.
+\item \textbf{Prove.} \cmd{bag formal} runs the generated SymbiYosys jobs.
+\end{enumerate}
+
+Steps 1 to 3 need only Python. Steps 4 to 6 need the EDA tools of
+chapter~\ref{ch:install}.
+
+\section{What you can rely on}
+
+\begin{itemize}
+\item \textbf{Same input, same output.} BAG writes the same bytes for the same workbook
+  on every run and every machine. Generated files carry no time stamps. You can keep
+  them under version control and review a change as a diff.
+\item \textbf{The IR is the contract.} Every generated file comes from the IR. A
+  workbook and an IR are both accepted as input; an IR is checked as strictly as a
+  workbook.
+\item \textbf{Every finding names its place.} A check message names the sheet, the row
+  and a stable \term{rule ID}, for example \ruleid{TOPO-INDEX-RANGE}.
+\item \textbf{The generated files are yours.} They are not covered by the licence of
+  BAG itself.
+\end{itemize}
+
+\section{What BAG does not do}
+
+\begin{itemize}
+\item It does not write your masters and slaves (processors, memories, peripherals).
+  It writes the interconnect between them.
+\item It does not run synthesis, place and route, or timing analysis, and it does not
+  yet write timing constraints for clock-domain crossings.
+\item It does not edit generated files for you. Change the workbook and generate again.
+\item It does not test a fabric you supply yourself (a \code{bag_external} fabric): BAG
+  does not know how it behaves.
+\end{itemize}
+
+Chapter~\ref{ch:limits} lists the known limits in detail.
+
+\section{How to read this manual}
+
+Chapter~\ref{ch:first} takes the sample design from an empty folder to a generated,
+linted and simulated fabric. Read it first. Chapter~\ref{ch:workbook} is the reference
+for every sheet and column of the workbook, chapter~\ref{ch:checks} for every check, and
+chapter~\ref{ch:cli} for every command.
+
+Every example in this manual is a file that a test runs, so the output you see is what
+BAG prints. A line that starts with \code{$} is a command; the lines after it are what
+the command prints. \code{<examples>} stands for the folder the example runs in, and
+\code{<version>} for the version of BAG.
