@@ -25,8 +25,11 @@ from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import (
     ROUTE_CYCLES,
     ROUTE_CYCLES_PER_FIFO,
+    ROUTE_CYCLES_PER_MIDPOINT_STAGE,
     ROUTE_DEPTH,
     ROUTE_DEPTH_LITE_FIFO,
+    ROUTE_DEPTH_UPSIZE,
+    ROUTE_MIDPOINT_FREE_STAGES,
     SCOREBOARD,
     id_prefixes,
 )
@@ -740,6 +743,49 @@ def test_an_apb_port_behind_a_crossing_bridge_is_covered_by_its_fabric_unit(
     assert "proto_read_wdt0" not in route
 
 
+def test_a_route_unit_shows_valid_rising_while_ready_is_held_low(tmp_path: Path) -> None:
+    """D38 (#56): the checkers already assert that VALID and its payload hold until READY on
+    every channel a unit drives. What no cover showed is that VALID does not wait for READY:
+    a one-edge stall (valid && !ready) is reachable by a design that waits for a registered
+    READY. Each route unit's AXI4 and AXI4-Lite port now has, per channel the unit drives,
+    a cover of VALID rising while READY was low at this edge and the one before: B and R
+    where the unit is the slave, AW, W and AR where it is the master, for the accesses the
+    IR sends there (s1 takes only reads)."""
+    for config, proto in (("axi_shared_rr", "axi"), ("axil_shared_rr", "axil")):
+        generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        text = (tmp_path / config / "formal" / f"{config}_route_bus.sv").read_text(encoding="utf-8")
+        drives = {"m0": ("b", "r"), "s0": ("aw", "w", "ar"), "s1": ("ar",)}
+        for port, chans in drives.items():
+            for ch in ("aw", "w", "ar", "b", "r"):
+                label = f"cover_bus_{port}_{ch}_valid_before_ready"
+                if ch not in chans:
+                    assert label not in text, (config, label)
+                    continue
+                v, r = f"{port}_{proto}_{ch}valid", f"{port}_{proto}_{ch}ready"
+                assert (
+                    f"  logic bag_{port}_{ch}_was_valid = 1'b0, bag_{port}_{ch}_was_ready = 1'b0;\n"
+                    f"  always_ff @(posedge clk_sys) begin bag_{port}_{ch}_was_valid <= {v}; "
+                    f"bag_{port}_{ch}_was_ready <= {r}; end\n"
+                    f"  always @(posedge clk_sys) {label}: cover (bag_live_D_SYS && {v} && "
+                    f"!bag_{port}_{ch}_was_valid && !{r} && !bag_{port}_{ch}_was_ready);\n"
+                ) in text, (config, label)
+    # A bridge across domains (review, #107): its AXI4-Lite down side has the covers, sampled
+    # on that bus's clock but only once every domain of the unit is out of reset, as the
+    # crossing covers are (else a side that has not seen reset could raise VALID). Its APB up
+    # side has none.
+    generate(load(P3 / "bridges_inhouse_cdc.ir.yaml"), tmp_path / "cdc", P3)
+    br = (tmp_path / "cdc" / "formal" / "bridges_inhouse_cdc_route_br_lite.sv").read_text(
+        encoding="utf-8"
+    )
+    for ch in ("aw", "w", "ar"):
+        v = f"br_lite_2_lite_axil_{ch}valid"
+        assert (
+            f"  always @(posedge clk_sys) cover_br_lite_br_lite_2_lite_{ch}_valid_before_ready: "
+            f"cover (bag_live_D_AON && bag_live_D_SYS && {v} && "
+        ) in br, ch
+    assert br.count("_valid_before_ready: cover") == 3
+
+
 def test_every_cover_event_has_a_direction() -> None:
     """D92: a cover event is a write's, a read's or either's (wait, error, full, burst, kept
     with the writes). Review (PR #50): an event in no list went to the write group without a
@@ -1014,18 +1060,63 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
         assert want in job, unit
 
 
-def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_two_more_edges(tmp_path: Path) -> None:
+def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_three_more_edges(tmp_path: Path) -> None:
     """Nightly 43207958073: mixed_lite_shared's br_ahb (AXI4-Lite to AHB-Lite, same width,
     FIFO depth 2) left its upstream B handshake unreached in 8 edges; at 16 it came at step 9.
-    The bridge's FIFO holds the request and the response an edge each, so a single-domain
-    bridge with a FIFO gets ROUTE_CYCLES_PER_FIFO more edges. br_per, without one, keeps 8."""
-    assert ROUTE_CYCLES_PER_FIFO == 2
-    generate(load(P3 / "mixed_lite_shared.ir.yaml"), tmp_path / "ls", P3)
-    formal = tmp_path / "ls" / "formal"
-    for unit, depth in (("br_ahb", 10), ("br_per", 8)):
-        job = (formal / f"mixed_lite_shared_route_{unit}.sby").read_text(encoding="utf-8")
+    Nightly 43857522665 (D38): bridges_inhouse's and mixed_adapters_bridges's br_ahb (AXI4 64
+    bits to AHB-Lite 32, FIFO depth 2) left R rising while RREADY is held low unreached at 12
+    edges; at 20 it came at step 12. The bridge's FIFO holds the request and the response, and
+    a read response through it takes three edges more, so a single-domain bridge with a FIFO
+    gets ROUTE_CYCLES_PER_FIFO more edges. br_per, without one, keeps 8."""
+    assert ROUTE_CYCLES_PER_FIFO == 3
+    cases = (("mixed_lite_shared", "br_ahb", 11), ("mixed_lite_shared", "br_per", 8),
+             ("bridges_inhouse", "br_ahb", 13),
+             ("mixed_adapters_bridges", "br_ahb", 13))  # fmt: skip
+    for config, unit, depth in cases:
+        if not (tmp_path / config).exists():
+            generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
+            encoding="utf-8"
+        )
         want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
-        assert want in job, unit
+        assert want in job, (config, unit)
+
+
+def test_a_fabric_with_a_deep_mid_point_gets_an_edge_per_further_stage(tmp_path: Path) -> None:
+    """Nightly 43857522665 (D38): axi_shared_fixed's bus (mid-point FIFO depth 2, then
+    multicut-3: four stages) left W rising while WREADY is held low at s0 unreached in 8 edges;
+    at 12 it came at step 8. mixed_shared_chain's bus (a FIFO and a cut: two stages) and
+    axil_shared_rr's (a cut) reached every cover in 8. A fabric gets
+    ROUTE_CYCLES_PER_MIDPOINT_STAGE more edges per mid-point stage past
+    ROUTE_MIDPOINT_FREE_STAGES."""
+    assert (ROUTE_CYCLES_PER_MIDPOINT_STAGE, ROUTE_MIDPOINT_FREE_STAGES) == (1, 2)
+    cases = (("axi_shared_fixed", 10), ("mixed_shared_chain", 8), ("axil_shared_rr", 8),
+             ("axi_shared_rr", 8))  # fmt: skip
+    for config, depth in cases:
+        generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        job = (tmp_path / config / "formal" / f"{config}_route_bus.sby").read_text(encoding="utf-8")
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        assert want in job, config
+
+
+def test_a_bridge_across_domains_that_widens_the_data_gets_32_steps(tmp_path: Path) -> None:
+    """Nightly 43857522665 (D38): bridges_inhouse_cdc's br_ahb (AXI4 32 bits to AHB-Lite 64
+    across domains) and bridges_pulp_cdc's br_aon (AXI4 32 bits to AXI4-Lite 64 across domains)
+    left B and R rising while READY is held low unreached at 24 steps; at 36 br_ahb's came at
+    step 31 (local run, 6 min). A unit across domains whose data path widens gets at least
+    ROUTE_DEPTH_UPSIZE steps; ones that keep or narrow the width (mixed_cdc_chain's br_lite,
+    bridges_inhouse_cdc's br_aon) keep theirs."""
+    assert ROUTE_DEPTH_UPSIZE == 32
+    cases = (("bridges_inhouse_cdc", "br_ahb", 32), ("bridges_pulp_cdc", "br_aon", 32),
+             ("bridges_inhouse_cdc", "br_aon", 24), ("mixed_cdc_chain", "br_lite", 24))  # fmt: skip
+    for config, unit, depth in cases:
+        if not (tmp_path / config).exists():
+            generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
+        job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
+            encoding="utf-8"
+        )
+        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        assert want in job, (config, unit)
 
 
 def test_an_axi4_lite_bridge_with_a_fifo_across_domains_gets_34_steps(tmp_path: Path) -> None:
