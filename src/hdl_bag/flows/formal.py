@@ -238,6 +238,16 @@ def reached_covers(output: str) -> list[tuple[str, int]]:
     return out
 
 
+def finished_findings(output: str, sources: dict[str, str], job_dir: str = "") -> list[Finding]:
+    """The findings of the tasks in OUTPUT (a run cut short) that printed their verdict. A
+    job stopped at its time limit keeps them: a task that had already failed must not read
+    as a mere timeout (PR 5 review). The task still running gives no finding here."""
+    done = {m["job"] for raw in output.splitlines()
+            if (m := _LINE.match(raw)) and _DONE.match(m["msg"])}  # fmt: skip
+    found = SymbiYosys().parse(output, sources, job_dir)
+    return [f for f in found if any(f.message.startswith(f"{job}: ") for job in done)]
+
+
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """Stop PROC and everything it started (POSIX); only PROC itself elsewhere."""
     killpg = getattr(os, "killpg", None)
@@ -249,9 +259,10 @@ def _kill_group(proc: subprocess.Popen[str]) -> None:
 
 
 def run_sby(job: Path, root: Path, *, timeout: float | None = None,
-            task: str | None = None) -> Report:  # fmt: skip
+            task: str | None = None, hint: str = "--timeout") -> Report:  # fmt: skip
     """Run the SymbiYosys JOB (a .sby file) in its own directory, or only its TASK; ROOT is
     what finding paths are relative to. Each task's work directory is replaced (``sby -f``).
+    HINT names the option that allows more time, for the timeout message.
     Raises ValueError if JOB does not exist or has no such task."""
     if not job.is_file():
         raise ValueError(f"{job}: no such SymbiYosys job (run bag generate again)")
@@ -292,13 +303,17 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None,
             late = Finding(backend.name, "", 0, "FORMAL-TIMEOUT", "error",
                            f"{expected[0] if task else job.stem}: no verdict within "
                            f"{timeout:g} s{reached} "
-                           "(allow more with --timeout)")  # fmt: skip
+                           f"(allow more with {hint})")  # fmt: skip
             if got := reached_covers(partial or ""):
                 listed = ", ".join(f"{n} (step {k})" for n, k in got)
                 notes = (*notes, f"{expected[0] if task else job.stem}: {len(got)} "
                                  f"{'cover' if len(got) == 1 else 'covers'} reached before "
                                  f"the time limit: {listed}")  # fmt: skip
-            return Report("formal", (late,), (backend.name,), notes=notes)
+            rel = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
+            kept = finished_findings(partial or "", job_sources(job, root),
+                                     "" if rel == "." else rel)  # fmt: skip
+            notes = (*notes, *bounded_notes(job, task=task))
+            return Report("formal", tuple(sorted([late, *kept])), (backend.name,), notes=notes)
     job_dir = Path(os.path.relpath(job.parent.resolve(), root.resolve())).as_posix()
     summaries = {}
     for raw in output.splitlines():
