@@ -81,6 +81,21 @@ run EDA tools read its \file{bag_outputs.json} to find the files.
   step also builds the model and the simulation is left out, with a note.
 \end{entry}
 
+\begin{entry}{\cmd{bag regress} (\opt{--seeds} N [\opt{--seed-base} B] [\opt{--shard} I/K] | \opt{--seed} S) [\opt{-o} DIR] [\opt{--formal-budget} SECONDS | \opt{--no-formal}]}
+\item[Does] Draws a random configuration per seed and runs it through check, generate,
+  lint, compile, the generated tests and formal (section~\ref{sec:regress}). Writes
+  \file{DIR/<seed>/result.json} with the workbook and IR of the seed, and, after each
+  seed, \file{DIR/summary.json} and \file{DIR/summary.md} over every seed in DIR.
+\item[Options] \opt{--seeds}: run this many seeds; seed j is B $\times$ 10000 + j.
+  \opt{--seed-base}: B, for example the date (default 0). \opt{--shard}: run only the
+  seeds whose j is I$-$1 modulo K (default \code{1/1}). \opt{--seed}: rerun one seed;
+  give \opt{--seeds} or \opt{--seed}, not both. \opt{--output} (\opt{-o}): the run
+  directory (default \file{out/regress}). \opt{--formal-budget}: the seconds of formal
+  per seed (default 600). \opt{--no-formal}: leave formal out.
+\item[Exit status] 1 when a seed fails or the generator drew an illegal configuration;
+  formal work cut off by the budget is reported, not a failure.
+\end{entry}
+
 \section{Exit status}
 
 \begin{description}

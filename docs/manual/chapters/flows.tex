@@ -454,6 +454,35 @@ later instead. \opt{--formal-timeout} is the \opt{--timeout} of the formal step,
 
 \lstinputlisting[style=console]{examples/console/eda/flow-flow.txt}
 
+\section{Random configurations}
+\label{sec:regress}
+
+\cmd{bag regress} tests BAG itself on configurations nobody wrote by hand. For each seed
+it draws a configuration (fabrics of every protocol and topology, bridges, adapters,
+address maps, aliases, hierarchy and port options), writes its workbook, and runs it
+through every step. A seed draws the same configuration on every machine, so a result can
+be repeated with \cmd{bag regress --seed S}.
+
+Each seed ends with one status:
+
+\begin{description}
+\item[pass] Every step passed and every formal task ran to a verdict.
+\item[fail] A step reported a finding or stopped with an error. \code{step} in
+  \file{result.json} names it.
+\item[timeout] Formal work was cut off by \opt{--formal-budget} or not reached. Formal runs
+  task by task: the decode proof first, then the reset proof, the route and protocol
+  bounded checks, then the covers. After the decode job each task may use a quarter of the
+  budget left (at least 30 seconds). A timeout is reported, not a failure.
+\item[generator] The drawn configuration fails \cmd{bag check}: a bug in the generator,
+  not in the design.
+\end{description}
+
+\file{result.json} also records the findings, the dimensions the configuration covers
+(protocol pairs, width ratios, clock crossings and so on), the budget and the version of
+BAG, and the commands that repeat it: \cmd{bag regress --seed S} and \cmd{bag flow} on its
+IR. A seed's configuration depends on the version of BAG, so repeat a seed with the same
+version.
+
 \section{Tool versions}
 \label{sec:versions}
 

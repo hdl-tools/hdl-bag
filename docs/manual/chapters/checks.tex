@@ -51,9 +51,6 @@ and a message that names the fabric, instance or name, and writes no RTL. These 
   a wrapper port, or a sub-wrapper with the name of the top wrapper. Rename one of them.
 \item two user-supplied fabrics that share an External module but would need different
   ports, for example through different ID widths.
-\item a fabric whose masters see different address translations: a pass-through N
-  bridge on the same fabric as a direct master, or as a bridge with another window. One
-  decoder serves all the masters of a fabric, so give them separate fabrics.
 \end{itemize}
 
 \section{Every check}
