@@ -147,3 +147,23 @@ def test_lint_uses_the_project_lint_tools(tmp_path: Path, monkeypatch: pytest.Mo
     result = CliRunner().invoke(main, ["lint", str(out)])
     assert result.exit_code == 0, result.output
     assert seen == [("verilator",)]
+
+
+@pytest.mark.parametrize("command", ["lint", "sim", "formal"])
+@pytest.mark.parametrize(("manifest", "message"), [
+    (None, "no bag_outputs.json here: give the output directory that bag generate wrote"),
+    ("{not json", "bag_outputs.json cannot be read: run bag generate again"),
+    ('{"top": null, "files": [], "filelist": ""}', "no RTL was generated (see bag_outputs.json)"),
+    ('{"top": "x"}', "bag_outputs.json cannot be read: run bag generate again"),
+    ('{"top": "x", "files": {}, "filelist": 3}', "bag_outputs.json cannot be read: run bag generate again"),
+])  # fmt: skip
+def test_a_folder_that_is_not_an_output_directory_is_an_error_not_a_traceback(
+    tmp_path: Path, command: str, manifest: str | None, message: str
+) -> None:
+    """PR 109 review: bag lint, sim and formal raised a raw FileNotFoundError or ValueError
+    on such a folder. Each gives one error line and exit status 1."""
+    if manifest is not None:
+        (tmp_path / "bag_outputs.json").write_text(manifest, encoding="utf-8")
+    result = CliRunner().invoke(main, [command, str(tmp_path)])
+    assert (result.exit_code, result.output) == (1, f"error: {tmp_path}: {message}\n")
+    assert isinstance(result.exception, SystemExit)

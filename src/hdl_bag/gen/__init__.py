@@ -87,16 +87,23 @@ def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
 
 
 def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None) -> Outputs:
-    """Write every output of SPEC under OUTDIR. Raises MissingRtl after the collateral."""
+    """Write every output of SPEC under OUTDIR. Raises MissingRtl after the collateral.
+
+    With Project > Generate RTL = N (D100), only the C header and the documents that need
+    no RTL are written: no package, RTL, file list, tie-off report, tests or formal, and
+    the manifest records no top, so lint, sim and formal say there is no RTL."""
     style = style or spec.wrapper.port_style
     user_header = None
     if spec.wrapper.file_header:
         user_header = (spec_dir / spec.wrapper.file_header).read_text(encoding="utf-8")
     hdr = header(spec, user_header)
     written: list[str] = []
+    p = spec.project
 
+    # The package first: its name check is the earliest guard against colliding names.
     pkg_rel = f"rtl/pkg/{spec.wrapper.package}.sv"
-    _write(outdir, pkg_rel, package(spec, hdr), written)
+    if p.outputs.rtl:
+        _write(outdir, pkg_rel, package(spec, hdr), written)
     if spec.project.outputs.c_header:
         _write(outdir, f"sw/{spec.project.name}_memmap.h", c_header(spec, user_header), written)
     if spec.project.outputs.doc:
@@ -104,6 +111,9 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _write(outdir, "doc/memmap.html", memmap_html(spec, user_header), written)
         _write(outdir, "doc/port_map.md", port_map_md(spec, user_header), written)
         _write(outdir, "doc/reset.md", reset_md(spec, user_header), written)
+    if not p.outputs.rtl:
+        _manifest(outdir, written, spec, None, None, None)
+        return Outputs(outdir, tuple(sorted(written)), "", "", None, p.lint_tools, p.simulator)
 
     registry = builtin_registry()
     netlist = build_netlist(spec)
@@ -205,7 +215,6 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
             _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
         sby = tuple(sorted(r for r in written if r.startswith("formal/") and r.endswith(".sby")))
     _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
-    p = spec.project
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
                    p.simulator, tuple(sorted(sby)))  # fmt: skip
 
@@ -214,10 +223,24 @@ MANIFEST = "bag_outputs.json"
 
 
 def load_outputs(root: Path) -> Outputs:
-    """The Outputs that a previous generate() recorded in ROOT."""
-    data = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    """The Outputs that a previous generate() recorded in ROOT. Raises ValueError, with a
+    message for the user, when ROOT is not an output directory of bag generate."""
+    path = root / MANIFEST
+    if not path.is_file():
+        raise ValueError(
+            f"{root}: no {MANIFEST} here: give the output directory that bag generate wrote"
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
+    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
+            and isinstance(data.get("files"), dict | list)):  # fmt: skip
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     defaults = Outputs(root, (), "", "")
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
@@ -248,10 +271,15 @@ def _manifest(
 ) -> None:
     # Remove files a previous run wrote that this run did not (e.g. after a style change).
     old = root / MANIFEST
-    if old.is_file():
-        for rel in json.loads(old.read_text(encoding="utf-8")).get("files", {}):
-            if rel not in written:
-                (root / rel).unlink(missing_ok=True)
+    try:
+        listed = (
+            json.loads(old.read_text(encoding="utf-8")).get("files", {}) if old.is_file() else {}
+        )
+    except (OSError, UnicodeDecodeError, ValueError, AttributeError):
+        listed = {}  # an unreadable manifest lists nothing to clean up; this run replaces it
+    for rel in listed if isinstance(listed, dict | list) else ():
+        if isinstance(rel, str) and rel not in written:
+            (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
     data = {
         "files": entries,

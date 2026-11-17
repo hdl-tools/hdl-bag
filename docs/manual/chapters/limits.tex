@@ -291,21 +291,10 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   the conditioned reset of each domain, not the raw reset.
 \item \textbf{\file{doc/tieoffs.md} is not complete.} It does not list constant alias
   enables (\code{always}). Completing the report is planned.
-\item \textbf{Project > \setting{Generate RTL} has no effect.} BAG checks the value, but
-  \cmd{bag generate} writes the RTL whatever it is.
 \item \textbf{Some columns are kept but not used.} BAG checks Clocks > \col{Freq (MHz)},
   Masters > \col{Max outstanding rd} and \col{Max outstanding wr}, Slaves >
   \col{Wait states} and \col{Error response}, and Fabrics > \col{Backing IP}, and keeps
   them in the IR, but no generated file depends on them yet.
-\end{itemize}
-
-\section{The command line}
-
-\begin{itemize}
-\item \textbf{A folder that is not an output directory.} \cmd{bag lint}, \cmd{bag sim}
-  and \cmd{bag formal} on a folder without \file{bag_outputs.json}, or with a broken one,
-  stop with a Python traceback instead of an \code{error:} line. The exit status is 1.
-  Give them the folder that \cmd{bag generate} wrote.
 \end{itemize}
 
 \section{Not in this version}

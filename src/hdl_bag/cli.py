@@ -102,6 +102,9 @@ def _load(spec: Path) -> tuple[ir.Spec, Path]:
     return loaded, spec.parent
 
 
+NO_RTL = "no RTL generated (Project > Generate RTL is N): nothing to lint, simulate or prove"
+
+
 def _generate(spec_path: Path, output: Path | None, style: str | None) -> Outputs:
     spec, spec_dir = _load(spec_path)
     outdir = output or spec_dir / spec.project.output_dir
@@ -109,15 +112,29 @@ def _generate(spec_path: Path, output: Path | None, style: str | None) -> Output
         out = generate(spec, outdir, spec_dir, style)
     except MissingRtl as exc:
         click.echo(f"wrote collateral to {outdir}")
-        click.echo(f"error: {exc} (AXI templates arrive in Phase 3)", err=True)
+        click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     except (GenerateError, OSError) as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
+    if not out.top:
+        click.echo(f"wrote {len(out.files)} file(s) to {outdir}")
+        click.echo(NO_RTL)
+        return out
     click.echo(f"wrote {len(out.files)} file(s) to {outdir} (top {out.top})")
     if spec.project.outputs.tests and out.tests is None:
         click.echo("no generated tests: BAG does not know how a user-supplied fabric behaves")
     return out
+
+
+def _outputs(outdir: Path) -> Outputs:
+    """OUTDIR's recorded outputs, or an error line and exit 1 when it is not an output
+    directory of bag generate."""
+    try:
+        return load_outputs(outdir)
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
 
 
 def _report(report: Report) -> None:
@@ -149,7 +166,7 @@ def generate_command(spec: Path, output: Path | None, style: str | None) -> None
 @click.argument("outdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def lint_command(outdir: Path) -> None:
     """Lint a generated OUTDIR with Project > Lint tools; exit 1 on any unwaived finding."""
-    out = load_outputs(outdir)
+    out = _outputs(outdir)
     _report(lint(sources(out), out.top, outdir, tools=out.lint_tools, incdirs=include_dirs(out)))
 
 
@@ -168,7 +185,7 @@ def _sim(out: Outputs, test_filter: str | None = None, ready_shim: bool = False)
               help="Run traffic with each AXI READY driven from its VALID.")  # fmt: skip
 def sim_command(outdir: Path, test_filter: str | None, ready_shim: bool) -> None:
     """Run a generated OUTDIR's cocotb tests; exit 1 on any failure. Needs hdl-bag[sim]."""
-    _sim(load_outputs(outdir), test_filter, ready_shim)
+    _sim(_outputs(outdir), test_filter, ready_shim)
 
 
 def _formal(out: Outputs, timeout: float | None = None) -> None:
@@ -185,7 +202,7 @@ def _formal(out: Outputs, timeout: float | None = None) -> None:
 def formal_command(outdir: Path, timeout: float | None) -> None:
     """Run a generated OUTDIR's SymbiYosys jobs; exit 1 on any finding (a failed assertion, an
     unreached cover, an error or a timeout)."""
-    _formal(load_outputs(outdir), timeout)
+    _formal(_outputs(outdir), timeout)
 
 
 @main.command()
@@ -208,6 +225,8 @@ def flow(spec: Path, output: Path | None, style: str | None, with_formal: bool,
     if formal_timeout is not None and not with_formal:
         raise click.UsageError("--formal-timeout needs --formal")
     out = _generate(spec, output, style)
+    if not out.top:
+        return  # D100: _generate said why
     _report(lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out)))
     # Simulation builds the C++ model itself, so build it here only if nothing will.
     _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out),

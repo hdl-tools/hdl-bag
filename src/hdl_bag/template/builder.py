@@ -40,6 +40,8 @@ THIN = Side(style="thin", color="BFBFBF")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 WRAP = Alignment(wrap_text=True, vertical="top")
 HDR_ROW, FIRST = 4, 5
+# Wrapper > Adapter instance naming, read by the Adapter instances formulas.
+WRAPPER_NAMING_ROW = HDR_ROW + 9
 MAXR = 60  # rows covered by validation / formula ranges on most sheets
 TMAX = 200  # Topology rows covered by lookups
 SW_LAST = 12  # Hierarchy sub-wrapper rows 5..12
@@ -310,7 +312,7 @@ class _Builder:
             ("Generate cocotb unit tests", self.project_value("Generate cocotb unit tests"), "Per-config directed + random tests."),
             ("Generate formal (SymbiYosys)", self.project_value("Generate formal (SymbiYosys)"), "Decode and port-protocol properties."),
             ("Lint tools", self.project_value("Lint tools"), "All must pass with zero un-waived warnings."),
-            ("Simulator", self.project_value("Simulator"), "Pluggable; commercial simulators via the tool-abstraction layer."),
+            ("Simulator", self.project_value("Simulator"), "verilator: the only simulator bag sim runs in v1."),
         ])  # fmt: skip
         v = DataValidation(type="list", formula1=self.lref["YesNo"], allow_blank=False)
         ws.add_data_validation(v)
@@ -399,10 +401,19 @@ class _Builder:
         w1, w2 = ("D{r}", "O{r}") if direction == "in" else ("O{r}", "D{r}")
         d1, d2 = ("H{r}", "Q{r}") if direction == "in" else ("Q{r}", "H{r}")
         frm, to = ("A{r}", "C{r}") if direction == "in" else ("C{r}", "A{r}")
+
+        # Names from Wrapper > Adapter instance naming, as resolve gives them. The row is
+        # pinned by tests/template/test_builder.py, like the validations of the Wrapper sheet.
+        pattern = f"Wrapper!$B${WRAPPER_NAMING_ROW}"
+
+        def name(kind: str) -> str:
+            return (f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({pattern},"{{from}}",{frm}),'
+                    f'"{{type}}","{kind}"),"{{to}}",{to})')  # fmt: skip
+
         inst = (
-            f'=TRIM(IF(N{{r}}="none","",{frm}&"_pc_2_"&{to}&" ")'
-            f'&IF(P{{r}}="none","",{frm}&"_dw_2_"&{to}&" ")'
-            f'&IF(R{{r}}="none","",{frm}&"_cdc_2_"&{to}))'
+            f'=TRIM(IF(N{{r}}="none","",{name("pc")}&" ")'
+            f'&IF(P{{r}}="none","",{name("dw")}&" ")'
+            f'&IF(R{{r}}="none","",{name("cdc")}))'
         )
         return [
             _drv("Fabric protocol", 11, "From Fabrics.", "=" + fab_lookup("B")),
@@ -415,8 +426,9 @@ class _Builder:
             _drv("CDC", 20, "Async CDC inserted when port and fabric domains differ.",
                  f'=IF(H{{r}}=Q{{r}},"none","async CDC "&{d1}&" -> "&{d2})'),
             _drv("Adapter instances", 34,
-                 "Instance names per Wrapper > Adapter instance naming: {from}_{type}_2_{to}; "
-                 "type = pc (protocol), dw (width), cdc. "
+                 "Instance names per Wrapper > Adapter instance naming, for the protocol (pc), "
+                 "width (dw) and CDC adapters. ID-width (iw), FIFO and register-slice (cut) "
+                 "adapters are named the same way; bag ir lists every adapter. "
                  "Use these names on the Hierarchy sheet to override placement.", inst),
         ]  # fmt: skip
 
@@ -530,6 +542,7 @@ class _Builder:
             f'IF(COUNTIFS({_rng("A")},A{{r}},{_rng("B")},B{{r}})>1,"DUPLICATE",'
             f'IF(AND(F{{r}}<>"fabric",COUNTIF({_rng("A")},A{{r}})>1),"MULTI-ATTACH",'
             f'IF(AND(G{{r}}<>"fabric",COUNTIF({_rng("B")},B{{r}})>1),"MULTI-ATTACH",'
+            'IF(C{r}="","INDEX MISSING",'  # before the range test: "" > any number in Excel
             f'IF({idx_bad},"INDEX NOT INTEGER",'
             'IF(J{r}>=K{r},"INDEX OUT OF RANGE",'
             f'IF(COUNTIFS({_rng("H")},H{{r}},{_rng("I")},I{{r}},{_rng("J")},J{{r}})>1,"INDEX REPEATED",'
@@ -537,18 +550,16 @@ class _Builder:
             f'IF(AND(I{{r}}="master port",{arb}="fixed-priority",D{{r}}=""),"PRIORITY MISSING",'
             f'IF(AND(I{{r}}="master port",{arb}="fixed-priority",'
             f'COUNTIFS({_rng("H")},H{{r}},{_rng("I")},"master port",{_rng("D")},D{{r}})>1),"PRIORITY REPEATED",'
-            '"ok")))))))))))'
+            '"ok"))))))))))))'
         )  # fmt: skip
-        res_idx = (
-            f'=IF(C{{r}}<>"",C{{r}},COUNTIFS($H${FIRST}:H{{r}},H{{r}},$I${FIRST}:I{{r}},I{{r}})-1)'
-        )
+        res_idx = '=IF(C{r}<>"",C{r},"")'  # a blank Port index is an error, not row order
         n_side = f"=COUNTIFS({_rng('H')},H{{r}},{_rng('I')},I{{r}})"
         self.table(ws, [
             _in("Source", 16, "Master, fabric or bridge (downstream end)."),
             _in("Destination", 16, "Fabric, slave or bridge (upstream end)."),
             _in("Port index", 8,
-                "Port number on the fabric side of this link: 0 .. (ports on that side - 1), no repeats. "
-                "Blank = next free position in row order (not recommended)."),
+                "Required. Port number on the fabric side of this link: 0 .. (ports on that side - 1), "
+                "no repeats. bag check refuses a blank (TOPO-INDEX-MISSING)."),
             _in("Priority", 8,
                 "Master-port links only, read when the fabric's Arbitration = fixed-priority. 0 = highest; no repeats per fabric."),
             _in("Notes", 32, ""),
@@ -557,10 +568,10 @@ class _Builder:
             _drv("Fabric", 12, "The fabric this link attaches to.", '=IF(F{r}="fabric",A{r},B{r})'),
             _drv("Port side", 11, "master port (link into the fabric) | slave port (link out of the fabric).",
                  '=IF(F{r}="fabric","slave port","master port")'),
-            _drv("Resolved index", 9, "Port index used for generation: the explicit value, or row order when blank.", res_idx),
+            _drv("Resolved index", 9, "Port index used for generation: the Port index (a blank is an error).", res_idx),
             _drv("Ports on side", 9, "Number of links on this fabric side; legal indices are 0 .. this - 1.", n_side),
             _drv("Check", 20,
-                 "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
+                 "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX MISSING | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
                  "INDEX REPEATED | PRIORITY NOT INTEGER | PRIORITY MISSING | PRIORITY REPEATED", topo_check),
         ], "topology", spare=30)  # fmt: skip
         self.check_format(ws, "L", last=TMAX)
@@ -763,7 +774,7 @@ class _Builder:
             ("Parameter package", self.wrapper_value("Parameter package"), "Widths, base addresses and region sizes as localparams."),
             ("File header", self.wrapper_value("File header"), "Text file prepended to every generated file (licence/copyright)."),
             ("Extra top-level inputs", self.wrapper_value("Extra top-level inputs"), "Inputs referenced by Address_Decode alias enables."),
-            ("Adapter placement", self.wrapper_value("Adapter placement"), "Default home for inserted adapters: with fabric | with port (top) | top."),
+            ("Adapter placement", self.wrapper_value("Adapter placement"), "Default home for inserted adapters: with fabric (the fabric's sub-wrapper) | with port (beside the port: the top for masters and slaves, the bridge's sub-wrapper for a bridge end) | top."),
             ("Adapter instance naming", self.wrapper_value("Adapter instance naming"),
              "type = pc (protocol), dw (width), cdc, iw (ID width), fifo, cut. e.g. main_xbar_dw_2_ddr0."),
             ("Sub-wrapper port naming", self.wrapper_value("Sub-wrapper port naming"), "Ports created where a link crosses a sub-wrapper boundary."),

@@ -761,6 +761,7 @@
  "tests/gen/test_wrapper_sim.py::test_hierarchy_variant_lints_and_compiles[sv-interface-midlca]": 0.4,
  "tests/gen/test_wrapper_sim.py::test_hierarchy_variant_lints_and_compiles[sv-interface-sibling2dom]": 0.69,
  "tests/gen/test_wrapper_sim.py::test_hierarchy_variant_lints_and_compiles[sv-interface-ties_internal]": 0.69,
+ "tests/ir/test_ir.py::test_a_bridge_end_adapter_in_its_bridges_sub_wrapper_lints_clean": 15.0,
  "tests/manual/test_manual.py::test_an_eda_transcript_replays[first-flow]": 10.76,
  "tests/manual/test_manual.py::test_an_eda_transcript_replays[flow-flow]": 11.83,
  "tests/manual/test_manual.py::test_an_eda_transcript_replays[flow-formal]": 34.25,
