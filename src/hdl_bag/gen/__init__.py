@@ -214,8 +214,19 @@ MANIFEST = "bag_outputs.json"
 
 
 def load_outputs(root: Path) -> Outputs:
-    """The Outputs that a previous generate() recorded in ROOT."""
-    data = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    """The Outputs that a previous generate() recorded in ROOT. Raises ValueError, with a
+    message for the user, when ROOT is not an output directory of bag generate."""
+    path = root / MANIFEST
+    if not path.is_file():
+        raise ValueError(
+            f"{root}: no {MANIFEST} here: give the output directory that bag generate wrote"
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
     defaults = Outputs(root, (), "", "")
