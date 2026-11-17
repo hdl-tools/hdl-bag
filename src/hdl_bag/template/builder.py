@@ -310,7 +310,7 @@ class _Builder:
             ("Generate cocotb unit tests", self.project_value("Generate cocotb unit tests"), "Per-config directed + random tests."),
             ("Generate formal (SymbiYosys)", self.project_value("Generate formal (SymbiYosys)"), "Decode and port-protocol properties."),
             ("Lint tools", self.project_value("Lint tools"), "All must pass with zero un-waived warnings."),
-            ("Simulator", self.project_value("Simulator"), "Pluggable; commercial simulators via the tool-abstraction layer."),
+            ("Simulator", self.project_value("Simulator"), "verilator: the only simulator bag sim runs in v1."),
         ])  # fmt: skip
         v = DataValidation(type="list", formula1=self.lref["YesNo"], allow_blank=False)
         ws.add_data_validation(v)
@@ -399,10 +399,16 @@ class _Builder:
         w1, w2 = ("D{r}", "O{r}") if direction == "in" else ("O{r}", "D{r}")
         d1, d2 = ("H{r}", "Q{r}") if direction == "in" else ("Q{r}", "H{r}")
         frm, to = ("A{r}", "C{r}") if direction == "in" else ("C{r}", "A{r}")
+
+        # Names from Wrapper > Adapter instance naming (Wrapper!B13), as resolve gives them.
+        def name(kind: str) -> str:
+            return (f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(Wrapper!$B$13,"{{from}}",{frm}),'
+                    f'"{{type}}","{kind}"),"{{to}}",{to})')  # fmt: skip
+
         inst = (
-            f'=TRIM(IF(N{{r}}="none","",{frm}&"_pc_2_"&{to}&" ")'
-            f'&IF(P{{r}}="none","",{frm}&"_dw_2_"&{to}&" ")'
-            f'&IF(R{{r}}="none","",{frm}&"_cdc_2_"&{to}))'
+            f'=TRIM(IF(N{{r}}="none","",{name("pc")}&" ")'
+            f'&IF(P{{r}}="none","",{name("dw")}&" ")'
+            f'&IF(R{{r}}="none","",{name("cdc")}))'
         )
         return [
             _drv("Fabric protocol", 11, "From Fabrics.", "=" + fab_lookup("B")),
@@ -415,8 +421,9 @@ class _Builder:
             _drv("CDC", 20, "Async CDC inserted when port and fabric domains differ.",
                  f'=IF(H{{r}}=Q{{r}},"none","async CDC "&{d1}&" -> "&{d2})'),
             _drv("Adapter instances", 34,
-                 "Instance names per Wrapper > Adapter instance naming: {from}_{type}_2_{to}; "
-                 "type = pc (protocol), dw (width), cdc. "
+                 "Instance names per Wrapper > Adapter instance naming, for the protocol (pc), "
+                 "width (dw) and CDC adapters. ID-width (iw), FIFO and register-slice (cut) "
+                 "adapters are named the same way; bag ir lists every adapter. "
                  "Use these names on the Hierarchy sheet to override placement.", inst),
         ]  # fmt: skip
 
@@ -539,16 +546,14 @@ class _Builder:
             f'COUNTIFS({_rng("H")},H{{r}},{_rng("I")},"master port",{_rng("D")},D{{r}})>1),"PRIORITY REPEATED",'
             '"ok")))))))))))'
         )  # fmt: skip
-        res_idx = (
-            f'=IF(C{{r}}<>"",C{{r}},COUNTIFS($H${FIRST}:H{{r}},H{{r}},$I${FIRST}:I{{r}},I{{r}})-1)'
-        )
+        res_idx = '=IF(C{r}<>"",C{r},"")'  # a blank Port index is an error, not row order
         n_side = f"=COUNTIFS({_rng('H')},H{{r}},{_rng('I')},I{{r}})"
         self.table(ws, [
             _in("Source", 16, "Master, fabric or bridge (downstream end)."),
             _in("Destination", 16, "Fabric, slave or bridge (upstream end)."),
             _in("Port index", 8,
-                "Port number on the fabric side of this link: 0 .. (ports on that side - 1), no repeats. "
-                "Blank = next free position in row order (not recommended)."),
+                "Required. Port number on the fabric side of this link: 0 .. (ports on that side - 1), "
+                "no repeats. bag check refuses a blank (TOPO-INDEX-MISSING)."),
             _in("Priority", 8,
                 "Master-port links only, read when the fabric's Arbitration = fixed-priority. 0 = highest; no repeats per fabric."),
             _in("Notes", 32, ""),
@@ -557,7 +562,7 @@ class _Builder:
             _drv("Fabric", 12, "The fabric this link attaches to.", '=IF(F{r}="fabric",A{r},B{r})'),
             _drv("Port side", 11, "master port (link into the fabric) | slave port (link out of the fabric).",
                  '=IF(F{r}="fabric","slave port","master port")'),
-            _drv("Resolved index", 9, "Port index used for generation: the explicit value, or row order when blank.", res_idx),
+            _drv("Resolved index", 9, "Port index used for generation: the Port index (a blank is an error).", res_idx),
             _drv("Ports on side", 9, "Number of links on this fabric side; legal indices are 0 .. this - 1.", n_side),
             _drv("Check", 20,
                  "ok | UNKNOWN NAME | ILLEGAL LINK | DUPLICATE | MULTI-ATTACH | INDEX NOT INTEGER | INDEX OUT OF RANGE | "
