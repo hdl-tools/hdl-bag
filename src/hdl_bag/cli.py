@@ -109,7 +109,7 @@ def _generate(spec_path: Path, output: Path | None, style: str | None) -> Output
         out = generate(spec, outdir, spec_dir, style)
     except MissingRtl as exc:
         click.echo(f"wrote collateral to {outdir}")
-        click.echo(f"error: {exc} (AXI templates arrive in Phase 3)", err=True)
+        click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     except (GenerateError, OSError) as exc:
         click.echo(f"error: {exc}", err=True)

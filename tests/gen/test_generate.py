@@ -201,7 +201,9 @@ def test_cli_generate_and_missing_rtl(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(cli, "generate", missing)
     bad = runner.invoke(main, ["generate", str(GOLDEN_IR), "-o", str(tmp_path / "bad")])
     assert bad.exit_code == 1
-    assert "no RTL yet for template(s): bag_apb_mux" in bad.output
+    # Every built-in template has RTL since Phase 3, so the message names no phase.
+    assert bad.output.splitlines()[-2:] == [f"wrote collateral to {tmp_path / 'bad'}",
+                                            "error: no RTL yet for template(s): bag_apb_mux"]  # fmt: skip
 
 
 def test_generated_lines_fit_100_columns(tmp_path: Path) -> None:
