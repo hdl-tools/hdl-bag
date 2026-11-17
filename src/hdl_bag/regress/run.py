@@ -74,7 +74,8 @@ class SeedResult:
     bag_version: str = __version__
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=1, sort_keys=True) + "\n"
+        # Unsorted: the steps keep the order they ran in (field order is fixed).
+        return json.dumps(asdict(self), indent=1) + "\n"
 
     @classmethod
     def from_json(cls, text: str) -> "SeedResult":

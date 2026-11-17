@@ -108,8 +108,9 @@ def test_a_passing_seed_runs_every_step_and_writes_its_repro(tmp_path: Path,
     assert r.repro == [f"bag regress --seed {SEED} --formal-budget 300",
                        f"bag flow {SEED}/{name}.ir.yaml --formal"]  # fmt: skip
     assert (r.budget_s, r.formal) == (300, True)
-    saved = (tmp_path / str(SEED) / "result.json").read_text(encoding="utf-8")
-    assert SeedResult.from_json(saved) == r
+    saved = SeedResult.from_json((tmp_path / str(SEED) / "result.json").read_text("utf-8"))
+    assert saved == r
+    assert list(saved.steps) == list(r.steps)  # the order they ran in (dicts compare unordered)
 
 
 def test_formal_runs_task_by_task_from_the_decode_proof_to_the_covers(
