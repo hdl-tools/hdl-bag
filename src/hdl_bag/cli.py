@@ -283,9 +283,10 @@ def regress(
 ) -> None:
     """Random configurations, each through check, generate, lint, compile, the generated
     tests and formal. Writes OUTPUT/<seed>/result.json (with the workbook, the IR and the
-    repro commands) and OUTPUT/summary.json and summary.md. Exit 1 on any failure or
-    generator bug; a formal timeout is reported, not a failure."""
-    from hdl_bag.regress.run import run_seed, seeds, summary
+    repro commands), and after each seed OUTPUT/summary.json and summary.md over every seed
+    in OUTPUT. Exit 1 on any failure or generator bug among the seeds run; formal work cut
+    off by the budget is a timeout, reported but not a failure."""
+    from hdl_bag.regress.run import run_seed, seeds, write_summary
 
     if (count is None) == (one is None):
         raise click.UsageError("give --seeds N or --seed S")
@@ -294,16 +295,15 @@ def regress(
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
     output.mkdir(parents=True, exist_ok=True)
-    results = []
+    failed = False
+    line = ""
     for seed in todo:
         r = run_seed(seed, output, budget=formal_budget, formal=not no_formal)
         click.echo(f"seed {seed}: {r.status}{f' ({r.step})' if r.step else ''}")
-        results.append(r)
-    data, text = summary(results)
-    (output / "summary.json").write_text(data, encoding="utf-8", newline="\n")
-    (output / "summary.md").write_text(text, encoding="utf-8", newline="\n")
-    click.echo(text.splitlines()[2])
-    if any(r.status in ("fail", "generator") for r in results):
+        failed |= r.status in ("fail", "generator")
+        line = write_summary(output)  # a run cut short still leaves a summary
+    click.echo(line)
+    if failed:
         raise SystemExit(1)
 
 
