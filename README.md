@@ -43,7 +43,16 @@ bag lint out/                           # Project > Lint tools (slang, Verilator
 bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
 bag formal out/                         # generated SymbiYosys jobs: every assertion holds, every cover is reached
 bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim (add --formal for formal)
+bag regress --seeds 10 -o out/regress   # random configs through the whole flow; --seed S reruns one
 ```
+
+`bag regress` draws a random configuration per seed (seed j of a run is
+`--seed-base` × 10000 + j; `--shard i/k` runs every k-th), writes its workbook
+and IR, and runs it through check, generate, lint, compile, the generated tests
+and formal. Formal per seed is the decode job, then the other jobs within
+`--formal-budget` seconds (600 by default); a job cut off is reported as a
+timeout, not a failure. Each seed's `result.json` holds the failing step, the
+findings and the commands that reproduce it; `summary.md` lists the run.
 
 `--style flat|sv-interface` on `generate` and `flow` overrides the workbook's
 port style. `hdl-bag` is an alias for the `bag` command. The sample's two
