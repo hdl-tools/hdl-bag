@@ -226,5 +226,86 @@ def flow(spec: Path, output: Path | None, style: str | None, with_formal: bool,
         click.echo("no generated formal (Generate formal is N, or a user-supplied fabric)")
 
 
+def _shard(_ctx: click.Context, _param: click.Parameter, value: str) -> tuple[int, int]:
+    i, sep, k = value.partition("/")
+    if not sep or not i.isdigit() or not k.isdigit():
+        raise click.BadParameter(f"'{value}' is not i/k, e.g. 2/4")
+    return int(i), int(k)
+
+
+@main.command()
+@click.option(
+    "--seeds",
+    "count",
+    type=click.IntRange(min=1),
+    help="Run this many seeds: BASE * 10000 + j for j below the count.",
+)
+@click.option(
+    "--seed-base",
+    "base",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="The run's base, e.g. the date (20261117).",
+)
+@click.option(
+    "--shard",
+    default="1/1",
+    callback=_shard,
+    show_default=True,
+    help="Run shard i of k: the seeds whose j is i-1 modulo k.",
+)
+@click.option("--seed", "one", type=click.IntRange(min=0), help="Rerun one seed.")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("out/regress"),
+    show_default=True,
+    help="Run directory.",
+)
+@click.option(
+    "--formal-budget",
+    type=click.FloatRange(min=1),
+    default=600,
+    show_default=True,
+    help="Seconds of formal per seed: the decode job, then the rest in turn (D96).",
+)
+@click.option("--no-formal", is_flag=True, help="Skip formal.")
+def regress(
+    count: int | None,
+    base: int,
+    shard: tuple[int, int],
+    one: int | None,
+    output: Path,
+    formal_budget: float,
+    no_formal: bool,
+) -> None:
+    """Random configurations, each through check, generate, lint, compile, the generated
+    tests and formal. Writes OUTPUT/<seed>/result.json (with the workbook, the IR and the
+    repro commands) and OUTPUT/summary.json and summary.md. Exit 1 on any failure or
+    generator bug; a formal timeout is reported, not a failure."""
+    from hdl_bag.regress.run import run_seed, seeds, summary
+
+    if (count is None) == (one is None):
+        raise click.UsageError("give --seeds N or --seed S")
+    try:
+        todo = [one] if one is not None else seeds(base, count or 0, *shard)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    output.mkdir(parents=True, exist_ok=True)
+    results = []
+    for seed in todo:
+        r = run_seed(seed, output, budget=formal_budget, formal=not no_formal)
+        click.echo(f"seed {seed}: {r.status}{f' ({r.step})' if r.step else ''}")
+        results.append(r)
+    data, text = summary(results)
+    (output / "summary.json").write_text(data, encoding="utf-8", newline="\n")
+    (output / "summary.md").write_text(text, encoding="utf-8", newline="\n")
+    click.echo(text.splitlines()[2])
+    if any(r.status in ("fail", "generator") for r in results):
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()
