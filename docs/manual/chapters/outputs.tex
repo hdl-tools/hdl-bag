@@ -1,0 +1,333 @@
+\chapter{What bag generate writes}
+\label{ch:outputs}
+
+\cmd{bag generate} reads a spec, checks it, and writes every generated file into one
+folder, the \term{output directory}. You name it with \opt{-o}. Without \opt{-o}, BAG
+uses Project > \setting{Output directory}, relative to the folder of the spec. This
+chapter describes every file and folder that \cmd{bag generate} writes there, and what
+each one is for.
+
+The examples in this chapter use a small design, \code{lite_ss}: one AXI4-Lite master
+\code{cpu}, an AXI4-Lite shared bus \code{bus}, and two AXI4-Lite slaves, \code{sram} and
+\code{uart}, in one clock domain. Its IR, \file{lite_ss.ir.yaml}, is in \file{files/} of
+the examples. \cmd{bag generate} accepts an IR in place of a workbook (chapter~\ref{ch:ir}).
+
+\section{The output tree}
+\label{sec:tree}
+
+\lstinputlisting[style=console]{examples/console/out-tree.txt}
+
+The summary line names the \term{top}: the module that the lint, compile, simulation and
+formal steps use as their top module. In the flat port style it is the top wrapper.
+
+\begin{description}
+\item[\file{rtl/}] the SystemVerilog of the design (section~\ref{sec:rtl}).
+\item[\file{lite_ss.f}] the file list, \file{<project>.f} (section~\ref{sec:filelist}).
+\item[\file{sw/}] the C header (section~\ref{sec:cheader}).
+\item[\file{doc/}] the documents (section~\ref{sec:docs}).
+\item[\file{tests/}] the generated cocotb tests (section~\ref{sec:tests}).
+\item[\file{formal/}] the SymbiYosys jobs and their properties (section~\ref{sec:jobs}).
+\item[\file{bag_outputs.json}] the manifest: what this run wrote
+  (section~\ref{sec:manifest}).
+\end{description}
+
+Which of these parts BAG writes depends on settings of the Project sheet
+(section~\ref{sec:switches}). The commands \cmd{bag lint}, \cmd{bag sim} and
+\cmd{bag formal} write more folders into the output directory when they run
+(chapter~\ref{ch:flows}). \cmd{bag generate} does not write them.
+
+\section{The RTL}
+\label{sec:rtl}
+
+Everything under \file{rtl/} is SystemVerilog (IEEE 1800-2017).
+
+\begin{description}
+\item[\file{rtl/pkg/<package>.sv}] The \term{parameter package}. Its name is Wrapper >
+  \setting{Parameter package}. It holds, for each fabric, the widths, port counts and
+  address decode tables that the fabric's template reads, and the memory map as
+  constants: \code{<Slave><Region>Base} and \code{<Slave><Region>Size}, in system
+  addresses. Your SoC can import the package to use the same addresses as the fabric.
+\item[\file{rtl/<top>.sv}] The \term{top wrapper}. Its name is Wrapper >
+  \setting{Top module name}. It is the module that your SoC instantiates. It has its
+  clock and reset ports (Wrapper > \setting{Clock/reset ports}), and one set of bus
+  signals per master and slave port, named by Wrapper > \setting{Signal naming pattern}.
+  Inside, it conditions the resets that need it (\code{bag_rst_sync}, see
+  \file{doc/reset.md}) and instantiates the fabrics, bridges and adapters.
+\item[\file{rtl/<sub-wrapper>.sv}] One module for each sub-wrapper of the Hierarchy
+  sheet. A sub-wrapper groups some instances inside the top. Its ports are always flat,
+  one port per signal, whatever the port style.
+\item[\file{rtl/inhouse/}] Copies of the in-house RTL that the design uses: the modules
+  written for BAG, such as the AHB-Lite and APB fabrics, the bridges between protocol
+  families, the address decoder and the reset synchronizer. BAG copies only the files
+  that the design needs.
+\item[\file{rtl/vendor/pulp/}] Copies of the files of the PULP \code{axi} and
+  \code{common_cells} libraries that the design uses, with the \file{LICENSE} file of
+  each library. The include files are here too, under \file{include/}.
+\item[\file{rtl/vendor/derived/}] Files that BAG derives from PULP files, such as
+  \file{bag_axil_mux.sv}. Each one names its upstream file and commit, lists what was
+  changed, and keeps the upstream licence notice.
+\item[\file{rtl/ext/}] Only for a user-supplied fabric: a stub for you to replace
+  (section~\ref{sec:external}).
+\end{description}
+
+BAG copies the in-house and vendored files as they are. It does not add its file header
+to them (section~\ref{sec:header}). The lint step treats every file under
+\file{rtl/vendor/} as third-party code (section~\ref{sec:lint}).
+
+\subsection{The two port styles}
+
+Wrapper > \setting{Port style} sets the ports of the top wrapper. The option
+\opt{--style} of \cmd{bag generate} overrides it for one run.
+
+\begin{description}
+\item[\code{flat}] One port per signal, for example \code{cpu_axil_awaddr}. This is the
+  default. The top wrapper is also the top of lint, compile, simulation and formal.
+\item[\code{sv-interface}] One SystemVerilog interface port per master and slave port.
+  BAG writes two more files: \file{rtl/<project>_<proto>_if.sv}, one interface for each
+  protocol at the top's ports (\code{axi}, \code{axil}, \code{ahb}, \code{apb3},
+  \code{apb4}), and \file{rtl/<top>_flat.sv}, a \term{flat harness}. The harness has
+  flat ports, instantiates the interfaces and the top wrapper, and connects them.
+  Verilator cannot compile a top module with interface ports, so the harness is the top
+  of lint, compile, simulation and formal.
+\end{description}
+
+\lstinputlisting[style=console]{examples/console/out-style.txt}
+
+The summary line names \code{lite_ss_top_flat} as the top: the flat harness. Your SoC
+still instantiates \code{lite_ss_top}.
+
+\section{The file list}
+\label{sec:filelist}
+
+\file{<project>.f} lists the files of the design for your own tools. It starts with one
+\code{+incdir+} line for each include directory that the vendored files need. Then it
+names every file to compile, one per line, in compile order: the package first, then the
+interfaces (\code{sv-interface} style only), the vendored and in-house files, the
+sub-wrappers, the top wrapper and, last, the flat harness (\code{sv-interface} style
+only). The paths are relative to the output directory, so run your tool from there.
+
+\lstinputlisting[style=console]{examples/console/out-filelist.txt}
+
+The \file{LICENSE} files and the include files are not in the list: they are not
+compiled on their own.
+
+\section{The manifest}
+\label{sec:manifest}
+
+\file{bag_outputs.json} records what \cmd{bag generate} wrote. \cmd{bag lint},
+\cmd{bag sim} and \cmd{bag formal} read it to find the files, so they take only the
+output directory as their argument. It is a JSON object with these keys:
+
+\begin{description}
+\item[\code{files}] every file written, relative to the output directory, with its
+  SHA-256 hash.
+\item[\code{top}] the top of lint, compile, simulation and formal.
+\item[\code{filelist}] the name of the file list.
+\item[\code{tests}] the generated cocotb module, or \code{null} if there is none.
+\item[\code{formal}] the generated SymbiYosys jobs (\file{formal/*.sby}); empty if there
+  are none.
+\item[\code{lint_tools}] Project > \setting{Lint tools}.
+\item[\code{simulator}] Project > \setting{Simulator}.
+\end{description}
+
+When you generate into the same output directory again, BAG reads the old manifest
+first. It deletes each file that the old manifest lists and the new run does not write,
+for example the flat harness after a change from \code{sv-interface} to \code{flat}.
+BAG does not touch files that it did not write.
+
+\section{The C header}
+\label{sec:cheader}
+
+\file{sw/<project>_memmap.h} gives software the memory map. For each region of the
+\sheet{Memory_Map} sheet it defines \code{<SLAVE>_<REGION>_BASE} and \code{<SLAVE>_<REGION>_SIZE}
+as \code{ULL} constants, in system addresses, grouped by fabric. A comment after each
+base gives the access (\code{RW}, \code{RO} or \code{WO}) and marks a secure-only region
+and a bridge window.
+
+\lstinputlisting[style=console]{examples/console/out-c-header.txt}
+
+\section{The documents}
+\label{sec:docs}
+
+\file{doc/} holds five documents for the people who integrate and review the design.
+
+\lstinputlisting[style=console]{examples/console/out-docs.txt}
+
+\begin{description}
+\item[\file{doc/memmap.md} and \file{doc/memmap.html}] The memory map, per fabric: each
+  region with its base, inclusive end, size, access and whether it is secure only; the
+  bridge windows; each master's aliases; and what a master gets for an address that no
+  region decodes. The HTML file shows the same rows as the Markdown file. It needs no
+  other file, so you can open it in a browser or attach it to a review.
+\item[\file{doc/port_map.md}] Per fabric: its protocol, topology, arbitration, template
+  and instance name, and every master and slave port with its index, protocol, widths,
+  clock domain, priority and the adapters on it. Use it to check how BAG resolved the
+  ports.
+\item[\file{doc/tieoffs.md}] The ports of BAG's components that are not simply wired to a
+  bus signal: inputs tied to a constant, defaults, fitted widths and outputs that nothing
+  reads, each with the reason. The report does not list every such port yet
+  (chapter~\ref{ch:limits}).
+\item[\file{doc/reset.md}] The \term{reset sequence} that the design needs: its clock
+  domains and reset ports, every clock-domain crossing, the \term{reset groups} (the
+  domains that must reset together because a crossing joins them), and the steps to
+  follow when you assert and release the resets. It also says what goes wrong otherwise,
+  and what the generated tests check of it. The file \file{docs/reset-sequence.md} in
+  the BAG repository explains why.
+\end{description}
+
+\section{The generated tests}
+\label{sec:tests}
+
+\file{tests/} holds the cocotb tests for this design. \cmd{bag sim} runs them
+(section~\ref{sec:sim}).
+
+\begin{description}
+\item[\file{tests/<project>_tests.py}] One cocotb test for each generated test that
+  applies to this design. A test that could check nothing on this design is left out.
+  The test bodies, the reference model and the bus models are part of BAG: the module
+  imports them from \code{hdl_bag.tests_gen}.
+\item[\file{tests/<project>.ir.yaml}] A copy of the IR. The tests read it to know what
+  the design must do.
+\item[\file{tests/<top>_ready_shim.sv}] The \term{READY shim}: a module with the ports of
+  the top that instantiates the top and drives each AXI READY into the design from that
+  channel's VALID. A design that waits for READY before it raises VALID then has a
+  combinational loop, which does not settle in simulation. \cmd{bag sim}
+  \opt{--ready-shim} uses it. BAG writes the shim only when the design has an AXI4 or
+  AXI4-Lite port and the back-pressure test applies.
+\end{description}
+
+\lstinputlisting[style=console]{examples/console/out-tests-formal.txt}
+
+\section{The formal jobs}
+\label{sec:jobs}
+
+\file{formal/} holds the SymbiYosys jobs and the properties they check. A \term{job} is
+one \file{.sby} file. A job has one or more \term{tasks}; each task runs one check, in
+one mode, to one depth (section~\ref{sec:formal}). Each job reads the design from
+\file{rtl/} and a property file of its own. The property files attach to the design with
+\code{bind}, so the design needs no formal wrapper.
+
+\begin{description}
+\item[\file{formal/<project>_reset.sv}, \file{.sby}] The quiet-in-reset job. While a
+  domain's reset is held, the design asks nothing of the masters and slaves in that
+  domain. Every design has this job.
+\item[\file{formal/<project>_protocol.sv}, \file{.sby}] The port-protocol job. It checks
+  each master and slave port of the top against the rules of its protocol. A design
+  with no port to check has no protocol job.
+\item[\file{formal/<project>_decode.sv}, \file{.sby}] The decode job. It compares the
+  address decoder of each fabric that BAG generates with a reference that BAG writes from the IR.
+\item[\file{formal/<project>_route_<unit>.sv}, \file{.sby}] One route job for each fabric
+  and each bridge that BAG generates, named after its instance. It checks that unit on its own: routing,
+  arbitration and bridge windows.
+\item[\file{formal/bag_step.v}] Registers that the property files use to count solver
+  steps.
+\item[\file{formal/bag_faxi4.sv}, \file{formal/bag_fahb.sv}] BAG's own protocol checkers
+  for AXI4 and AHB-Lite ports. BAG writes each one only when a job needs it.
+\item[\file{formal/vendor/zipcpu/}] The protocol checkers from ZipCPU that the jobs use,
+  for AXI4-Lite and APB ports, with their \file{LICENSE} and a \file{SOURCE.md} that
+  names their source and commit.
+\end{description}
+
+Section~\ref{sec:formal} explains what each job checks and how to read its result. One
+job, the quiet-in-reset job, is shown here:
+
+\lstinputlisting[style=console]{examples/console/out-reset-job.txt}
+
+\section{The file header}
+\label{sec:header}
+
+Every file that BAG generates from your spec starts with a header. The header is the
+text of the file that Wrapper > \setting{File header} names, followed by BAG's banner. The banner names the version of BAG, the project, its revision, and the SHA-256
+hash of the IR. It says \code{DO NOT EDIT}: change the spec and generate again. In SystemVerilog and C files the text is copied as it is, so write it as \code{//}
+line comments: BAG does not check this, and other text stops the RTL from compiling. In
+Markdown and HTML the whole header goes inside an HTML comment, and in Python and
+\file{.sby} files BAG puts \texttt{\#} before each of its lines.
+
+Three files have no header: the file list, the manifest and the copy of the IR in
+\file{tests/}. The files that BAG copies (the in-house and vendored RTL, the ZipCPU
+checkers, \file{bag_step.v}, \file{bag_faxi4.sv} and \file{bag_fahb.sv}) keep their own
+headers.
+
+\section{Same input, same output}
+\label{sec:deterministic}
+
+\cmd{bag generate} is \term{deterministic}: for the same IR, the same File header text
+and the same version of BAG, it writes the same bytes on every run and on every machine.
+No generated file holds a time stamp, a user name or a path of your machine. Every text
+file has LF line ends, also on Windows. A workbook and the IR that \cmd{bag ir} writes
+from it give the same output. So you can keep the output directory under version
+control and review a change of the spec as a diff of the generated files.
+
+The IR hash in the header changes when anything in the IR changes. The version in the
+header changes when you update BAG, so a new version changes every generated file, even
+when nothing else changed.
+
+The folders that the EDA flows write (\file{obj/}, \file{sim/}, \file{sim_ready_shim/}
+and the work folders of the formal jobs under \file{formal/}) are not part of this: the
+tools write them, and their content can differ between runs.
+
+\section{Which settings switch each part on}
+\label{sec:switches}
+
+The Project sheet decides which parts BAG writes. A setting is \code{Y} or \code{N}
+(chapter~\ref{ch:workbook}).
+
+\begin{center}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{0.34\linewidth}X}
+\toprule
+Setting & What it switches \\
+\midrule
+\setting{Generate RTL} & Nothing yet: BAG reads it, but writes \file{rtl/}, the file list
+  and the manifest whatever its value (chapter~\ref{ch:limits}). \\
+\setting{Generate C header} & \file{sw/<project>_memmap.h}. \\
+\setting{Generate memory-map doc} & All of \file{doc/}: the memory map in Markdown and
+  HTML, the port map, the tie-off report and the reset sequence. \\
+\setting{Generate cocotb unit tests} & All of \file{tests/}: the tests, the copy of the
+  IR and the READY shim. \\
+\setting{Generate formal (SymbiYosys)} & All of \file{formal/}. \\
+\setting{Lint tools} & No file: the tools that \cmd{bag lint} runs, recorded in the
+  manifest. \\
+\setting{Simulator} & No file: the simulator of \cmd{bag sim}, recorded in the manifest.
+  Only \code{verilator} is accepted. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The parameter package, the top wrapper, the sub-wrappers, the copied RTL, the file list
+and the manifest are always written. Wrapper > \setting{Port style} and Wrapper >
+\setting{File header} change what the RTL looks like, but not which parts are written.
+
+\section{A user-supplied fabric}
+\label{sec:external}
+
+A fabric whose template is \code{bag_external} is a \term{user-supplied fabric}: you
+write its RTL, and BAG instantiates it in the place where a generated fabric would be.
+Three things change in the output directory.
+
+\begin{itemize}
+\item BAG writes a \term{stub} for the fabric, \file{rtl/ext/<module>.sv}, and lists it in
+  the file list. The module name is Fabrics > \col{External module} or, if that is
+  blank, \code{<project>_<fabric>}. The stub has the exact ports that BAG connects. Its
+  outputs are tied to zero, so the design lints and elaborates, but the stub accepts and
+  answers nothing.
+\item There are no generated tests: \file{tests/} is not written, and
+  \cmd{bag generate} says so. The tests drive every fabric through the top, and BAG
+  does not know how your fabric behaves.
+\item There are no formal jobs: \file{formal/} is not written, for the same reason.
+\end{itemize}
+
+This holds for the whole design: one user-supplied fabric turns off the tests and the
+formal jobs of every fabric in it. The C header and the documents are written as usual.
+
+\lstinputlisting[style=console]{examples/console/out-external.txt}
+
+The ports of the stub are, in order: \code{clk_i} and \code{rst_ni} (the fabric's clock
+and its conditioned, active-low reset); the bus signals of each attached port, master
+side first, named by Wrapper > \setting{Signal naming pattern}; then the ports that the
+\sheet{User_Ports} sheet declares for the fabric. Directions are the fabric's own: on a master's
+port the fabric is the slave end. Chapter~\ref{ch:workbook} describes how a shared
+External module names its ports by position instead.
+
+Replace the stub with your fabric's RTL. \cmd{bag generate} writes the stub again on
+every run, so keep your RTL outside the output directory and copy it over the stub
+after each run, or compile your own file in its place.

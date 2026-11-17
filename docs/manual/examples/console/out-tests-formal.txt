@@ -1,0 +1,23 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ ls out/tests
+lite_ss.ir.yaml
+lite_ss_tests.py
+lite_ss_top_ready_shim.sv
+$ ls out/formal
+bag_step.v
+lite_ss_decode.sby
+lite_ss_decode.sv
+lite_ss_protocol.sby
+lite_ss_protocol.sv
+lite_ss_reset.sby
+lite_ss_reset.sv
+lite_ss_route_bus.sby
+lite_ss_route_bus.sv
+vendor/
+$ ls out/formal/vendor/zipcpu
+LICENSE
+SOURCE.md
+faxil_master.v
+faxil_slave.v

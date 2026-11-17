@@ -1,0 +1,327 @@
+\chapter{Limits and known problems}
+\label{ch:limits}
+
+This chapter lists what BAG does not do, and what you must know to use its output
+safely. Every item was checked against the code of this version. For each limit you find
+what happens, what you can do about it, and the check rule ID or warning that reports it,
+if there is one. A limit with no rule ID is not reported by \cmd{bag check}: you must
+keep to it yourself.
+
+\section{Protocols and bursts}
+
+\begin{itemize}
+\item \textbf{Protocol versions.} BAG knows five protocols: AXI4, AXI4-Lite, AHB-Lite,
+  APB4 and APB3. There is no AXI3, AXI5, AHB5, APB5, full AHB (with SPLIT and RETRY) or
+  AXI-Stream. AXI4 ports have no ATOP signal, so AXI5 atomic transactions are not
+  supported. The master-port guards drive \code{AWATOP} to zero.
+\item \textbf{WRAP bursts through a width converter.} The vendored PULP width converters
+  cannot split a WRAP burst. A \code{dw} adapter answers every WRAP burst with SLVERR, and
+  so does \code{bag_axi2ahb} when its two sides have different data widths. When the
+  converter makes the bus narrower, a FIXED burst of more than one beat also gets
+  SLVERR. \cmd{bag check} warns once for each AXI4 master and converter, with
+  \ruleid{AXI-WRAP-REFUSED}. The message names the slaves and bridges that the master can
+  reach through that converter.
+
+  What you can do: send INCR bursts on that path, or keep the path at one data width and
+  one protocol. The warning lists every target with a region on the master's fabric. It
+  does not look at the master's address width, so it can name a target that the master
+  cannot address.
+\item \textbf{WRAP bursts into AXI4-Lite or APB.} The protocol converters from AXI4 to
+  AXI4-Lite (a \code{pc} adapter, and the bridges \code{bag_axi2axil} and
+  \code{bag_axi2apb}) also answer every WRAP burst with SLVERR. \cmd{bag check} does not
+  warn here, because register buses rarely see WRAP bursts. The generated tests expect the
+  SLVERR on these paths.
+\item \textbf{Non-modifiable bursts.} A burst with \code{AxCACHE[1]} = 0 is
+  non-modifiable: a converter may not split it. The AXI4 to AXI4-Lite converters (the
+  \code{pc} adapter, \code{bag_axi2axil}, \code{bag_axi2apb}) answer with SLVERR a
+  non-modifiable FIXED burst of more than one beat, and a non-modifiable INCR burst of 2 to
+  17 beats. The two bridges also refuse a non-modifiable access that is wider than the
+  downstream bus. \code{bag_axi2ahb} refuses a non-modifiable burst that its width
+  converter must split. No check reports this.
+
+  What you can do: send modifiable bursts (\code{AxCACHE[1]} = 1) on these paths, or
+  single beats.
+\item \textbf{Write errors through a protocol converter.} The AXI4 to AXI4-Lite
+  converters report every write error as SLVERR. A DECERR from behind them reaches the
+  master as SLVERR.
+\item \textbf{Arbitration.} The AXI4 and AXI4-Lite crossbars arbitrate round-robin only
+  (\ruleid{FAB-ARBITRATION}). Shared buses and the AHB-Lite bus also offer fixed priority.
+  No fabric arbitrates by QoS. An AHB-Lite fabric is a single-layer bus; there is no
+  multi-layer matrix (\ruleid{FAB-TOPOLOGY}). An APB fabric has one master
+  (\ruleid{FAB-SINGLE-MASTER}).
+\item \textbf{ID widths.} Each master port of an AXI4 fabric has a guard that counts
+  transactions per ID. Its tables double with each master-side ID bit.
+  \ruleid{FAB-GUARD-ID-WIDTH} warns above 8 bits. Each crossbar level adds bits to the
+  slave-side ID; \ruleid{FAB-ID-GROWTH} warns above 16 bits. Both are area costs, not
+  errors. Narrow the master IDs if the area matters.
+\item \textbf{Max mst trans and Max slv trans mean different things per protocol.} The
+  vendored PULP crossbars count differently for AXI4 and AXI4-Lite, and BAG passes the
+  values through. Table~\ref{tab:limits-trans} shows the meaning. No check reports a
+  difference, because none is an error.
+\end{itemize}
+
+\begin{table}[htbp]
+\centering\small
+\caption[What Max mst trans and Max slv trans limit]{What \col{Max mst trans} and
+  \col{Max slv trans} limit}
+\label{tab:limits-trans}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.2\linewidth}
+  >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+Fabric & \col{Max mst trans} & \col{Max slv trans} \\
+\midrule
+AXI4 crossbar & At least this many per ID at each master, not in total. &
+  Writes per slave whose data has not finished. Reads are not limited. \\
+AXI4 shared bus & At least this many per ID at each master. Also the depth of the
+  write FIFO of the bus, shared by all masters. & At least this many per ID, across all
+  slaves. \\
+AXI4-Lite crossbar or shared bus & This many per master. & This many per slave, reads
+  and writes. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Both columns also size the adapters on the ports of the fabric. \col{Max slv trans} also
+limits the reads and writes through a \code{bag_axi2apb} or \code{bag_axi2axil} bridge on
+the fabric, and the reads through \code{bag_axi2ahb}.
+
+\section{Bridges and adapters}
+
+\begin{itemize}
+\item \textbf{\code{bag_axi2ahb} handles one transaction at a time.} It serializes the
+  IDs, so responses come back in order and the bridge never overlaps two transactions.
+  A read stays open until all its beats are in a 4-entry read buffer.
+
+  This has one rule for you. A master must not make RREADY wait for the progress of a
+  later write (its AW, W or B). If it does, the bridge and the master wait for each other,
+  and the bus stops.
+\item \textbf{\code{bag_axi2ahb} and AHB-Lite features.} The bridge answers an exclusive
+  access (\code{AxLOCK}) with OKAY, so the exclusive access fails. It drives
+  \code{HMASTLOCK} to zero. It does not carry USER signals (they read as zero). An INCR
+  burst becomes an AHB-Lite INCR burst of undefined length, which restarts at each 1 KB
+  boundary. WRAP and FIXED bursts become single transfers. After an error response, the
+  burst continues, and the master gets SLVERR.
+\item \textbf{Partial writes into AHB-Lite become byte writes.} AHB-Lite has no write
+  strobes. \code{bag_axi2ahb} and \code{bag_apb2ahb} split a write with some strobes
+  clear into one byte write for each set strobe. Contiguous strobes, such as a halfword,
+  are split too. \code{bag_axi2ahb} drops a write beat with no strobe set.
+
+  So such a write is not atomic at the slave: the slave sees several writes, and another
+  master can access the word between them. What you can do: write whole words to AHB-Lite
+  registers where this matters. A change to this behaviour is planned.
+\item \textbf{The bridges from AHB-Lite and APB do one transfer at a time.}
+  \code{bag_ahb2apb}, \code{bag_ahb2axi}, \code{bag_apb2ahb} and \code{bag_apb2axi} pass
+  each transfer through a four-phase handshake and wait for its response. Their
+  \col{FIFO depth} has no effect, and \ruleid{BRIDGE-FIFO-IGNORED} warns if you set one.
+  \code{bag_ahb2axi} and \code{bag_apb2axi} issue AXI ID width 1 with one transfer
+  outstanding. A 64-bit AHB-Lite beat into a 32-bit AXI bus becomes two AXI transfers.
+\item \textbf{Signals the PULP-based bridges do not carry.} \code{bag_axi2axil} and
+  \code{bag_axi2apb} do not carry USER, \code{AxCACHE}, QoS, REGION or LOCK. An exclusive
+  access through them reaches the slave as a normal access and gets OKAY, so it fails.
+  \code{bag_axi2apb} does one APB transfer at a time.
+\item \textbf{The AHB-Lite bus does not forward \code{HMASTLOCK}.} A locked sequence
+  keeps the grant of the bus, but the slaves never see \code{HMASTLOCK}.
+\item \textbf{Partial writes into APB3.} APB3 has no PSTRB. A partial write reaches an
+  APB3 slave that is wider than 8 bits as a full-word write: the bytes with a clear
+  strobe are written too. The same happens on an APB4 slave whose PSTRB you tie in
+  \sheet{Port_Options}. What you can do: write whole words to such slaves.
+\item \textbf{Narrow APB slaves.} \code{bag_axi2apb} splits a beat that is wider than
+  the APB bus into several APB transfers. An error on one of them does not stop the
+  others. So a write can change some bytes of the slave while the master gets SLVERR.
+
+  An unaligned access from an AXI4-Lite master behaves differently on an 8-bit and a
+  16-bit APB bus. Onto 8 bits, the bridge accesses the bytes from the address to the end
+  of the beat, and not the bytes below the address. Onto 16 bits, it accesses the whole
+  aligned word. Both are legal AXI. What you can do: use aligned accesses to narrow APB
+  slaves.
+\item \textbf{AXI4-Lite width converters access the whole wider word.} An AXI4-Lite
+  \code{dw} adapter always reads the whole wider word. It writes the whole wider word too,
+  with \code{WSTRB} = 0 on the bytes the master did not write. So a read also reads
+  bytes at the slave that the master did not address. Keep registers with read side effects (a FIFO pop, a clear-on-read
+  status) away from the other half of the wider word.
+\item \textbf{FIFOs and register slices exist only on AXI ports.} \sheet{Port_Options}
+  accepts a \col{FIFO depth} or a \col{Register slice} only on an AXI4 or AXI4-Lite port.
+  \ruleid{PORT-ADAPTER} reports any other.
+\end{itemize}
+
+\section{Address decode and aliases}
+
+\begin{itemize}
+\item \textbf{Alias-enable pins must be quasi-static.} An alias enable that is a
+  top-level input goes straight into the decoder of the fabric. There is no synchronizer.
+  If the pin changes while a transfer is in flight, BAG does not define which map
+  decodes it. The generated tests and the formal jobs assume that the pin changes only
+  while the fabric is in reset.
+
+  What you can do: change an alias pin only in reset, or while no master of the fabric
+  has a transfer open. If the pin comes from another clock domain, synchronize it to the
+  fabric's clock yourself. \ruleid{DEC-ALIAS-ENABLE} checks only that the pin name is
+  \code{always} or an extra top-level input.
+\item \textbf{The map is static.} BAG writes the memory map and the access rules into the
+  RTL. Software cannot change regions or permissions at run time, and there is no
+  firewall with lock bits.
+\item \textbf{What the access control covers.} BAG enforces \sheet{Access_Rules}, the
+  read-only and write-only regions, and secure-only regions. The secure check reads only
+  the non-secure bit of PROT (\code{AxPROT[1]}, \code{HNONSEC}, \code{PPROT[1]}). A
+  secure-only region must not be reachable from a port whose PROT is tied, or whose
+  protocol has no PROT: \ruleid{SEC-PROT-TIED} reports it.
+\item \textbf{The default slave is yours.} BAG does not know what a default slave
+  answers. Nothing warns when it answers a miss with OKAY. A tied PSLVERR on the master
+  side of an APB fabric hides every error, its own miss response included
+  (\ruleid{PORTOPT-ERROR-MASKED}).
+\item \textbf{What a slave sees.} A slave sees the address after alias translation and
+  after the offset of a bridge with \col{Pass-through address} N. A slave with a narrow
+  address port sees only the low bits. Its regions must lie in one aligned block of its
+  address width (\ruleid{MM-SLAVE-ALIGN}).
+\end{itemize}
+
+\section{Clocks, resets and clock-domain crossings}
+
+\begin{itemize}
+\item \textbf{No timing constraints are generated.} \cmd{bag generate} writes no SDC
+  for the clock-domain crossings. You must write them yourself:
+  \begin{itemize}
+  \item a max-delay, data-path-only constraint on the gray-coded pointer and data paths
+    of each PULP \code{axi_cdc} (the \code{cdc} adapter, and the bridges from AXI);
+  \item the same on the payload paths of the four-phase handshake in the bridges from
+    AHB-Lite and APB;
+  \item a false path, or your tool's equivalent, into the first stage of each
+    \code{bag_sync}.
+  \end{itemize}
+  The generation of these constraints is planned.
+\item \textbf{No synthesis attributes on the synchronizers.} \code{bag_sync} and
+  \code{bag_rst_sync} carry no \code{ASYNC_REG} or keep attributes, and there is no hook
+  for a technology cell. Mark them in your synthesis flow. Attributes are planned.
+\item \textbf{Resets of a reset group assert together.} Domains joined by a chain of
+  crossings form a reset group. All resets of a group must assert at the same moment.
+  Resetting one domain of a group alone is not supported: the PULP CDC FIFOs need both
+  sides in reset together. If they are not, the running side can see a transfer that no
+  master sent. \ruleid{CLK-CDC-RESET} checks that each reset on a crossing has async
+  assertion and sync deassertion. It cannot check when your resets assert.
+
+  \cmd{bag generate} writes \file{doc/reset.md} (with \setting{Generate memory-map doc}
+  Y). It lists the reset groups of your design and the reset sequence to follow. BAG
+  sees only its own crossings: a crossing inside your user-supplied fabric is yours.
+\item \textbf{No timeouts.} No fabric or bridge has a timeout. A slave that never raises
+  PREADY, HREADYOUT or an AXI READY, or never sends its response, stops the master. On a
+  shared bus it stops every master. What you can do: use slaves that always answer, and
+  add a watchdog outside BAG where you need one. A PREADY timeout is planned.
+\item \textbf{No clock-domain crossing analysis.} BAG runs no CDC tool. Simulation has
+  zero delay, so it cannot show metastability or a missing constraint.
+\end{itemize}
+
+\section{Verification}
+
+\begin{itemize}
+\item \textbf{Simulation coverage is a report only.} \cmd{bag sim} writes
+  \file{sim/coverage.md} (\file{sim_ready_shim/coverage.md} with \opt{--ready-shim}). It has no closure target. Its bins come from the same addresses
+  and burst shapes that the tests use. So a full passing run reads 100\% by construction:
+  the report says what a run exercised, not what the tests leave out. It has no bins for
+  back-pressure per channel, arbitration contention, alias pins on and off, narrow single
+  transfers, or narrow bursts outside AXI4.
+\item \textbf{What the generated tests do not try.}
+  \begin{itemize}
+  \item WRAP and FIXED bursts are tested only at full width.
+  \item The burst at a 4 KB edge is not run on a region of exactly 4 KB.
+  \item Every reset is asserted together and released together. A staggered release,
+    and assertion with stopped clocks, are not tested.
+  \item \cmd{bag sim} uses one fixed seed (\code{20261031}) unless you set
+    \code{BAG_COCOTB_SEED}. A run tries one seed only: the tests do not sweep seeds.
+  \end{itemize}
+\item \textbf{\cmd{bag sim} does not judge the build log.} It builds the design with
+  Verilator and runs the tests, but it does not read the warnings of the build. An
+  elaboration \code{$error} in the RTL shows in \cmd{bag lint}. \cmd{bag flow} runs lint
+  before sim, so use it, or run \cmd{bag lint} first.
+\item \textbf{Formal is bounded, except two jobs.} The decode job is a complete proof,
+  because the decoder is combinational. The reset job is proved by induction, so it holds
+  in every reachable state. The protocol job and the route jobs check only to a fixed
+  number of solver steps (16 for the protocol job). A bug that needs more steps to show
+  is not found. There is no liveness check: no job proves that every request gets a
+  response.
+\item \textbf{What the route jobs compare.} For each request at a slave port, a route
+  job checks the address, the direction, the secure bit and the slave port. It does not
+  check the other request fields (length, size, burst type, cache and protection bits),
+  the write data, or the payload and routing of responses. On a fabric with several
+  masters and no IDs (an AXI4-Lite crossbar or shared bus, or the AHB-Lite bus), the job does
+  not explore two masters with open requests to the same address at the same time. The
+  window check of a bridge uses single-beat accesses, one at a time.
+\item \textbf{Clocks in formal.} The formal jobs treat every clock as a free input, so
+  they explore any clock ratio and phase. They model a crossing as ideal logic: they prove
+  nothing about metastability or the timing of a synchronizer.
+\item \textbf{The PULP blocks are not proved inside.} The properties sit at the ports of
+  the design, of each fabric and of each bridge. Nothing is proved about the internals of
+  the vendored PULP blocks, and BAG does not change their code. Adapters have no route job
+  of their own; the protocol job and the simulation see them only from the ports.
+\item \textbf{User-supplied fabrics get no tests and no formal.} BAG does not know how a
+  \code{bag_external} fabric behaves. It writes a stub with all outputs tied to zero, so
+  the design lints and elaborates. It writes no tests and no formal jobs for such a
+  design. The memory map, the decode tables and the documents are still generated. If
+  fabrics share an \col{External module}, their ports must be equal;
+  \ruleid{EXT-MODULE-SHARED} checks the protocol, widths and attachments, and
+  \cmd{bag generate} stops on a difference that the check cannot see, such as an ID width.
+\end{itemize}
+
+\section{Tools}
+
+\begin{itemize}
+\item \textbf{Pinned versions.} BAG is tested with the tool versions in
+  \file{tools.lock}: Verilator, slang, Verible, and SymbiYosys and Yosys from one OSS CAD
+  Suite release. With another version, findings can differ. The built-in lint waivers
+  were written for the pinned versions: with another version, a waiver that matches
+  nothing is a note, not an error. \cmd{bag formal} notes a SymbiYosys that is not the
+  pinned one.
+\item \textbf{Linux and the tools image.} The EDA flows are tested on Linux, in the tools
+  image (Ubuntu 24.04). Reading, checking and generating need no EDA tools and run on
+  Linux and Windows.
+\item \textbf{One simulator.} \cmd{bag sim} runs Verilator with cocotb only.
+  \setting{Simulator} accepts only \code{verilator} (\ruleid{VALUE-ILLEGAL}). Xcelium and
+  VCS are not supported, and the bus models are not tested with them. \cmd{bag lint} runs
+  slang, Verilator and Verible, and \cmd{bag formal} runs SymbiYosys. There are no
+  commercial backends.
+\item \textbf{Generated tests need the same BAG version.} The generated test module
+  imports the tests from the installed BAG. If that is another version, the tests stop
+  with a message that tells you to run \cmd{bag generate} again.
+\end{itemize}
+
+\section{Generated output}
+
+\begin{itemize}
+\item \textbf{Sub-wrappers have flat ports.} A sub-wrapper from the \sheet{Hierarchy}
+  sheet has flat ports, also when \setting{Port style} is \code{sv-interface}. It receives
+  the conditioned reset of each domain, not the raw reset.
+\item \textbf{\file{doc/tieoffs.md} is not complete.} It does not list constant alias
+  enables (\code{always}). Completing the report is planned.
+\item \textbf{Project > \setting{Generate RTL} has no effect.} BAG checks the value, but
+  \cmd{bag generate} writes the RTL whatever it is.
+\item \textbf{Some columns are kept but not used.} BAG checks Clocks > \col{Freq (MHz)},
+  Masters > \col{Max outstanding rd} and \col{Max outstanding wr}, Slaves >
+  \col{Wait states} and \col{Error response}, and Fabrics > \col{Backing IP}, and keeps
+  them in the IR, but no generated file depends on them yet.
+\end{itemize}
+
+\section{The command line}
+
+\begin{itemize}
+\item \textbf{A folder that is not an output directory.} \cmd{bag lint}, \cmd{bag sim}
+  and \cmd{bag formal} on a folder without \file{bag_outputs.json}, or with a broken one,
+  stop with a Python traceback instead of an \code{error:} line. The exit status is 1.
+  Give them the folder that \cmd{bag generate} wrote.
+\end{itemize}
+
+\section{Not in this version}
+
+\begin{itemize}
+\item \textbf{No functional-safety mechanisms.} BAG generates no bus timeouts, no
+  parity or ECC on bus signals, no fabric duplication with a comparator, and no
+  error-status registers. It gives no safety manual and no FMEDA data.
+\item \textbf{No tool qualification.} There is no qualification kit and no
+  tool-confidence evidence for a functional-safety standard. Deterministic output, the
+  generated tests and the formal jobs are evidence you can use, but BAG does not package
+  them for qualification.
+\item \textbf{No plug-in templates.} You can use only the built-in fabric, adapter and
+  bridge templates (\ruleid{TMPL-FABRIC}, \ruleid{TMPL-BRIDGE}). For a fabric that BAG
+  cannot generate, use \code{bag_external} and supply the RTL. Plug-in templates are
+  planned.
+\item \textbf{Other things BAG does not do.} BAG does not import or export IP-XACT. It
+  does not report area or timing. It does not support custom protocols.
+\end{itemize}

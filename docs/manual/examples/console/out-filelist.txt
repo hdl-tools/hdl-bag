@@ -1,0 +1,29 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ cat out/lite_ss.f
++incdir+rtl/vendor/pulp/axi/include
++incdir+rtl/vendor/pulp/common_cells/include
+rtl/pkg/lite_ss_pkg.sv
+rtl/vendor/pulp/common_cells/src/cf_math_pkg.sv
+rtl/vendor/pulp/common_cells/src/fifo_v3.sv
+rtl/vendor/pulp/common_cells/src/rr_arb_tree.sv
+rtl/vendor/pulp/common_cells/src/spill_register_flushable.sv
+rtl/vendor/pulp/common_cells/src/lzc.sv
+rtl/vendor/pulp/common_cells/src/spill_register.sv
+rtl/vendor/pulp/axi/src/axi_pkg.sv
+rtl/vendor/pulp/axi/src/axi_intf.sv
+rtl/vendor/pulp/axi/src/axi_cut.sv
+rtl/vendor/pulp/axi/src/axi_fifo.sv
+rtl/vendor/pulp/axi/src/axi_lite_demux.sv
+rtl/vendor/pulp/axi/src/axi_multicut.sv
+rtl/inhouse/bag_addr_decode.sv
+rtl/inhouse/bag_axil_err_slv.sv
+rtl/inhouse/bag_axil_from_flat.sv
+rtl/inhouse/bag_axil_guard.sv
+rtl/inhouse/bag_axil_shared_bus.sv
+rtl/inhouse/bag_axil_to_flat.sv
+rtl/inhouse/bag_prio_arb.sv
+rtl/inhouse/bag_rst_sync.sv
+rtl/vendor/derived/bag_axil_mux.sv
+rtl/lite_ss_top.sv

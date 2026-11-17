@@ -1,0 +1,38 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ bag sim out
+sim (verilator, cocotb): 0 unwaived finding(s), 0 waived
+note: coverage: path 4/4
+note: coverage: response 5/5
+note: coverage report (report only, gates nothing): <examples>/out/sim/coverage.md
+$ cat out/sim/coverage.md
+# lite_ss functional coverage
+
+What the generated tests exercised. The bins are the reference model's view of the same probe addresses and burst shapes the tests use, so a full passing run reads 100%: this says what ran, not what the tests leave untested (hdl_bag.tests_gen.coverage). A report only: it gates nothing.
+
+| Kind | Covered | Bins |
+|---|---|---|
+| path | 4 | 4 |
+| response | 5 | 5 |
+| secure | 0 | 0 |
+| burst | 0 | 0 |
+
+## path
+
+| Master | Slave | Access | Hits |
+|---|---|---|---|
+| cpu | sram | read | 4 |
+| cpu | sram | write | 4 |
+| cpu | uart | read | 4 |
+| cpu | uart | write | 4 |
+
+## response
+
+| Master | Slave | Response | Hits |
+|---|---|---|---|
+| cpu | - | miss | 12 |
+| cpu | sram | OKAY | 6 |
+| cpu | sram | slave error | 2 |
+| cpu | uart | OKAY | 6 |
+| cpu | uart | slave error | 2 |

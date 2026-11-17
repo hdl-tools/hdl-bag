@@ -1,0 +1,4 @@
+// Copyright 2026 Example Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Sample file header for the Phase 2 configs (Wrapper > File header).

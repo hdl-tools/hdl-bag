@@ -1,0 +1,67 @@
+$ bag template --sample -o spec.xlsx
+wrote spec.xlsx
+wrote header.txt
+$ bag check spec.xlsx
+warning: Masters row 5: WRAP bursts from cpu0 to br_main2cfg, br_main2per, ddr0, sram0 get SLVERR: dw adapter cpu0_dw_2_main_xbar cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)
+warning: Masters row 6: WRAP bursts from dma0 to ddr0 get SLVERR: dw adapter main_xbar_dw_2_ddr0 cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)
+spec.xlsx: 0 error(s), 2 warning(s)
+$ bag generate spec.xlsx -o out
+warning: Masters row 5: WRAP bursts from cpu0 to br_main2cfg, br_main2per, ddr0, sram0 get SLVERR: dw adapter cpu0_dw_2_main_xbar cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)
+warning: Masters row 6: WRAP bursts from dma0 to ddr0 get SLVERR: dw adapter main_xbar_dw_2_ddr0 cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)
+spec.xlsx: 0 error(s), 2 warning(s)
+wrote 132 file(s) to out (top demo_ss_bus_top)
+$ ls out
+bag_outputs.json
+demo_ss.f
+doc/
+formal/
+rtl/
+sw/
+tests/
+$ ls out/rtl
+aon_wrapper.sv
+demo_ss_bus_top.sv
+inhouse/
+main_wrapper.sv
+per_wrapper.sv
+pkg/
+vendor/
+$ ls out/doc
+memmap.html
+memmap.md
+port_map.md
+reset.md
+tieoffs.md
+$ ls out/tests
+demo_ss.ir.yaml
+demo_ss_bus_top_ready_shim.sv
+demo_ss_tests.py
+$ ls out/formal
+bag_fahb.sv
+bag_faxi4.sv
+bag_step.v
+demo_ss_decode.sby
+demo_ss_decode.sv
+demo_ss_protocol.sby
+demo_ss_protocol.sv
+demo_ss_reset.sby
+demo_ss_reset.sv
+demo_ss_route_ahb_bus.sby
+demo_ss_route_ahb_bus.sv
+demo_ss_route_aon_apb.sby
+demo_ss_route_aon_apb.sv
+demo_ss_route_br_ahb2aon.sby
+demo_ss_route_br_ahb2aon.sv
+demo_ss_route_br_ahb2main.sby
+demo_ss_route_br_ahb2main.sv
+demo_ss_route_br_main2cfg.sby
+demo_ss_route_br_main2cfg.sv
+demo_ss_route_br_main2per.sby
+demo_ss_route_br_main2per.sv
+demo_ss_route_cfg_bus.sby
+demo_ss_route_cfg_bus.sv
+demo_ss_route_main_xbar.sby
+demo_ss_route_main_xbar.sv
+demo_ss_route_periph_apb.sby
+demo_ss_route_periph_apb.sv
+vendor/

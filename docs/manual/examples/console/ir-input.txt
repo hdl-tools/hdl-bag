@@ -1,0 +1,18 @@
+$ cp files/apb4_min.ir.yaml apb4_min.ir.yaml
+$ cp files/header.txt header.txt
+$ bag generate apb4_min.ir.yaml -o out
+apb4_min.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 27 file(s) to out (top apb4_min_top)
+$ cp files/apb4_min_edited.ir.yaml edited.ir.yaml
+$ bag generate edited.ir.yaml -o out2
+error: Memory_Map row 5: size 0x0000_0C00 is not a power of 2 (MM-SIZE-NOT-POW2)
+error: Address_Decode row 5: alias target 0x0000_0000..0x0000_00FF is not inside one region on apb (DEC-ALIAS-TARGET)
+edited.ir.yaml (checked as the workbook it converts to): 2 error(s), 0 warning(s)
+[exit status 1]
+$ ls
+apb4_min.ir.yaml
+console/
+edited.ir.yaml
+files/
+header.txt
+out/
