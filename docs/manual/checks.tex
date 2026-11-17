@@ -19,6 +19,7 @@
 \checkrule{DEC-DUPLICATE}{error}{Address\_Decode row 14: dma0 already has a row (6) (DEC-DUPLICATE)}
 \checkrule{DEC-MISS-RESP}{error}{Address\_Decode row 6: PSLVERR does not suit AXI4 fabric main\_xbar (DECERR, SLVERR, default-slave) (DEC-MISS-RESP)}
 \checkrule{DEC-MISSING-ROW}{error}{Address\_Decode: master port dma0 on main\_xbar has no row (DEC-MISSING-ROW)}
+\checkrule{DEC-MIXED-TRANSLATION}{error}{Fabrics row 6: the masters of cfg\_bus see different addresses (br\_main2cfg: offsets from 0x4100\_0000; sec0: system addresses), but one decoder serves them all: give them separate fabrics, or set Pass-through address to Y on the bridges (DEC-MIXED-TRANSLATION)}
 \checkrule{DEC-UNKNOWN-MASTER}{error}{Address\_Decode row 14: ghost is not a connected master or bridge (DEC-UNKNOWN-MASTER)}
 \checkrule{EXT-MODULE-NAME}{error}{Fabrics row 9: External module '1bad' is not a SystemVerilog identifier (EXT-MODULE-NAME)}
 \checkrule{EXT-MODULE-SHARED}{error}{Fabrics row 9: aon\_apb and ahb\_bus share module one but differ in protocol, widths, attachments or user ports (EXT-MODULE-SHARED)}

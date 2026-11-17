@@ -653,9 +653,9 @@ its upstream fabric.
 must send the same kind of address. A fabric fed by a pass-through \code{N} bridge cannot
 also have a master that sends other addresses: a direct master, a pass-through \code{Y}
 bridge from a fabric without an offset, or a pass-through \code{N} bridge with another
-window base. Give them separate fabrics. \cmd{bag check} does
-not report this case yet; \cmd{bag generate} stops with the error
-\code{fabric <name>: its masters see different address translations}.
+window base. Give them separate fabrics. \cmd{bag check} refuses this at the fabric's row
+on \sheet{Fabrics}, naming each master and the addresses it sends
+(\ruleid{DEC-MIXED-TRANSLATION}).
 
 \subsection{Rules across rows}
 

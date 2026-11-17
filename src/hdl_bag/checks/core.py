@@ -90,6 +90,7 @@ RULES: Final[dict[str, Severity]] = {
     "DEC-ALIAS-TARGET": E,
     "DEC-ALIAS-OVERLAP": E,
     "DEC-ALIAS-ENABLE": E,
+    "DEC-MIXED-TRANSLATION": E,
     "SEC-PROT-TIED": E,
     # port options
     "PORTOPT-UNKNOWN-PORT": E,

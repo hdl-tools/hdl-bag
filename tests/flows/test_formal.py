@@ -19,6 +19,7 @@ from hdl_bag.flows.formal import (
     SbyTask,
     SymbiYosys,
     bounded_notes,
+    finished_findings,
     job_sources,
     job_tasks,
     prove,
@@ -366,6 +367,34 @@ def test_a_timeout_stops_sby_and_everything_it_started(
         time.sleep(0.1)
     else:
         pytest.fail(f"sby's child {child} is still running after the timeout")
+
+
+def test_a_timed_out_run_keeps_the_verdicts_of_the_tasks_that_finished() -> None:
+    """PR 5 review: a job killed at its time limit must not drop a task that had already
+    failed (a counterexample would read as a mere timeout). Only tasks with a DONE line
+    count; the one still running gives no finding of its own here."""
+    partial = (
+        "SBY 10:00:00 [x_bmc] DONE (FAIL, rc=2)\n"
+        "SBY 10:00:00 [x_prove] DONE (PASS, rc=0)\n"
+        "SBY 10:00:01 [x_cover] engine_0: ##   0:00:01  Checking cover reachability in step 4..\n"
+    )
+    assert [(f.rule, f.message) for f in finished_findings(partial, {})] == [
+        ("FORMAL-UNKNOWN", "x_bmc: failed without naming a property")
+    ]
+    assert finished_findings("SBY 10:00:01 [x_cover] engine_0: step 4\n", {}) == []
+
+
+@posix
+def test_a_timeout_after_a_failed_task_reports_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = _fake_sby(tmp_path, monkeypatch, "echo 'SBY 10:00:00 [x_prove] DONE (FAIL, rc=2)'\n"
+                    "sleep 300\n")  # fmt: skip
+    report = run_sby(job, tmp_path, timeout=2, hint="--formal-budget")
+    assert [(f.rule, f.message) for f in report.findings] == [
+        ("FORMAL-TIMEOUT", "x: no verdict within 2 s (allow more with --formal-budget)"),
+        ("FORMAL-UNKNOWN", "x_prove: failed without naming a property"),
+    ]
 
 
 @posix

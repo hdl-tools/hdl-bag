@@ -150,7 +150,8 @@ module bag_axi_dw #(
   // says so, and a write's beats go with no byte strobe set, so no byte changes and its OKAY
   // says so too (owner, 2026-11-12). A write still reaches the slave: one acting on any write,
   // whatever its strobes, sees it.
-  localparam int unsigned MstMaxSize = $clog2(MstDataWidth / 8);
+  // $clog2 returns a signed integer: cast, or slang reports the conversion (random seed 0).
+  localparam int unsigned MstMaxSize = unsigned'($clog2(MstDataWidth / 8));
   localparam bit Downsize = SlvDataWidth > MstDataWidth;
 
   function automatic logic too_long(input logic [7:0] len, input logic [2:0] size);

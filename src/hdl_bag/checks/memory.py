@@ -58,6 +58,38 @@ def _window_offset(ctx: Context, fabric: str, depth: int = 0) -> int:
     return 0
 
 
+def _bridge_view(ctx: Context, bridge: str, depth: int = 0) -> int:
+    """The offset the addresses BRIDGE sends downstream are relative to: its window base for
+    pass-through N, else whatever its upstream fabric decodes (0: system addresses)."""
+    for row in ctx.raw.bridges:
+        if ctx.text(row["Bridge"]) != bridge:
+            continue
+        if ctx.yes_no(row["Pass-through address"], required=False) is False:
+            base = ctx.hexval(row["Window base (hex)"], required=False)
+            return base if isinstance(base, int) else 0
+        upstream = ctx.slave_fabric.get(bridge)
+        if upstream is not None and depth < len(ctx.raw.bridges):
+            return _window_offset(ctx, upstream, depth + 1)
+    return 0
+
+
+def check_mixed_translation(ctx: Context) -> None:
+    """Every master of a fabric must send addresses relative to the same base, because one
+    decoder serves them all: a pass-through N bridge beside a direct master (or beside a
+    bridge with another window) cannot share a fabric. bag generate refuses the same
+    (gen/decode.py fabric_offset); this says so at bag check, as every refusal should."""
+    for row in ctx.raw.fabrics:
+        fabric = ctx.text(row["Fabric"])
+        masters = ctx.fabric_masters.get(fabric or "", [])
+        views = {m: _bridge_view(ctx, m) if ctx.kinds.get(m) == "bridge" else 0 for m in masters}
+        if len(set(views.values())) < 2:
+            continue
+        seen = "; ".join(f"{m}: {f'offsets from {_hex(v)}' if v else 'system addresses'}"
+                         for m, v in views.items())  # fmt: skip
+        ctx.report("DEC-MIXED-TRANSLATION", row["Fabric"],
+                   f"the masters of {fabric} see different addresses ({seen}), but one decoder serves them all: give them separate fabrics, or set Pass-through address to Y on the bridges")  # fmt: skip
+
+
 def _pow2(v: int) -> bool:
     return v > 0 and v & (v - 1) == 0
 

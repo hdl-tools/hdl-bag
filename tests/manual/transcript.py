@@ -15,7 +15,8 @@ Rules of the format:
   `cat FILE`, `cp SRC DST` (one file), `ls [DIR]` (names in sorted order, one per line, a
   directory with a trailing "/"). Words are split as a POSIX shell does; there are no
   pipes, variables or wildcards.
-- `bag lint`, `bag sim`, `bag formal` and `bag flow` need the EDA tools. They may appear
+- `bag lint`, `bag sim`, `bag formal`, `bag flow` and `bag regress` need the EDA
+  tools. They may appear
   only in a transcript under `examples/console/eda/`, which the EDA test replays in the
   tools image; the host test replays the others.
 - A transcript starts in a fresh copy of `docs/manual/examples`. Commands of one transcript
@@ -55,7 +56,7 @@ MANUAL = REPO / "docs" / "manual"
 EXAMPLES = MANUAL / "examples"
 UPDATE = os.environ.get("BAG_MANUAL_UPDATE") == "1"
 # Commands that run EDA tools: only in transcripts under examples/console/eda/.
-EDA_COMMANDS = frozenset({"lint", "sim", "formal", "flow"})
+EDA_COMMANDS = frozenset({"lint", "sim", "formal", "flow", "regress"})
 
 _VERSION = re.compile(r"(?<![\w.])" + re.escape(hdl_bag.__version__) + r"(?![\w.])")
 
