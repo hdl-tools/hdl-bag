@@ -33,7 +33,7 @@ from hdl_bag.regress.dsl import (
     AXIL_NA,
     ERROR,
     Cfg,
-    _hex,
+    hex_address,
 )
 from hdl_bag.template.builder import build_workbook
 from hdl_bag.templates.registry import builtin_registry
@@ -45,7 +45,8 @@ LATENCY = ("NO_LATENCY", "CUT_SLV_AX", "CUT_MST_AX", "CUT_ALL_AX", "CUT_SLV_PORT
            "CUT_MST_PORTS", "CUT_ALL_PORTS")  # fmt: skip
 SLICES = ("none", "cut", "multicut-2", "multicut-3")
 KB = 0x400
-HEADER = "Random configuration drawn by bag regress.\n"
+# The File header goes into every generated file as written, so it is SystemVerilog comments.
+HEADER = "// Random configuration drawn by bag regress.\n"
 
 
 def _na(proto: str, master: bool) -> dict[str, str]:
@@ -96,7 +97,7 @@ class _Draw:
     offset: dict[str, bool] = field(default_factory=dict)  # fabric -> sees window offsets
     pass_through: dict[str, bool] = field(default_factory=dict)  # bridge -> Y
     counts: dict[str, int] = field(default_factory=dict)
-    secure: bool = False
+    dense: bool = False  # the map: regions and windows fill their slots, side by side
 
     def name(self, kind: str) -> str:
         k = self.counts.get(kind, 0)
@@ -119,14 +120,16 @@ def random_config(seed: int) -> Cfg:
     cfg.data.description = f"Drawn by bag regress (bag regress --seed {seed} redraws it)."
     cfg.data.project["Spec revision"] = f"seed {seed}"
     d = _Draw(rng, cfg, n_domains=rng.choice((1, 1, 2, 3)))
+    d.dense = rng.random() < 0.5
     bridges = _bridges()
 
     root = _fabric(d, rng.choice(PROTOCOLS), d.domain(0))
     for _ in range(rng.choice((1, 1, 2, 3)) if root.proto not in ("APB4", "APB3") else 1):
         _master(d, root)
     frontier = [root]
-    for _ in range(rng.choice((0, 1, 1, 2, 3))):
-        parent = rng.choice(frontier)
+    for _ in range(rng.choice((0, 1, 1, 2, 3, 4))):
+        # Half the time behind the newest fabric, so chains of bridges grow deep.
+        parent = frontier[-1] if rng.random() < 0.5 else rng.choice(frontier)
         options = [p for p in PROTOCOLS if bridges.get((parent.proto, p))]
         if not options:
             continue
@@ -276,23 +279,28 @@ def _option(d: _Draw, port: str, proto: str, master: bool) -> None:
     if proto in AXI:
         values["fifo"] = rng.choice((0, 0, 0, 2))
         values["slice"] = rng.choice(("none", "none", *SLICES[1:]))
-        for sig in ("qos", "region", "cache"):
+        for sig in ("qos", "region", "cache", "lock"):
             if sig not in values and rng.random() < 0.2:
                 values[sig] = rng.choice(("tie-0", "tie-default"))
+    elif proto == "APB4" and master and rng.random() < 0.3:
+        values["pstrb"] = "tie-default"  # every write a full word
+    elif proto in ("APB4", "APB3") and not master and rng.random() < 0.3:
+        values["pslverr"] = "tie-0"  # a slave that never errors
     d.cfg.option(port, **values)
 
 
 def _map(d: _Draw, fab: _Fabric, base: int, size: int) -> None:
-    """Share FAB's block [BASE, BASE + SIZE) among its targets, densely or with gaps; a
-    bridge's window is its whole slot, and the fabric behind it maps inside the window."""
+    """Share FAB's block [BASE, BASE + SIZE) among its targets: a dense map gives them
+    adjacent slots that their regions fill; a sparse one spreads them with gaps and shrinks
+    them. The fabric behind a bridge maps inside the bridge's window."""
     rng = d.rng
     d.block[fab.name] = (base, size)
     n = len(fab.targets)
     slots = 1 << (n - 1).bit_length()
-    if rng.random() < 0.5:
-        slots *= rng.choice((2, 4))  # sparse
+    if not d.dense:
+        slots *= rng.choice((2, 4))
     slot = size // slots
-    picks = sorted(rng.sample(range(slots), n)) if slots > n else list(range(n))
+    picks = list(range(n)) if d.dense else sorted(rng.sample(range(slots), n))
     for t, k in zip(fab.targets, picks, strict=True):
         at = base + k * slot
         if t in d.slaves:
@@ -307,8 +315,7 @@ def _map(d: _Draw, fab: _Fabric, base: int, size: int) -> None:
 
 
 def _bridge_window(d: _Draw, bridge: str, at: int, slot: int) -> int:
-    win = max(16 * KB, slot >> d.rng.choice((0, 0, 2, 4)))
-    win = min(win, slot)
+    win = slot if d.dense else min(slot, max(16 * KB, slot >> d.rng.choice((0, 2, 4))))
     d.cfg.region(bridge, "win", at, win)
     _set_window(d, bridge, at)
     return win
@@ -316,7 +323,7 @@ def _bridge_window(d: _Draw, bridge: str, at: int, slot: int) -> int:
 
 def _set_window(d: _Draw, bridge: str, base: int) -> None:
     row = next(r for r in d.cfg.data.bridges if r[0] == bridge)
-    row[2] = _hex(base)
+    row[2] = hex_address(base)
 
 
 def _carries_prot(d: _Draw, fab: _Fabric) -> bool:
@@ -335,14 +342,12 @@ def _carries_prot(d: _Draw, fab: _Fabric) -> bool:
 
 def _regions(d: _Draw, slave: str, at: int, slot: int, may_secure: bool) -> None:
     rng = d.rng
-    size = max(4 * KB, slot >> rng.choice((0, 2, 4, 8)))
-    size = min(size, slot)
+    size = slot if d.dense else min(slot, max(4 * KB, slot >> rng.choice((2, 4, 8))))
     count = 2 if size >= 8 * KB and rng.random() < 0.3 else 1
     part = size // count
     for k in range(count):
         access = rng.choice(("RW", "RW", "RW", "RO", "WO"))
         secure = may_secure and rng.random() < 0.1
-        d.secure |= secure
         d.cfg.region(slave, f"r{k}", at + k * part, part, access=access, secure=secure)
 
 

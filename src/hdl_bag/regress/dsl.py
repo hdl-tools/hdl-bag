@@ -146,7 +146,7 @@ class Cfg:
 
     def bridge(self, name: str, window: int, pass_through: bool = True,
                template: str = "bag_ahb2apb", fifo_depth: int = 0) -> "Cfg":  # fmt: skip
-        self.data.bridges.append([name, template, _hex(window), "Y" if pass_through else "N",
+        self.data.bridges.append([name, template, hex_address(window), "Y" if pass_through else "N",
                                   fifo_depth, None])  # fmt: skip
         return self._expose(name, None, False)
 
@@ -162,7 +162,7 @@ class Cfg:
 
     def region(self, target: str, region: str, base: int, size: int, access: str = "RW",
                secure: bool = False) -> "Cfg":  # fmt: skip
-        self.data.memory_map.append([target, region, _hex(base), _hex(size), access,
+        self.data.memory_map.append([target, region, hex_address(base), hex_address(size), access,
                                      "Y" if secure else "N", None])  # fmt: skip
         return self
 
@@ -170,8 +170,8 @@ class Cfg:
                alias: tuple[int, int, int, str] | None = None) -> "Cfg":  # fmt: skip
         base, size, to, enable = alias or (None, None, None, None)
         self.data.address_decode.append([
-            master, miss, default, _hex(base) if base is not None else None,
-            _hex(size) if size is not None else None, _hex(to) if to is not None else None,
+            master, miss, default, hex_address(base) if base is not None else None,
+            hex_address(size) if size is not None else None, hex_address(to) if to is not None else None,
             enable, None,
         ])  # fmt: skip
         return self
@@ -204,7 +204,7 @@ class Cfg:
         return self
 
 
-def _hex(v: int) -> str:
+def hex_address(v: int) -> str:
     h = f"{v:08X}"
     return "0x" + "_".join(h[i : i + 4] for i in range(0, len(h), 4))
 
