@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The hdl-bag Authors
+name: nightly
+
+# Phase 5 PR 6. Every night at 18:00 UTC (D57):
+# - the full golden corpus, every EDA test with the formal corpus's deep tasks (D76), on 20
+#   jobs of 5 hours, two tests at a time each, and the alone tasks one per runner (D93);
+# - 50 random seeds through bag regress (D96: the decode job, then formal within a budget),
+#   with the date as --seed-base, on 10 jobs.
+# It only reports (D56): each regress job uploads its seeds' results, workbooks and IR, and
+# the summary job writes one table of every seed to the run summary and an artifact. Its
+# history lives in the artifacts (D55), so it needs no write permission. Its Verilator cache
+# restores the PR caches and never saves, to spare the 10 GB cache limit.
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: Random seeds this night
+        type: string
+        default: "50"
+      seed_base:
+        description: --seed-base (blank for the date, YYYYMMDD)
+        type: string
+        default: ""
+      formal_budget:
+        description: Seconds of formal per seed (D96)
+        type: string
+        default: "600"
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: eda and not alone
+      shards: 20
+      workers: "2"
+      timeout-minutes: 300
+      deep-timeout: 7200
+      save-cache: false
+    permissions:
+      contents: read
+      packages: read
+
+  corpus-alone:
+    # D93: the formal corpus's alone tasks, one per runner with their 4 h SBY limit.
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      marks: eda and alone
+      shards: 16
+      workers: "1"
+      timeout-minutes: 340
+      save-cache: false
+    permissions:
+      contents: read
+      packages: read
+
+  regress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
+      SEEDS: ${{ inputs.seeds || '50' }}
+      SEED_BASE: ${{ inputs.seed_base }}
+      FORMAL_BUDGET: ${{ inputs.formal_budget || '600' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-v2-regress-${{ github.sha }}
+          restore-keys: |
+            ccache-v2-
+      - run: uv sync --locked
+      - name: bag regress
+        run: |
+          base="${SEED_BASE:-$(date -u +%Y%m%d)}"
+          CCACHE_BASEDIR="$PWD" uv run bag regress --seeds "$SEEDS" --seed-base "$base" \
+            --shard "${{ matrix.shard }}/10" --formal-budget "$FORMAL_BUDGET" -o out/regress
+      # Per seed: its status, findings and repro (result.json), and the workbook and IR to
+      # rerun it from. The generated output is left out: bag regress --seed S writes it again.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regress-${{ matrix.shard }}
+          path: |
+            out/regress/*/result.json
+            out/regress/*/*.xlsx
+            out/regress/*/*.ir.yaml
+            out/regress/*/header.txt
+          if-no-files-found: ignore
+          retention-days: 90
+
+  summary:
+    # One table of every seed of the night, failures first (bag regress's own summary).
+    needs: regress
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.26"
+          python-version: "3.11"
+      - run: uv sync --locked
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: regress-*
+          path: out/regress
+          merge-multiple: true
+      - name: Summary
+        run: |
+          mkdir -p out/regress
+          uv run python -c "from pathlib import Path; from hdl_bag.regress.run import write_summary; print(write_summary(Path('out/regress')))"
+          cat out/regress/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regress-summary
+          path: |
+            out/regress/summary.md
+            out/regress/summary.json
+          retention-days: 90
+
+  nightly:
+    # The one result to read: the corpus passed, and no seed failed or drew an illegal config.
+    needs: [corpus, corpus-alone, regress]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - run: test "${{ needs.corpus.result }}" = success
+      - run: test "${{ needs.corpus-alone.result }}" = success
+      - run: test "${{ needs.regress.result }}" = success
