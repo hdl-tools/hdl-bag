@@ -224,8 +224,8 @@ If \setting{Spec schema version} is not \code{0.6}, \cmd{bag check} reports
 \ruleid{PROJ-SCHEMA-VERSION} and checks nothing else: a workbook of another schema has
 other columns. Make a new template with \cmd{bag template} and copy your rows into it.
 
-\setting{Generate RTL} is checked and kept in the IR, but \cmd{bag generate} writes the
-RTL whatever its value. The option \opt{-o} of \cmd{bag generate} replaces
+With \setting{Generate RTL} set to \code{N}, \cmd{bag generate} writes only the C header and
+the documents that need no RTL. The option \opt{-o} of \cmd{bag generate} replaces
 \setting{Output directory} for one run. Chapter~\ref{ch:outputs} lists every file that
 the \code{Generate} settings control.
 
@@ -733,8 +733,8 @@ The rules:
 \end{itemize}
 
 The grey \textsf{Check} column shows the same problems by name, such as
-\code{INDEX OUT OF RANGE}. The grey \textsf{Resolved index} column uses the row order for
-a blank \col{Port index}, but \cmd{bag check} refuses a blank index.
+\code{INDEX OUT OF RANGE}. The grey \textsf{Resolved index} column repeats the
+\col{Port index}; a blank index is an error (\ruleid{TOPO-INDEX-MISSING}).
 
 \section{Access\_Rules}
 
@@ -1133,7 +1133,9 @@ The template fills in the defaults: \code{flat}, \code{{port}_{proto}_{signal}},
   (\ruleid{NAME-IDENT}). The inputs are used by \col{Alias enable} on
   \sheet{Address_Decode} and by \code{extra input} on \sheet{User_Ports}.
 \item[Adapter placement] \code{with fabric} puts an adapter in the same wrapper as its
-  fabric. \code{with port} and \code{top} both put it in the top wrapper. \sheet{Hierarchy} can place any adapter elsewhere.
+  fabric. \code{with port} puts it beside the port it serves: in the top wrapper for a
+  master or slave, which are exposed there, and in the bridge's sub-wrapper for an adapter
+  on a bridge end. \code{top} puts it in the top wrapper. \sheet{Hierarchy} can place any adapter elsewhere.
 \end{description}
 
 \subsection{Exposed ports}

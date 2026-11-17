@@ -277,8 +277,10 @@ The Project sheet decides which parts BAG writes. A setting is \code{Y} or \code
 \toprule
 Setting & What it switches \\
 \midrule
-\setting{Generate RTL} & Nothing yet: BAG reads it, but writes \file{rtl/}, the file list
-  and the manifest whatever its value (chapter~\ref{ch:limits}). \\
+\setting{Generate RTL} & \file{rtl/}, the file list, \file{doc/tieoffs.md}, \file{tests/}
+  and \file{formal/}. With \code{N}, BAG writes only the C header and the other documents,
+  and the manifest records no top, so lint, simulation and formal say no RTL was
+  generated. \\
 \setting{Generate C header} & \file{sw/<project>_memmap.h}. \\
 \setting{Generate memory-map doc} & All of \file{doc/}: the memory map in Markdown and
   HTML, the port map, the tie-off report and the reset sequence. \\

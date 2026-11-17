@@ -34,7 +34,9 @@ run EDA tools read its \file{bag_outputs.json} to find the files.
 \begin{entry}{\cmd{bag generate} SPEC [\opt{-o} DIR] [\opt{--style} STYLE]}
 \item[Does] Checks SPEC, then writes the RTL, the wrapper and the collateral into the
   output directory (chapter~\ref{ch:outputs}). Prints the number of files and the top
-  module. An IR is checked as the workbook it converts to.
+  module. An IR is checked as the workbook it converts to. With Project >
+  \setting{Generate RTL} set to \code{N}, it writes only the C header and the documents,
+  and says that no RTL was generated.
 \item[Options] \opt{--output} (\opt{-o}): the output directory. Without it, BAG uses
   Project > \setting{Output directory}, relative to the folder of SPEC.
   \opt{--style}: \code{flat} or \code{sv-interface}, in place of Wrapper >
@@ -69,7 +71,8 @@ run EDA tools read its \file{bag_outputs.json} to find the files.
 \item[Does] Runs the steps in turn: check, generate, lint, compile, the generated tests,
   and the formal jobs with \opt{--formal}. Stops at the first step that fails. Formal is
   left out unless you ask for it, because the proofs of a large design take long; run
-  \cmd{bag formal} on the output directory later instead.
+  \cmd{bag formal} on the output directory later instead. With Project >
+  \setting{Generate RTL} set to \code{N}, it stops after generating, with status 0.
 \item[Options] \opt{--output} (\opt{-o}) and \opt{--style}: as for \cmd{bag generate}.
   \opt{--formal}: also run the formal jobs. \opt{--formal-timeout}: the seconds allowed
   per formal job; it needs \opt{--formal}.
