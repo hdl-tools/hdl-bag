@@ -98,19 +98,18 @@ def to_spec_data(spec: ir.Spec) -> SpecData:
 
     # Placement rows only where the IR differs from the default home or instance name.
     top = spec.hierarchy.top
-    fabric_home = {
-        pl.instance: pl.wrapper for pl in spec.hierarchy.placement if pl.kind == "fabric"
-    }
-    adapter_fabric = {a.name: a.fabric for a in spec.adapters}
+    home = {pl.instance: pl.wrapper for pl in spec.hierarchy.placement if pl.kind != "adapter"}
+    adapters = {a.name: a for a in spec.adapters}
+    bridges = {b.name for b in spec.bridges}
     for pl in spec.hierarchy.placement:
+        default = top
         if pl.kind == "adapter":
-            default = (
-                fabric_home[adapter_fabric[pl.instance]]
-                if w.adapter_placement == "with fabric"
-                else top
-            )
-        else:
-            default = top
+            adapter = adapters[pl.instance]
+            # The default home resolve gives (D102); only a placement away from it is a row.
+            if w.adapter_placement == "with fabric":
+                default = home[adapter.fabric]
+            elif w.adapter_placement == "with port" and adapter.port in bridges:
+                default = home[adapter.port]
         rtl = None if pl.rtl_name == f"u_{pl.instance}" else pl.rtl_name
         if pl.wrapper != default or rtl is not None:
             data.placement.append([pl.instance, pl.wrapper, rtl, None])

@@ -1,0 +1,25 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ ls out
+bag_outputs.json
+doc/
+formal/
+lite_ss.f
+rtl/
+sw/
+tests/
+$ ls out/rtl
+inhouse/
+lite_ss_top.sv
+pkg/
+vendor/
+$ ls out/rtl/pkg
+lite_ss_pkg.sv
+$ ls out/rtl/vendor
+derived/
+pulp/
+$ ls out/rtl/vendor/pulp/axi
+LICENSE
+include/
+src/

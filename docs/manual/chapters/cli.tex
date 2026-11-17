@@ -1,0 +1,92 @@
+\chapter{The command line}
+\label{ch:cli}
+
+BAG is one program, \cmd{bag}, with a command for each step. \cmd{hdl-bag} is the same
+program under another name. \cmd{bag --version} prints the version and
+\cmd{bag <command> --help} the options of a command.
+
+A \term{spec} is a workbook (\file{.xlsx}) or an IR (\file{.ir.yaml} or \file{.yml}).
+An \term{output directory} is a folder that \cmd{bag generate} wrote; the commands that
+run EDA tools read its \file{bag_outputs.json} to find the files.
+
+\section{Commands}
+
+\begin{entry}{\cmd{bag template} [\opt{--sample}] \opt{-o} WORKBOOK}
+\item[Does] Writes a blank spec workbook to WORKBOOK. With \opt{--sample}, writes the
+  sample design \code{demo_ss} instead, and the file header it names
+  (\file{header.txt}) in the same folder. An existing \file{header.txt} is kept.
+\item[Options] \opt{--output} (\opt{-o}): the workbook to write; required.
+  \opt{--sample}: write the sample.
+\end{entry}
+
+\begin{entry}{\cmd{bag check} WORKBOOK}
+\item[Does] Reads WORKBOOK and runs every check (chapter~\ref{ch:checks}). Prints each
+  finding and a summary line. File header paths are relative to the workbook's folder.
+\item[Exit status] 1 on any error; warnings alone give 0.
+\end{entry}
+
+\begin{entry}{\cmd{bag ir} WORKBOOK \opt{-o} IR}
+\item[Does] Checks WORKBOOK as \cmd{bag check} does, then writes its IR
+  (chapter~\ref{ch:ir}).
+\item[Options] \opt{--output} (\opt{-o}): the IR file to write; required.
+\end{entry}
+
+\begin{entry}{\cmd{bag generate} SPEC [\opt{-o} DIR] [\opt{--style} STYLE]}
+\item[Does] Checks SPEC, then writes the RTL, the wrapper and the collateral into the
+  output directory (chapter~\ref{ch:outputs}). Prints the number of files and the top
+  module. An IR is checked as the workbook it converts to. With Project >
+  \setting{Generate RTL} set to \code{N}, it writes only the C header and the documents,
+  and says that no RTL was generated.
+\item[Options] \opt{--output} (\opt{-o}): the output directory. Without it, BAG uses
+  Project > \setting{Output directory}, relative to the folder of SPEC.
+  \opt{--style}: \code{flat} or \code{sv-interface}, in place of Wrapper >
+  \setting{Port style}.
+\end{entry}
+
+\begin{entry}{\cmd{bag lint} DIR}
+\item[Does] Lints the generated RTL in DIR with the tools of Project >
+  \setting{Lint tools} (section~\ref{sec:lint}).
+\item[Exit status] 1 on any finding that is not waived.
+\end{entry}
+
+\begin{entry}{\cmd{bag sim} DIR [\opt{--filter} REGEX] [\opt{--ready-shim}]}
+\item[Does] Runs the generated cocotb tests in DIR with Verilator
+  (section~\ref{sec:sim}). Needs the \code{sim} extra.
+\item[Options] \opt{--filter}: run only the tests whose names this regular expression
+  finds. \opt{--ready-shim}: run the traffic through a top that drives each AXI READY
+  from its VALID; it cannot be used with \opt{--filter}.
+\item[Exit status] 1 on any failed test, or when DIR has no generated tests.
+\end{entry}
+
+\begin{entry}{\cmd{bag formal} DIR [\opt{--timeout} SECONDS]}
+\item[Does] Runs every generated SymbiYosys job in DIR, one after the other
+  (section~\ref{sec:formal}).
+\item[Options] \opt{--timeout}: the seconds allowed per job, at least 1. A job without a
+  verdict in that time is a finding.
+\item[Exit status] 1 on any finding: a failed assertion, an unreached cover, a tool
+  error or a timeout.
+\end{entry}
+
+\begin{entry}{\cmd{bag flow} SPEC [\opt{-o} DIR] [\opt{--style} STYLE] [\opt{--formal} [\opt{--formal-timeout} SECONDS]]}
+\item[Does] Runs the steps in turn: check, generate, lint, compile, the generated tests,
+  and the formal jobs with \opt{--formal}. Stops at the first step that fails. Formal is
+  left out unless you ask for it, because the proofs of a large design take long; run
+  \cmd{bag formal} on the output directory later instead. With Project >
+  \setting{Generate RTL} set to \code{N}, it stops after generating, with status 0.
+\item[Options] \opt{--output} (\opt{-o}) and \opt{--style}: as for \cmd{bag generate}.
+  \opt{--formal}: also run the formal jobs. \opt{--formal-timeout}: the seconds allowed
+  per formal job; it needs \opt{--formal}.
+\item[Without tests] For a design with no generated tests (Project >
+  \setting{Generate cocotb unit tests} is N, or a user-supplied fabric), the compile
+  step also builds the model and the simulation is left out, with a note.
+\end{entry}
+
+\section{Exit status}
+
+\begin{description}
+\item[0] Everything passed. Warnings and notes do not change this.
+\item[1] A check gave an error, a step reported a finding, or a step could not run (for
+  example a missing tool, or an output directory without generated tests).
+\item[2] The command line itself is wrong: an unknown option, a missing argument, or a
+  file that does not exist. The message starts with \code{Usage:}.
+\end{description}

@@ -124,3 +124,17 @@ def test_port_matches_reference_except_schema_delta(sample: Workbook) -> None:
                 if old != cur and not _expected_delta(name, coord, old, cur):
                     unexplained.append(f"{name}.{key}.{coord}: {old!r} -> {cur!r}")
     assert unexplained == []
+
+
+def test_the_adapter_instances_formulas_read_the_naming_setting(tmp_path: Path) -> None:
+    """The Adapter instances formulas on Masters and Slaves read the Wrapper cell of Adapter
+    instance naming by its row, so that row must hold that setting (cleanup review)."""
+    from hdl_bag.template.builder import WRAPPER_NAMING_ROW
+
+    path = tmp_path / "blank.xlsx"
+    build_workbook(sample=False).save(path)
+    wb = openpyxl.load_workbook(path)
+    assert wb["Wrapper"].cell(WRAPPER_NAMING_ROW, 1).value == "Adapter instance naming"
+    formulas = [c.value for row in wb["Masters"].iter_rows() for c in row
+                if isinstance(c.value, str) and "SUBSTITUTE" in c.value]  # fmt: skip
+    assert formulas and all(f"Wrapper!$B${WRAPPER_NAMING_ROW}" in f for f in formulas)

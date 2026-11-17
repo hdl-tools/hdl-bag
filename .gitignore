@@ -30,3 +30,15 @@ Thumbs.db
 
 # Bender checkouts (scripts/vendor_pulp.py)
 .bender/
+
+# LaTeX build products of the manual
+docs/manual/*.aux
+docs/manual/*.log
+docs/manual/*.pdf
+docs/manual/*.toc
+docs/manual/*.out
+docs/manual/*.fls
+docs/manual/*.fdb_latexmk
+docs/manual/*.lof
+docs/manual/*.lot
+docs/manual/*.synctex.gz

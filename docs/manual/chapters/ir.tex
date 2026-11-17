@@ -1,0 +1,68 @@
+\chapter{The IR}
+\label{ch:ir}
+
+The \term{IR} (intermediate representation) is a YAML file that holds the whole design
+after BAG has resolved it. Every generated file comes from it, so the IR is the contract
+between the workbook and the output. \cmd{bag ir} writes it:
+
+\begin{center}
+\cmd{bag ir spec.xlsx -o spec.ir.yaml}
+\end{center}
+
+\section{What the IR holds}
+
+The IR holds what you typed and what BAG derived from it:
+
+\begin{itemize}
+\item the project, the clocks and resets, and the wrapper settings, as typed;
+\item every fabric with its ports in port order, its ID widths, its address rules (the
+  decode table, with \sheet{Access_Rules} and aliases applied) and its decode settings per
+  master;
+\item every master, slave and bridge, with the fabric it is on;
+\item every adapter BAG inserts (protocol, width, clock domain, ID width, FIFO, register
+  slice), with its instance name and the sub-wrapper it is placed in;
+\item the memory map, the port options, the user ports and the hierarchy;
+\item a \code{provenance} section: the version of BAG, the workbook it came from and its
+  SHA-256 hash.
+\end{itemize}
+
+This is the IR of the small design of chapter~\ref{ch:first}: one APB4 fabric
+\code{apb} with the master \code{m0} and the slave \code{s0}.
+
+\lstinputlisting[style=yaml]{examples/files/apb4_min.ir.yaml}
+
+Keys and lists come in a fixed order, and numbers in a fixed form (addresses as
+\code{'0x0000_0800'}), so the same design always gives the same file.
+
+\section{The IR as input}
+
+\cmd{bag generate} and \cmd{bag flow} take an IR as well as a workbook. (\cmd{bag check}
+and \cmd{bag ir} read workbooks only.) An IR may have been edited by hand, so BAG checks
+it as strictly as a workbook: it converts the IR back to a workbook and runs every check
+on that. The summary line says so. A finding names a sheet and row of that converted
+workbook, which is not written to disk; use the names and values in the message to find
+the place in the IR.
+
+\lstinputlisting[style=console]{examples/console/ir-input.txt}
+
+In \file{apb4_min_edited.ir.yaml} the size of the region \code{regs} of \code{s0} is
+\code{0x0000_0C00}, which is not a power of 2. The second error follows from the first:
+the alias of \code{m0} points into that region.
+
+\section{The schema version}
+
+The IR starts with \code{schema:}, the version of the workbook and IR schema. This
+version of BAG reads schema 0.6, and the Project sheet of the workbook names the same
+version. BAG refuses an IR of another version with a message such as
+\code{x.ir.yaml is schema 0.5; this bag reads schema 0.6. Update its workbook
+(docs/schema-changelog.md), then write the IR again with bag ir}, and an IR with a key it
+does not know with \code{x.ir.yaml is not a valid IR: project.colour: Extra inputs are
+not permitted}. The file \file{docs/schema-changelog.md} of the repository lists what
+changed in each version.
+
+\section{Workbook or IR?}
+
+Keep the workbook as your source. It is what a person reads and edits, and the checks
+report against its rows. Keep the IR under version control next to it: a review of an
+IR diff shows exactly what a workbook change did to the design, including the derived
+parts such as inserted adapters and decode tables.

@@ -201,7 +201,9 @@ def test_cli_generate_and_missing_rtl(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(cli, "generate", missing)
     bad = runner.invoke(main, ["generate", str(GOLDEN_IR), "-o", str(tmp_path / "bad")])
     assert bad.exit_code == 1
-    assert "no RTL yet for template(s): bag_apb_mux" in bad.output
+    # Every built-in template has RTL since Phase 3, so the message names no phase.
+    wrote = f"wrote collateral to {tmp_path / 'bad'}"
+    assert bad.output.splitlines()[-2:] == [wrote, "error: no RTL yet for template(s): bag_apb_mux"]
 
 
 def test_generated_lines_fit_100_columns(tmp_path: Path) -> None:
@@ -214,3 +216,65 @@ def test_generated_lines_fit_100_columns(tmp_path: Path) -> None:
     long = [(p.name, n) for p in files
             for n, line in enumerate(p.read_text().splitlines(), 1) if len(line) > 100]  # fmt: skip
     assert not long
+
+
+def _no_rtl(tmp_path: Path) -> Path:
+    """CONFIG with Project > Generate RTL = N, as an IR beside its header."""
+    text = CONFIG.read_text(encoding="utf-8")
+    assert text.count("    rtl: true\n") == 1
+    ir_path = tmp_path / "no_rtl.ir.yaml"
+    ir_path.write_text(text.replace("    rtl: true\n", "    rtl: false\n"), encoding="utf-8")
+    header = CONFIG.parent / "header.txt"
+    if header.is_file():
+        (tmp_path / "header.txt").write_text(header.read_text(encoding="utf-8"), encoding="utf-8")
+    return ir_path
+
+
+def test_generate_rtl_n_writes_the_collateral_and_no_rtl(tmp_path: Path) -> None:
+    """D100: Project > Generate RTL = N writes the C header and the documents that need no
+    RTL, and no RTL, file list, tests or formal; the manifest records no top."""
+    ir_path = _no_rtl(tmp_path)
+    out = generate(load(ir_path), tmp_path / "out", tmp_path)
+    name = load(ir_path).project.name
+    docs = [f"doc/{d}" for d in ("memmap.html", "memmap.md", "port_map.md", "reset.md")]
+    assert sorted(out.files) == [*docs, f"sw/{name}_memmap.h"]
+    assert (out.top, out.tests, out.formal) == ("", None, ())
+    manifest = json.loads((tmp_path / "out" / MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["top"] is None
+    with pytest.raises(ValueError, match="no RTL was generated"):
+        load_outputs(tmp_path / "out")
+
+
+def test_bag_generate_and_flow_say_there_is_no_rtl(tmp_path: Path) -> None:
+    """D100: bag generate says why it wrote no RTL; bag flow stops after it, with status 0,
+    since there is nothing to lint, compile, simulate or prove."""
+    ir_path = _no_rtl(tmp_path)
+    note = "no RTL generated (Project > Generate RTL is N): nothing to lint, simulate or prove"
+    got = CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(tmp_path / "out")])
+    assert got.exit_code == 0, got.output
+    assert got.output.splitlines()[-2:] == [f"wrote 5 file(s) to {tmp_path / 'out'}", note]
+    got = CliRunner().invoke(main, ["flow", str(ir_path), "-o", str(tmp_path / "flow")])
+    assert got.exit_code == 0, got.output
+    assert got.output.splitlines()[-1] == note
+
+
+def test_generate_rtl_n_after_y_removes_the_rtl_of_the_earlier_run(tmp_path: Path) -> None:
+    """D100 review: generating with Generate RTL = N into a directory that holds an earlier
+    run's RTL leaves only this run's files (the manifest removes the rest)."""
+    ir_path = _no_rtl(tmp_path)
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert (out / "rtl").is_dir()
+    done = generate(load(ir_path), out, tmp_path)
+    left = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    assert left == sorted([*done.files, MANIFEST])
+
+
+def test_generate_over_a_corrupt_manifest_writes_a_fresh_one(tmp_path: Path) -> None:
+    """A broken bag_outputs.json from an earlier run is no reason to stop: running bag
+    generate again is the remedy the error line names (cleanup review)."""
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / MANIFEST).write_text("{not json", encoding="utf-8")
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert load_outputs(out).top

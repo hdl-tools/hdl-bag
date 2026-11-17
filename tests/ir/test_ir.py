@@ -9,7 +9,7 @@ from pathlib import Path
 
 import openpyxl
 import pytest
-from dsl import SAMPLE_WRAP, unexpected
+from dsl import AXIL_NA, SAMPLE_WRAP, Cfg, resolve_cfg, unexpected
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -159,3 +159,80 @@ def test_a_master_with_two_aliases_is_not_a_valid_ir() -> None:
         "ahb_fixed.ir.yaml is not a valid IR: fabrics.0.decode.0.aliases: Value error, master "
         "m0 has 2 aliases; a master has at most one (the workbook's Address_Decode row)"
     )
+
+
+def _bridge_in_a_sub_wrapper(placement: str) -> Cfg:
+    """An AXI4 crossbar x in sub-wrapper ss1 with an AXI4-Lite master (adapter m0_pc_2_x), and
+    a bag_axi2axil bridge in sub-wrapper ss0 with a FIFO on its downstream end (adapter
+    br_fifo_2_l) into an AXI4-Lite fabric l in the top. Each placement gives each adapter a
+    different home."""
+    c = Cfg("wp", phase=3)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("x", "AXI4", 32, 32, "D0", "round-robin", latency="CUT_ALL_AX")
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "x", 0).decode("m0", "DECERR")
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0)
+    c.bridge("br", 0x4000_0000, template="bag_axi2axil")
+    c.link("x", "br", 0).link("br", "l", 0).decode("br", "DECERR")
+    c.region("br", "win", 0x4000_0000, 0x1_0000).region("s0", "regs", 0x4000_0000, 0x1000)
+    c.option("m0", **AXIL_NA).option("s0", **AXIL_NA).option("br", fifo=2, **AXIL_NA)
+    c.sub("ss0", "wp_top").place("br", "ss0").sub("ss1", "wp_top").place("x", "ss1")
+    c.data.wrapper["Adapter placement"] = placement
+    return c
+
+
+@pytest.mark.parametrize(("placement", "fifo_home", "pc_home"), [
+    ("with port", "ss0", "wp_top"), ("with fabric", "wp_top", "ss1"), ("top", "wp_top", "wp_top"),
+])  # fmt: skip
+def test_adapter_placement_with_port_puts_a_bridge_end_adapter_beside_its_bridge(
+    tmp_path: Path, placement: str, fifo_home: str, pc_home: str
+) -> None:
+    """D102: 'with port' places an adapter beside the port it serves. A master or slave is
+    exposed at the top, so its adapter stays in the top wrapper; a bridge end's adapter goes
+    in the bridge's sub-wrapper. 'with fabric' follows the fabric (here in the top), 'top'
+    is the top."""
+    spec, findings = resolve_cfg(_bridge_in_a_sub_wrapper(placement), tmp_path)
+    assert findings == [] and spec is not None
+    assert {a.name: a.placed_in for a in spec.adapters} == {
+        "br_fifo_2_l": fifo_home, "m0_pc_2_x": pc_home}  # fmt: skip
+    # Written back, an adapter in its default home needs no Placement row.
+    assert [row[0] for row in to_spec_data(spec).placement] == ["br", "x"]
+
+
+def test_an_adapter_placed_away_from_with_port_is_written_back(tmp_path: Path) -> None:
+    """The other direction of the round trip: an adapter the Hierarchy sheet moves out of
+    its 'with port' home keeps its Placement row."""
+    c = _bridge_in_a_sub_wrapper("with port").place("br_fifo_2_l", "wp_top")
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert [row[:2] for row in to_spec_data(spec).placement] == [
+        ["br", "ss0"], ["br_fifo_2_l", "wp_top"], ["x", "ss1"]]  # fmt: skip
+
+
+def test_a_bridge_end_adapter_in_its_bridges_sub_wrapper_is_wired_through_the_hierarchy(
+    tmp_path: Path,
+) -> None:
+    """D102, generated: the hierarchy oracle finds every link between br_fifo_2_l (in ss0),
+    the bridge and fabric l (in the top) connected through the sub-wrapper ports."""
+    from hier_oracle import check as oracle
+
+    from hdl_bag.gen import generate
+
+    spec, findings = resolve_cfg(_bridge_in_a_sub_wrapper("with port"), tmp_path)
+    assert findings == [] and spec is not None
+    generate(spec, tmp_path / "out", tmp_path)
+    assert (tmp_path / "out" / "rtl" / "ss0.sv").is_file()
+    assert oracle(spec, tmp_path / "out" / "rtl") == []
+
+
+@pytest.mark.eda
+def test_a_bridge_end_adapter_in_its_bridges_sub_wrapper_lints_clean(tmp_path: Path) -> None:
+    """D102: the same design through slang, Verilator and Verible."""
+    from hdl_bag.flows import lint
+    from hdl_bag.gen import generate, include_dirs, sources
+
+    spec, findings = resolve_cfg(_bridge_in_a_sub_wrapper("with port"), tmp_path)
+    assert findings == [] and spec is not None
+    out = generate(spec, tmp_path / "out", tmp_path)
+    report = lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out))
+    assert [f.format() for f in report.unwaived] == []

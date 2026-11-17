@@ -1,0 +1,7 @@
+$ bag generate files/lite_ss.ir.yaml -o out
+lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to out (top lite_ss_top)
+$ bag formal out
+formal (sby): 0 unwaived finding(s), 0 waived
+note: lite_ss_protocol_bmc: bounded check to depth 16 (bmc), not a proof
+note: lite_ss_route_bus_bmc: bounded check to depth 8 (bmc), not a proof

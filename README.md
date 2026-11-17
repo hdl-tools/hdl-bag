@@ -14,8 +14,9 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 92 validation checks | AXI4 and AHB-Lite protocol properties, decode properties, and nightly random regression (Phase 5) |
-| Canonical YAML IR, byte-identical across runs | CDC constraints, user guide and v1.0 release (Phase 6) |
+| Spec workbook template, reader and 92 validation checks | The nightly regression workflow, its shrinker and reports (Phase 5) |
+| Canonical YAML IR, byte-identical across runs | CDC constraints (SDC) and v1.0 release (Phase 6) |
+| `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
 | Per-port adapters: protocol, width, CDC, ID width, FIFO, register slice | |
@@ -25,7 +26,11 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
-| `bag formal`: SymbiYosys jobs per design: quiet-in-reset, and AXI4-Lite and APB port protocol (ZipCPU checkers) | |
+| `bag formal`: SymbiYosys jobs per design: decode (a proof), quiet-in-reset (a proof), port protocol on every AXI4, AXI4-Lite, AHB-Lite and APB port, and routing per fabric and bridge (bounded) | |
+| User manual (LaTeX, [docs/manual](docs/manual)) | |
+
+The user manual is LaTeX in [docs/manual](docs/manual) (`latexmk -pdf hdl-bag.tex` there);
+the `manual` workflow builds the PDF as the artifact `hdl-bag-manual`.
 
 Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
 
