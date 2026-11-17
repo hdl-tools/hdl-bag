@@ -3,8 +3,9 @@ name: eda-shards
 # Lint flow, simulation and formal tests against the pinned EDA tools: parallel jobs (four
 # unless the caller asks for more) balanced by tests/eda_durations.json (pytest-split; refresh it with scripts/eda_durations.py), each spread
 # over the runner's cores with pytest-xdist (every test has its own out/ directory). Called by
-# pr.yml (the smoke subset on pull requests, the full list on main and nightly) and by
-# full-eda.yml (the full list on a pull request labelled full-eda).
+# pr.yml (the smoke subset on pull requests, the full list on main), full-eda.yml (the full
+# list on a pull request labelled full-eda) and nightly.yml (everything, with the deep and
+# alone tests).
 
 on:
   workflow_call:

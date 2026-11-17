@@ -311,12 +311,30 @@ def summary(results: list[SeedResult]) -> tuple[str, str]:
     return json.dumps(data, indent=1) + "\n", "\n".join(lines) + "\n"
 
 
-def write_summary(run_dir: Path) -> str:
+def missing_seeds(run_dir: Path, expected: list[int]) -> list[int]:
+    """The EXPECTED seeds that left no result.json in RUN_DIR: a job cut off by its time limit
+    loses the seed it was running and every seed after it (PR 6 review)."""
+    return [s for s in expected if not (run_dir / str(s) / "result.json").is_file()]
+
+
+def write_summary(run_dir: Path, expected: list[int] | None = None) -> str:
     """Write RUN_DIR's summary from every seed's result.json in it (so a rerun of one seed
-    updates its row, and a run cut short still has a summary); returns the counts line."""
+    updates its row, and a run cut short still has a summary); returns the counts line. Given
+    the EXPECTED seeds, the summary also names those that left no result."""
     results = [SeedResult.from_json(p.read_text(encoding="utf-8"))
                for p in sorted(run_dir.glob("*/result.json"))]  # fmt: skip
     data, text = summary(results)
+    if expected is not None:
+        missing = missing_seeds(run_dir, expected)
+        record = json.loads(data)
+        record["missing"] = missing
+        data = json.dumps(record, indent=1) + "\n"
+        if missing:
+            lines = text.splitlines()
+            listed = ", ".join(str(s) for s in missing)
+            lines[3:3] = [f"Missing: {len(missing)} of {len(expected)} expected seed(s) left "
+                          f"no result: {listed}", ""]  # fmt: skip
+            text = "\n".join(lines) + "\n"
     (run_dir / "summary.json").write_text(data, encoding="utf-8", newline="\n")
     (run_dir / "summary.md").write_text(text, encoding="utf-8", newline="\n")
     return text.splitlines()[2]

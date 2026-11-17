@@ -425,12 +425,17 @@ def test_a_split_task_still_short_runs_alone_for_four_hours() -> None:
         names = {m.name for m in marks((c, j, t))}
         assert ("alone" in names) == ((c, t) in ALONE), (c, t)
         assert "alone" not in names or "deep" in names, (c, t)
-    flow = (TESTS.parent / ".github" / "workflows" / "pr.yml").read_text(encoding="utf-8")
-    alone = flow.split("\n  eda-alone:\n", 1)[1].split("\n\n", 1)[0]
-    assert "marks: eda and alone\n" in alone and f"shards: {len(ALONE)}\n" in alone
-    assert "workers: '1'\n" in alone and "timeout-minutes: 340\n" in alone
-    # The two-at-a-time shards leave them out, unless a dispatch selects tests by name.
-    assert "&& 'eda' || 'eda and not alone') || 'eda and not deep') }}" in flow
+    # The nightly (nightly.yml, PR 6) runs them one per runner, and its two-at-a-time shards
+    # leave them out.
+    from ruamel.yaml import YAML
+
+    flow = YAML(typ="safe").load(
+        (TESTS.parent / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    alone, shared = flow["jobs"]["corpus-alone"]["with"], flow["jobs"]["corpus"]["with"]
+    assert (alone["marks"], alone["shards"]) == ("eda and alone", len(ALONE))
+    assert (alone["workers"], alone["timeout-minutes"]) == ("1", 340)
+    assert shared["marks"] == "eda and not alone"
 
 
 def test_a_cover_out_of_ci_reach_is_reached_in_its_route_unit(tmp_path: Path) -> None:
