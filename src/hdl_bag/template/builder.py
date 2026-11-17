@@ -768,7 +768,7 @@ class _Builder:
             ("Parameter package", self.wrapper_value("Parameter package"), "Widths, base addresses and region sizes as localparams."),
             ("File header", self.wrapper_value("File header"), "Text file prepended to every generated file (licence/copyright)."),
             ("Extra top-level inputs", self.wrapper_value("Extra top-level inputs"), "Inputs referenced by Address_Decode alias enables."),
-            ("Adapter placement", self.wrapper_value("Adapter placement"), "Default home for inserted adapters: with fabric | with port (top) | top."),
+            ("Adapter placement", self.wrapper_value("Adapter placement"), "Default home for inserted adapters: with fabric (the fabric's sub-wrapper) | with port (beside the port: the top for masters and slaves, the bridge's sub-wrapper for a bridge end) | top."),
             ("Adapter instance naming", self.wrapper_value("Adapter instance naming"),
              "type = pc (protocol), dw (width), cdc, iw (ID width), fifo, cut. e.g. main_xbar_dw_2_ddr0."),
             ("Sub-wrapper port naming", self.wrapper_value("Sub-wrapper port naming"), "Ports created where a link crosses a sub-wrapper boundary."),

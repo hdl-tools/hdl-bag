@@ -346,9 +346,15 @@ def _adapters_and_placement(
             else "slave"
         )
         index = chain.index(a.name) if side == "master" else len(chain) - 1 - chain.index(a.name)
-        wrapper, rtl = overrides.get(
-            a.name, (home[a.fabric] if default == "with fabric" else top, None)
-        )
+        # D102: 'with port' is beside the port: a bridge end's adapter goes with its bridge;
+        # a master or slave is exposed at the top, so its adapter stays there.
+        if default == "with fabric":
+            near = home[a.fabric]
+        elif default == "with port" and ctx.kinds.get(a.port) == "bridge":
+            near = home[a.port]
+        else:
+            near = top
+        wrapper, rtl = overrides.get(a.name, (near, None))
         manifest = ctx.registry.adapter(a.type)
         assert manifest is not None
         adapters.append(ir.Adapter(
