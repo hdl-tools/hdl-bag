@@ -19,7 +19,8 @@ in a virtual environment.
   \cmd{pip install .}
 \item For \cmd{bag sim}, add the \code{sim} extra, which installs cocotb and
   cocotbext-axi at the versions the generated tests are written for:
-  \cmd{pip install ".[sim]"} from a checkout.
+  \cmd{pip install "hdl-bag[sim] @ git+https://github.com/hdl-tools/hdl-bag.git"},
+  or \cmd{pip install ".[sim]"} from a checkout.
 \end{enumerate}
 
 \section{Check the installation}
@@ -56,7 +57,7 @@ OSS CAD Suite (SymbiYosys, Yosys) & build of 2026-10-01 (SymbiYosys v0.69) \\
 \end{tabular}
 \end{center}
 
-BAG also runs another version, but it was not tested with it:
+BAG also works with other versions of the tools, but they are not tested:
 
 \begin{itemize}
 \item \cmd{bag formal} adds a note to its report, for example
@@ -68,6 +69,6 @@ BAG also runs another version, but it was not tested with it:
 \end{itemize}
 
 The simplest way to get every tool at its pinned version is the container image
-\code{ghcr.io/hdl-tools/hdl-bag-tools}, built from \file{tools/Dockerfile} in the
-repository. It also holds Python and BAG's dependencies. Run BAG inside it with your
-work folder mounted.
+\code{ghcr.io/hdl-tools/hdl-bag-tools:main}, built from \file{tools/Dockerfile} in the
+repository. It holds the tools, Python and BAG's dependencies, but not BAG itself:
+mount your checkout and install BAG in it.

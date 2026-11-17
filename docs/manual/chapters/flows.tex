@@ -267,7 +267,8 @@ it is an error when the design has no shim.
 \subsection{The coverage report}
 
 \cmd{bag sim} writes a \term{functional coverage} report, \file{sim/coverage.md}, and the
-counts it is made from, \file{sim/coverage.json}. A \term{bin} is one thing the spec says
+counts it is made from, \file{sim/coverage.json} (in \file{sim_ready_shim/} with
+\opt{--ready-shim}). A \term{bin} is one thing the spec says
 the design does. The report has four kinds of bins:
 
 \begin{description}
@@ -412,8 +413,8 @@ Every formal finding is an error.
 \item[\ruleid{FORMAL-ERROR}] The tool stopped on an error: a parse or elaboration error,
   or assumptions that allow no input sequence at all. In that last case nothing was
   checked, and the message says so.
-\item[\ruleid{FORMAL-UNKNOWN}] The task ended without a verdict, or failed without naming
-  a property.
+\item[\ruleid{FORMAL-UNKNOWN}] The task ended with a status that is not a verdict BAG
+  knows (for example UNKNOWN), or failed without naming a property.
 \item[\ruleid{TOOL-FAILED}] SymbiYosys exited with an error and printed nothing that BAG
   could read, or a task of the job printed no verdict at all.
 \item[\ruleid{TOOL-MISSING}] \code{sby} is not on your \code{PATH}.

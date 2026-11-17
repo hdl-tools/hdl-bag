@@ -1125,9 +1125,10 @@ The template fills in the defaults: \code{flat}, \code{{port}_{proto}_{signal}},
   the wrapper, \code{<top>_flat}, which lint and compile use as the top. The option
   \opt{--style} of \cmd{bag generate} replaces this setting for one run.
 \item[File header] The path starts at the folder of the workbook, and the file must
-  exist (\ruleid{WRAP-FILE-HEADER}). BAG copies its text as it is to the top of the RTL,
-  documents, tests and formal files it generates, above its own header lines. Copies of
-  library RTL keep their own headers.
+  exist (\ruleid{WRAP-FILE-HEADER}). Write it as SystemVerilog line comments (\code{//}): BAG copies it as it is to the top of
+  the RTL and the C header, and no check reads its text. Documents get it inside an HTML
+  comment, tests and formal jobs with \texttt{\#} before each line
+  (section~\ref{sec:header}). Copies of library RTL keep their own headers.
 \item[Extra top-level inputs] Each name must be a SystemVerilog identifier
   (\ruleid{NAME-IDENT}). The inputs are used by \col{Alias enable} on
   \sheet{Address_Decode} and by \code{extra input} on \sheet{User_Ports}.

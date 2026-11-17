@@ -78,7 +78,7 @@ The rest of this chapter needs the EDA tools (section~\ref{sec:eda}). Proving th
 sample design takes many hours of processor time, so the example uses a smaller design:
 one APB4 fabric with one master and one slave. Its IR,
 \file{apb4_min.ir.yaml}, is in \file{files/} of the examples, and chapter~\ref{ch:ir}
-shows it. An IR is accepted wherever a workbook is.
+shows it. \cmd{bag generate} and \cmd{bag flow} accept an IR in place of a workbook.
 
 \cmd{bag flow} runs every step in turn: check, generate, lint, compile, the generated
 tests and, with \opt{--formal}, the formal jobs. It stops at the first step that fails.

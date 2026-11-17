@@ -20,9 +20,9 @@ Each problem the checks find is a \term{finding}. It is one line:
   A finding about something that is missing has no row, for example
   \code{Address_Decode: master port dma0 on main_xbar has no row}.
 \item[what is wrong] The value, and what to do about it where that is not obvious.
-\item[rule ID] A stable name for the check, such as \ruleid{TOPO-INDEX-RANGE}. Its
-  first word names the area: \ruleid{TOPO} the Topology sheet, \ruleid{MM} the memory
-  map, \ruleid{DEC} address decode, and so on. Use the rule ID to find the check in the
+\item[rule ID] A stable name for the check, such as \ruleid{TOPO-INDEX-OUT-OF-RANGE}.
+  Its first word names the area: \code{TOPO-} the Topology sheet, \code{MM-} the memory
+  map, \code{DEC-} address decode, and so on. Use the rule ID to find the check in the
   table below.
 \end{description}
 
@@ -38,7 +38,8 @@ sheet also leaves ports unconnected.
 Most checks look at one sheet, or compare sheets: that a name is defined, that a value
 is legal, that two regions do not overlap. A few checks need the resolved design, for
 example to know which adapters BAG inserts. They run only when the others find no error.
-The WRAP warnings of the sample (section~\ref{ch:first}) are of this kind: they follow
+The two \ruleid{AXI-WRAP-REFUSED} warnings of the sample (chapter~\ref{ch:first}) are of
+this kind: they follow
 the path from a master through its adapters.
 
 A few problems are found only by \cmd{bag generate}. It then stops with \code{error:}

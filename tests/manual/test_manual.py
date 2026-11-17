@@ -283,6 +283,24 @@ def test_every_sheet_column_and_setting_is_in_the_workbook_chapter() -> None:
     assert sorted(w for w in wanted if w not in text) == []
 
 
+def _flow_rules() -> set[str]:
+    """Rule IDs the flows, generated tests and formal give (findings that are not checks)."""
+    src = transcript.REPO / "src" / "hdl_bag"
+    found: set[str] = set()
+    for folder in ("flows", "tests_gen", "formal_gen"):
+        for path in (src / folder).rglob("*.py"):
+            found |= set(re.findall(r'"([A-Z]+(?:-[A-Z0-9]+)+)"', path.read_text(encoding="utf-8")))
+    return found
+
+
+def test_every_rule_id_named_is_real() -> None:
+    """A rule ID in the text is a check rule or a rule a flow reports (PR 109 review: an
+    example named TOPO-INDEX-RANGE, which does not exist)."""
+    chapters = "\n".join(p.read_text(encoding="utf-8") for p in sorted(CHAPTERS.glob("*.tex")))
+    named = set(re.findall(r"\\ruleid\{([^}]+)\}", _uncommented(chapters)))
+    assert sorted(named - set(RULES) - _flow_rules()) == []
+
+
 def test_only_the_portable_packages_are_loaded() -> None:
     """M9."""
     main = _uncommented((MANUAL / "hdl-bag.tex").read_text(encoding="utf-8"))

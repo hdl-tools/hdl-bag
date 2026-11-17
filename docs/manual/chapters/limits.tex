@@ -214,18 +214,19 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 
 \begin{itemize}
 \item \textbf{Simulation coverage is a report only.} \cmd{bag sim} writes
-  \file{sim/coverage.md}. It has no closure target. Its bins come from the same addresses
+  \file{sim/coverage.md} (\file{sim_ready_shim/coverage.md} with \opt{--ready-shim}). It has no closure target. Its bins come from the same addresses
   and burst shapes that the tests use. So a full passing run reads 100\% by construction:
   the report says what a run exercised, not what the tests leave out. It has no bins for
-  back-pressure per channel, arbitration contention, alias pins on and off, or narrow
-  transfer sizes.
+  back-pressure per channel, arbitration contention, alias pins on and off, narrow single
+  transfers, or narrow bursts outside AXI4.
 \item \textbf{What the generated tests do not try.}
   \begin{itemize}
   \item WRAP and FIXED bursts are tested only at full width.
   \item The burst at a 4 KB edge is not run on a region of exactly 4 KB.
   \item Every reset is asserted together and released together. A staggered release,
     and assertion with stopped clocks, are not tested.
-  \item \cmd{bag sim} uses one fixed random seed. You cannot set another one.
+  \item \cmd{bag sim} uses one fixed seed (\code{20261031}) unless you set
+    \code{BAG_COCOTB_SEED}. A run tries one seed only: the tests do not sweep seeds.
   \end{itemize}
 \item \textbf{\cmd{bag sim} does not judge the build log.} It builds the design with
   Verilator and runs the tests, but it does not read the warnings of the build. An
@@ -296,6 +297,15 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   Masters > \col{Max outstanding rd} and \col{Max outstanding wr}, Slaves >
   \col{Wait states} and \col{Error response}, and Fabrics > \col{Backing IP}, and keeps
   them in the IR, but no generated file depends on them yet.
+\end{itemize}
+
+\section{The command line}
+
+\begin{itemize}
+\item \textbf{A folder that is not an output directory.} \cmd{bag lint}, \cmd{bag sim}
+  and \cmd{bag formal} on a folder without \file{bag_outputs.json}, or with a broken one,
+  stop with a Python traceback instead of an \code{error:} line. The exit status is 1.
+  Give them the folder that \cmd{bag generate} wrote.
 \end{itemize}
 
 \section{Not in this version}

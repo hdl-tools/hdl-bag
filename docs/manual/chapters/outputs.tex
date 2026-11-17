@@ -10,7 +10,7 @@ each one is for.
 The examples in this chapter use a small design, \code{lite_ss}: one AXI4-Lite master
 \code{cpu}, an AXI4-Lite shared bus \code{bus}, and two AXI4-Lite slaves, \code{sram} and
 \code{uart}, in one clock domain. Its IR, \file{lite_ss.ir.yaml}, is in \file{files/} of
-the examples. An IR is accepted wherever a workbook is (chapter~\ref{ch:ir}).
+the examples. \cmd{bag generate} accepts an IR in place of a workbook (chapter~\ref{ch:ir}).
 
 \section{The output tree}
 \label{sec:tree}
@@ -237,11 +237,11 @@ job, the quiet-in-reset job, is shown here:
 \label{sec:header}
 
 Every file that BAG generates from your spec starts with a header. The header is the
-text of the file that Wrapper > \setting{File header} names, as it is, followed by BAG's
-banner. The banner names the version of BAG, the project, its revision, and the SHA-256
-hash of the IR. It says \code{DO NOT EDIT}: change the spec and generate again. The
-header is a comment in the syntax of each file: \code{//} in SystemVerilog and C,
-\texttt{\#} in Python and \file{.sby} files, and an HTML comment in Markdown and HTML.
+text of the file that Wrapper > \setting{File header} names, followed by BAG's banner. The banner names the version of BAG, the project, its revision, and the SHA-256
+hash of the IR. It says \code{DO NOT EDIT}: change the spec and generate again. In SystemVerilog and C files the text is copied as it is, so write it as \code{//}
+line comments: BAG does not check this, and other text stops the RTL from compiling. In
+Markdown and HTML the whole header goes inside an HTML comment, and in Python and
+\file{.sby} files BAG puts \texttt{\#} before each of its lines.
 
 Three files have no header: the file list, the manifest and the copy of the IR in
 \file{tests/}. The files that BAG copies (the in-house and vendored RTL, the ZipCPU
