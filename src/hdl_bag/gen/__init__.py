@@ -87,16 +87,23 @@ def _write(root: Path, rel: str, text: str, written: list[str]) -> None:
 
 
 def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None) -> Outputs:
-    """Write every output of SPEC under OUTDIR. Raises MissingRtl after the collateral."""
+    """Write every output of SPEC under OUTDIR. Raises MissingRtl after the collateral.
+
+    With Project > Generate RTL = N (D100), only the C header and the documents that need
+    no RTL are written: no package, RTL, file list, tie-off report, tests or formal, and
+    the manifest records no top, so lint, sim and formal say there is no RTL."""
     style = style or spec.wrapper.port_style
     user_header = None
     if spec.wrapper.file_header:
         user_header = (spec_dir / spec.wrapper.file_header).read_text(encoding="utf-8")
     hdr = header(spec, user_header)
     written: list[str] = []
+    p = spec.project
 
+    # The package first: its name check is the earliest guard against colliding names.
     pkg_rel = f"rtl/pkg/{spec.wrapper.package}.sv"
-    _write(outdir, pkg_rel, package(spec, hdr), written)
+    if p.outputs.rtl:
+        _write(outdir, pkg_rel, package(spec, hdr), written)
     if spec.project.outputs.c_header:
         _write(outdir, f"sw/{spec.project.name}_memmap.h", c_header(spec, user_header), written)
     if spec.project.outputs.doc:
@@ -104,6 +111,9 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         _write(outdir, "doc/memmap.html", memmap_html(spec, user_header), written)
         _write(outdir, "doc/port_map.md", port_map_md(spec, user_header), written)
         _write(outdir, "doc/reset.md", reset_md(spec, user_header), written)
+    if not p.outputs.rtl:
+        _manifest(outdir, written, spec, None, None, None)
+        return Outputs(outdir, tuple(sorted(written)), "", "", None, p.lint_tools, p.simulator)
 
     registry = builtin_registry()
     netlist = build_netlist(spec)
@@ -205,7 +215,6 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
             _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
         sby = tuple(sorted(r for r in written if r.startswith("formal/") and r.endswith(".sby")))
     _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
-    p = spec.project
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
                    p.simulator, tuple(sorted(sby)))  # fmt: skip
 

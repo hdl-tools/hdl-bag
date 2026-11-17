@@ -102,6 +102,9 @@ def _load(spec: Path) -> tuple[ir.Spec, Path]:
     return loaded, spec.parent
 
 
+NO_RTL = "no RTL generated (Project > Generate RTL is N): nothing to lint, simulate or prove"
+
+
 def _generate(spec_path: Path, output: Path | None, style: str | None) -> Outputs:
     spec, spec_dir = _load(spec_path)
     outdir = output or spec_dir / spec.project.output_dir
@@ -114,6 +117,10 @@ def _generate(spec_path: Path, output: Path | None, style: str | None) -> Output
     except (GenerateError, OSError) as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
+    if not out.top:
+        click.echo(f"wrote {len(out.files)} file(s) to {outdir}")
+        click.echo(NO_RTL)
+        return out
     click.echo(f"wrote {len(out.files)} file(s) to {outdir} (top {out.top})")
     if spec.project.outputs.tests and out.tests is None:
         click.echo("no generated tests: BAG does not know how a user-supplied fabric behaves")
@@ -218,6 +225,8 @@ def flow(spec: Path, output: Path | None, style: str | None, with_formal: bool,
     if formal_timeout is not None and not with_formal:
         raise click.UsageError("--formal-timeout needs --formal")
     out = _generate(spec, output, style)
+    if not out.top:
+        return  # D100: _generate said why
     _report(lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out)))
     # Simulation builds the C++ model itself, so build it here only if nothing will.
     _report(compile_design(sources(out), out.top, out.root, incdirs=include_dirs(out),
