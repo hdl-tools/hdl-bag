@@ -414,3 +414,24 @@ def test_the_dimensions_of_a_nested_config_with_adapters() -> None:
     assert (dims["hierarchy_depth"], dims["clock_crossings"]) == (2, 1)
     assert dims["port_options"] == ["fifo", "slice"]
     assert dims["width_ratios"] == ["128:64", "32:64", "64:32"]
+
+
+def test_the_summary_names_the_seeds_that_left_no_result(tmp_path: Path) -> None:
+    """PR 6 review: a nightly shard cut off by its time limit leaves no result.json for the
+    seed it was running, nor for the seeds after it. Told which seeds to expect, the summary
+    names those, so a short count is never read as a clean night."""
+    from hdl_bag.regress.run import missing_seeds
+
+    for seed in (70000, 70002):
+        (tmp_path / str(seed)).mkdir()
+        (tmp_path / str(seed) / "result.json").write_text(
+            SeedResult(seed, f"rnd{seed}", repro=[f"bag regress --seed {seed}"]).to_json(),
+            encoding="utf-8")  # fmt: skip
+    expected = seeds(7, 3)
+    assert missing_seeds(tmp_path, expected) == [70001]
+    assert write_summary(tmp_path, expected) == (
+        "0 generator, 0 fail, 0 timeout, 2 pass of 2 seed(s)")  # fmt: skip
+    text = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "Missing: 1 of 3 expected seed(s) left no result: 70001" in text.splitlines()
+    assert json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))["missing"] == [70001]
+    assert missing_seeds(tmp_path, [70000, 70002]) == []

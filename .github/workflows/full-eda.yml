@@ -19,6 +19,7 @@ jobs:
     with:
       marks: eda and not deep
       shards: 12  # about 373 minutes of tests no longer fit 4 jobs of 30 minutes (PR 6)
+      timeout-minutes: 40  # its slowest job took 24 minutes
     permissions:
       contents: read
       packages: read

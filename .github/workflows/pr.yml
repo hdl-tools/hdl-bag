@@ -120,7 +120,9 @@ jobs:
             && 'eda and smoke'
             || ((github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 'eda and deep')
             || ((github.event_name == 'workflow_dispatch' && inputs.select != '') && 'eda' || 'eda and not deep') }}
-      timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 300 || 30 }}
+      # A select dispatch may name a deep or alone test (up to 5 h); the smoke subset stays
+      # under 15 minutes; the full list's slowest job took 24 minutes (PR 6), so it gets 40.
+      timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 300 || (github.event_name == 'workflow_dispatch' && inputs.select != '') && 340 || ((github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-eda')) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke')) && 30 || 40 }}
       keyword: ${{ github.event_name == 'workflow_dispatch' && inputs.select || '' }}
       bmc-engine: ${{ github.event_name == 'workflow_dispatch' && inputs.bmc_engine || '' }}
       shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.select != '') && (inputs.select_shards != '' && fromJSON(inputs.select_shards) || 1) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'deep') && 16 || (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-eda')) && 4 || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke') && 4 || 12 }}

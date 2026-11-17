@@ -9,7 +9,11 @@ What the owner settled and the tests hold:
   50 random seeds with the date as `--seed-base`, sharded so no shard nears its time limit.
 - The full EDA list (push to main, `suite=full`, the full-eda label) no longer fit 4 shards
   of 30 minutes (about 373 minutes of tests, PR 5): it runs on FULL_SHARDS.
-- The nightly's Verilator cache restores the PR caches and never saves (the 10 GB limit).
+- The nightly's Verilator cache restores what pushes to main saved and never saves (the
+  10 GB limit).
+- PR 6 review: the night's seed base is computed once (a rerun of failed jobs keeps it), a
+  shard cut off by its limit is named in the summary as missing seeds and fails the night,
+  and a dispatch of pr.yml that selects tests by name may run a deep or alone one.
 """
 
 from pathlib import Path
@@ -59,25 +63,58 @@ def test_the_nightly_runs_the_corpus_with_its_deep_and_alone_tests() -> None:
     assert corpus["with"]["save-cache"] is False and alone["with"]["save-cache"] is False
 
 
+def _script(job: dict[str, Any]) -> str:
+    return "\n".join(str(s.get("run", "")) for s in job["steps"])
+
+
+def test_the_night_computes_its_seed_base_once() -> None:
+    """A rerun of failed jobs the next day must draw the same seeds: the base is a job
+    output, which a rerun reuses, not a date each shard reads for itself."""
+    jobs = _load("nightly.yml")["jobs"]
+    assert jobs["prep"]["outputs"] == {"base": "${{ steps.base.outputs.base }}"}
+    assert "date -u +%Y%m%d" in _script(jobs["prep"])
+    assert "date" not in _script(jobs["regress"])
+    assert jobs["regress"]["needs"] == "prep"
+    assert jobs["regress"]["env"]["SEED_BASE"] == "${{ needs.prep.outputs.base }}"
+
+
 def test_the_nightly_runs_the_random_seeds_in_shards_with_the_date_as_base() -> None:
     job = _load("nightly.yml")["jobs"]["regress"]
     assert job["strategy"]["matrix"]["shard"] == list(range(1, REGRESS_SHARDS + 1))
     assert job["strategy"]["fail-fast"] is False
-    script = "\n".join(str(s.get("run", "")) for s in job["steps"])
-    assert "date -u +%Y%m%d" in script
+    assert job["timeout-minutes"] == 180
+    assert job["env"]["SEEDS"] == "${{ inputs.seeds || '50' }}"
+    assert job["env"]["FORMAL_BUDGET"] == "${{ inputs.formal_budget || '600' }}"
+    script = _script(job)
+    assert '--seed-base "$SEED_BASE"' in script
     assert f'--shard "${{{{ matrix.shard }}}}/{REGRESS_SHARDS}"' in script
+    # It restores the cache and never saves it.
+    assert not [s for s in job["steps"] if "cache/save" in str(s.get("uses", ""))]
     assert "bag regress --seeds" in script and "--formal-budget" in script
     uploads = [s for s in job["steps"]
                if str(s.get("uses", "")).startswith("actions/upload-artifact")]  # fmt: skip
     assert len(uploads) == 1 and uploads[0]["if"] == "always()"
-    assert "result.json" in uploads[0]["with"]["path"]
+    for kept in ("result.json", "*.xlsx", "*.ir.yaml"):
+        assert kept in uploads[0]["with"]["path"]
 
 
-def test_the_nightly_writes_one_summary_of_every_seed() -> None:
+def test_the_nightly_writes_one_summary_of_every_seed_and_names_the_missing() -> None:
     job = _load("nightly.yml")["jobs"]["summary"]
-    assert job["needs"] == "regress" and job["if"] == "always()"
-    script = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert job["needs"] == ["prep", "regress"] and job["if"] == "always()"
+    script = _script(job)
     assert "write_summary" in script and "GITHUB_STEP_SUMMARY" in script
+    assert "missing_seeds" in script and "sys.exit(1)" in script  # a cut-off shard fails it
+    assert job["env"]["SEED_BASE"] == "${{ needs.prep.outputs.base }}"
+    uploads = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload")]
+    assert uploads[0]["with"]["name"] == "regress-summary" and uploads[0]["if"] == "always()"
+
+
+def test_the_night_is_green_only_when_every_part_is() -> None:
+    gate = _load("nightly.yml")["jobs"]["nightly"]
+    parts = ["corpus", "corpus-alone", "regress", "summary"]
+    assert gate["needs"] == parts and gate["if"] == "always()"
+    assert [s["run"] for s in gate["steps"]] == [
+        f'test "${{{{ needs.{p}.result }}}}" = success' for p in parts]  # fmt: skip
 
 
 def test_the_interim_cron_left_pr_yml() -> None:
@@ -88,7 +125,20 @@ def test_the_interim_cron_left_pr_yml() -> None:
 
 
 def test_the_full_list_runs_on_enough_shards() -> None:
-    """pr.yml's full list (push to main, suite=full) and the full-eda label's run."""
-    pr = _load("pr.yml")["jobs"]["eda-shard"]["with"]["shards"]
-    assert f"|| {FULL_SHARDS} }}}}" in str(pr)
-    assert _load("full-eda.yml")["jobs"]["full-eda-shards"]["with"]["shards"] == FULL_SHARDS
+    """pr.yml's full list (push to main, suite=full) and the full-eda label's run: 12 jobs,
+    with 40 minutes each (its slowest took 24 of 30, PR 6 review)."""
+    with_ = _load("pr.yml")["jobs"]["eda-shard"]["with"]
+    assert f"|| {FULL_SHARDS} }}}}" in str(with_["shards"])
+    full = _load("full-eda.yml")["jobs"]["full-eda-shards"]["with"]
+    assert (full["shards"], full["timeout-minutes"]) == (FULL_SHARDS, 40)
+    timeout = str(with_["timeout-minutes"])
+    assert timeout.endswith("|| 40 }}")
+
+
+def test_a_dispatch_that_selects_tests_by_name_may_run_a_deep_or_alone_one() -> None:
+    """PR 6 review: select runs every matching test ('eda'), so its job gets the alone
+    tasks' 340 minutes; the smoke subset keeps 30."""
+    with_ = _load("pr.yml")["jobs"]["eda-shard"]["with"]
+    timeout = str(with_["timeout-minutes"])
+    assert "inputs.select != '') && 340" in timeout
+    assert "&& 30 ||" in timeout  # the smoke subset (pull requests, suite=smoke)
