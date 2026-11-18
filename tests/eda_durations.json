@@ -63,6 +63,7 @@
  "tests/flows/test_formal_eda.py::test_the_generated_jobs_hold[apb4_rules-jobs3]": 4.97,
  "tests/flows/test_formal_eda.py::test_the_generated_jobs_hold[axi_shared_one-jobs5]": 14.67,
  "tests/flows/test_formal_eda.py::test_the_generated_jobs_hold[axil_shared_one-jobs4]": 18.3,
+ "tests/flows/test_formal_eda.py::test_tools_image_has_the_pinned_sby": 0.1,
  "tests/flows/test_lint.py::test_tool_flags_dirty_rtl[slang]": 0.01,
  "tests/flows/test_lint.py::test_tool_flags_dirty_rtl[verible]": 0.0,
  "tests/flows/test_lint.py::test_tool_flags_dirty_rtl[verilator]": 0.74,

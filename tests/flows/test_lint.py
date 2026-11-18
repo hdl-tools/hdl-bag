@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
+import inspect
 import shutil
 from importlib import import_module
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 from hdl_bag.flows import Finding, Report, WaiverError, lint, load_waivers
 from hdl_bag.flows.backends import BACKENDS, Slang, Verible, Verilator, parse_flags, slang_flags
+from hdl_bag.flows.formal import SymbiYosys
 from hdl_bag.flows.waivers import Waiver, apply_waivers
 
 ROOT = Path("/run")
@@ -208,6 +210,9 @@ def test_version_parsing(
 
 
 def test_pinned_versions_match_tools_lock() -> None:
+    """Every pin in the code is the one tools.lock installs. The lint tools are pinned by
+    version, so they compare directly; SBY is not, because its version comes from the OSS
+    CAD Suite build, so the lock's build date must at least be named beside its pin."""
     lock = dict(
         line.split("=", 1)
         for line in (Path(__file__).parents[2] / "tools.lock").read_text().splitlines()
@@ -217,6 +222,12 @@ def test_pinned_versions_match_tools_lock() -> None:
         "slang": lock["SLANG_VERSION"], "verilator": lock["VERILATOR_VERSION"],
         "verible": lock["VERIBLE_VERSION"],
     }  # fmt: skip
+    date = lock["OSS_CAD_SUITE_DATE"]
+    assert date in inspect.getsource(SymbiYosys), (
+        f"tools.lock installs the OSS CAD Suite build of {date}: name that date beside "
+        f"SymbiYosys.pinned in src/hdl_bag/flows/formal.py, and check the version table and "
+        f"the not-pinned example in docs/manual/chapters/install.tex"
+    )
 
 
 @pytest.mark.parametrize(
