@@ -302,6 +302,13 @@ class _Harness:
             from hdl_bag.formal_gen import _APB, _AXIL, _CHECKER, zipcpu_params
 
             family = "axil" if p is Protocol.AXI4_LITE else "apb"
+            if family == "axil" and self.slave_can(a) == frozenset():
+                # Every master is denied this port: the routed assertion says the fabric sends
+                # nothing, and the checker's response covers could never be reached.
+                self.body.append(f"  // {bus.name}: no checker, every master is denied this port")
+                self.body += [f"  always_comb assume ({self.v(bus, s)} == 1'b0);"
+                              for s in ("bvalid", "rvalid")]  # fmt: skip
+                return
             vendor = _CHECKER[(family, not a.unit_is_slave)]
             module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
             self.zipcpu.append(
@@ -560,6 +567,9 @@ class _Harness:
                 if kind is not None and kind not in can[k]:
                     self.body.append(f"  // {label}: no cover, the IR sends {bus.name} no {kind}")
                     continue
+                if not can[k]:
+                    self.body.append(f"  // {label}: no cover, the IR sends {bus.name} nothing")
+                    continue
                 self.body.append(f"  always @(posedge {bclk}) cover_{label}: "
                                  f"cover (bag_live_{d} && {valid});")  # fmt: skip
         # Each scoreboard: the entries slaves took leave, then the request accepted now joins
@@ -620,6 +630,9 @@ class _Harness:
                         f"  always_comb if ({b}_ask) assume (!{clash});",
                     ]
             # The assumption leaves contention: two masters ask for one slave at once.
+            kind = {"aw": "write", "ar": "read"}.get(ch)
+            if not any(kind in c if kind else c for c in can):
+                continue  # no slave port takes this kind of request
             a, b = f"sb_{ch}0", f"sb_{ch}1"
             both = f"{a}_ask && {b}_ask && {a}_t == {b}_t"
             self.body.append(f"  always @(posedge {clk}) cover_{name}_{ch}_contended: cover "

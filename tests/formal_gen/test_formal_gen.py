@@ -4,12 +4,14 @@
 environment, the SymbiYosys job, and that every port they bind to exists on the top."""
 
 import re
+import shutil
 from pathlib import Path
 
 import pytest
-from dsl import AXI4_NA, AXIL_NA, Cfg, resolve_cfg
+from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag
+from hdl_bag.checks import run_checks
 from hdl_bag.flows.formal import job_tasks
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
@@ -21,6 +23,9 @@ from hdl_bag.formal_gen import (
     formal_jobs,
     props_module,
     render_protocol,
+)
+from hdl_bag.formal_gen import (
+    depth as path_depth,
 )
 from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import (
@@ -37,8 +42,10 @@ from hdl_bag.formal_gen.units import (
 )
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
-from hdl_bag.ir import load
+from hdl_bag.ir import load, resolve
 from hdl_bag.protocols import Protocol
+from hdl_bag.reader import read_workbook
+from hdl_bag.template.builder import build_workbook
 from hdl_bag.templates import builtin_registry
 
 TESTS = Path(__file__).parents[1]
@@ -1409,3 +1416,76 @@ def test_a_route_cover_searches_twice_as_deep_as_its_bmc(tmp_path: Path) -> None
     assert "bmc: depth 8\ncover: mode cover\ncover: depth 16\nmulticlock off\n" in xbar
     cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")
     assert "bmc: depth 24\ncover: mode cover\ncover: depth 48\nmulticlock on\n" in cdc
+
+
+def _route_text(tmp_path: Path, c: Cfg, unit: str) -> str:
+    """The route harness of UNIT for CFG, whose Access_Rules may leave a port unreachable (a
+    warning, ACC-UNREACHABLE-SLAVE, that resolve_cfg would refuse)."""
+    path = tmp_path / f"{c.name}.xlsx"
+    build_workbook(data=c.data).save(path)
+    shutil.copy(GOLDEN.parent / "header.txt", tmp_path / "header.txt")
+    result = run_checks(read_workbook(path), tmp_path)
+    assert not [f.message for f in result.findings if f.severity == "error"]
+    generate(resolve(result), tmp_path / "out", tmp_path)
+    return (tmp_path / "out" / "formal" / f"{c.name}_route_{unit}.sv").read_text(encoding="utf-8")
+
+
+def _denied_port(protocol: str) -> Cfg:
+    """Master m0 reaches slave s0; Access_Rules deny it s1, the fabric's only other slave."""
+    c = Cfg(f"denied{protocol.replace('-', '').lower()}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    apb = protocol == "APB4"
+    na = APB4_NA if apb else AXIL_NA
+    c.fabric("f", protocol, 32, 32, "D0", "single-master" if apb else "round-robin")
+    c.master("m0", protocol, 32, 32, "D0").link("m0", "f", 0)
+    c.decode("m0", "PSLVERR" if apb else "DECERR").option("m0", **na)
+    for k in range(2):
+        c.slave(f"s{k}", protocol, 32, 32, "D0").link("f", f"s{k}", k).option(f"s{k}", **na)
+        c.region(f"s{k}", "regs", 0x4000_0000 + k * 0x1000, 0x1000)
+    return c.access("m0", "s1", "-")
+
+
+def test_a_route_job_covers_no_request_on_a_port_every_master_is_denied(tmp_path: Path) -> None:
+    """Seeds 015 and 049: the fabric must send nothing to such a port, which its assertion
+    checks, so a cover of a request there can never be reached."""
+    text = _route_text(tmp_path, _denied_port("APB4"), "f")
+    assert re.search(r"cover_f_\w*s0\w*_p_routed: cover", text)
+    assert not re.search(r"cover_f_\w*s1\w*_p_routed: cover", text)
+    assert re.search(r"f_\w*s1\w*_p_routed: assert", text)
+
+
+def test_a_route_job_has_no_lite_checker_on_a_port_every_master_is_denied(tmp_path: Path) -> None:
+    """Seed 011: the ZipCPU checker always covers a response, which such a port never sees. The
+    harness keeps the environment's responses quiet there instead."""
+    text = _route_text(tmp_path, _denied_port("AXI4-Lite"), "f")
+    assert "u_chk_s0 (" in text
+    assert "u_chk_s1 (" not in text
+    for ch in ("bvalid", "rvalid"):
+        assert re.search(rf"assume \(\w*s1\w*_{ch} == 1'b0\);", text), ch
+
+
+def test_a_route_job_covers_no_contention_for_a_kind_no_slave_takes(tmp_path: Path) -> None:
+    """Seed 021: the crossbar's only slave is read-only, so two masters never contend to write."""
+    c = Cfg("rocontend", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    for k in range(2):
+        c.master(f"m{k}", "AXI4-Lite", 32, 32, "D0").link(f"m{k}", "f", k)
+        c.decode(f"m{k}", "DECERR").option(f"m{k}", **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000, access="RO")
+    text = _route_text(tmp_path, c, "f")
+    assert "cover_f_ar_contended: cover" in text
+    assert "cover_f_aw_contended: cover" not in text
+
+
+def test_a_port_is_as_deep_as_the_longest_kind_of_access_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seed 005: a near master only writes s3 and reads come from a far one, so s3's read cover
+    needs the far master's path."""
+    pairs = {("near", "s3"): {"write"}, ("far", "s3"): {"read"}}
+    costs = {"near": 20, "far": 44}
+    monkeypatch.setattr(path_depth, "reaching", lambda spec: pairs)
+    monkeypatch.setattr(path_depth, "_cost", lambda s, n, a, b: costs[b if a == "s3" else a])
+    assert path_depth.port_depths(None, None, ["s3"]) == {"s3": 44}  # type: ignore[arg-type]
