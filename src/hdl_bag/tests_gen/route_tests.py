@@ -67,6 +67,7 @@ from hdl_bag.tests_gen.route_model import (
     error_words,
     exokay_paths,
     forced_resp_paths,
+    may_repeat_reads,
     midpoint_path,
     narrow_apb_path,
     pin_sets,
@@ -448,7 +449,8 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                             rewrites=rewrites_words(SPEC, exp))  # fmt: skip
                             else:
                                 check_read(where, exp, access_bytes(m),
-                                           _read_beats(new, exp.word_bytes))  # fmt: skip
+                                           _read_beats(new, exp.word_bytes),
+                                           repeats=may_repeat_reads(SPEC, m, exp))  # fmt: skip
                             seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
@@ -1332,7 +1334,8 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                 assert need <= seen, f"{where}: read words {sorted(seen)}, needs {sorted(need)}"
                 # A beat narrower than a bus on the way can repeat a read: split into single
                 # transfers, each narrow beat reads that bus's whole word.
-                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp):
+                repeats = may_repeat_reads(SPEC, m, exp)
+                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp) and not repeats:
                     assert len(set(touched)) == len(touched), (
                         f"{where}: read an address twice: {touched}"
                     )

@@ -29,8 +29,6 @@ from hdl_bag.ir import Spec
 from hdl_bag.protocols import tie_value
 
 ERROR_WORD = 8  # region end - 8 answers with a slave error
-# Bridges that narrow on AXI4 ports with axi_dw_converter (bag_axil2apb uses the AXI4-Lite one).
-AXI4_CONVERTING_BRIDGES = ("bag_axi2ahb", "bag_axi2apb", "bag_axi2axil")
 
 
 @dataclass(frozen=True)
@@ -160,6 +158,17 @@ def _axi4_downsizer_in_front(spec: Spec, port: str, fabric: Any) -> bool:
     return False
 
 
+def _downsizes_on_axi4(bridge: Any, up: Any, down: Any) -> bool:
+    """Whether BRIDGE narrows from fabric UP to fabric DOWN with axi_dw_converter. From AXI4-Lite
+    a bag_axi2apb instance is bag_axil2apb, on axi_lite_dw_converter, except onto 8 bits, which
+    that converter cannot reach (the bag_axi2apb instance template)."""
+    if up.data_width <= down.data_width:
+        return False
+    if bridge.template == "bag_axi2apb":
+        return bool(up.protocol == "AXI4" or down.data_width == 8)
+    return bridge.template in ("bag_axi2ahb", "bag_axi2axil")
+
+
 def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
           pins: dict[str, bool]) -> Outcome:  # fmt: skip
     fabrics = {f.name: f for f in spec.fabrics}
@@ -184,9 +193,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
-            narrows = fabrics[b.upstream].data_width > fabrics[b.downstream].data_width
-            if _axi4_downsizer_in_front(spec, target, fabric) or (
-                narrows and b.template in AXI4_CONVERTING_BRIDGES
+            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(
+                b, fabrics[b.upstream], fabrics[b.downstream]
             ):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
@@ -499,6 +507,16 @@ def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> b
     return refusing_converter(spec, m.name, exp.bridges, exp.slave, burst, beats) is not None
 
 
+def may_repeat_reads(spec: Spec, m: Any, exp: Outcome) -> bool:
+    """Whether a read from M can reach one slave word twice: a bus on the way narrower than the
+    slave splits it into transfers, and a wider bus behind makes each a full beat again."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
+    return min(widths) // 8 < exp.word_bytes
+
+
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
     """Bytes in the widest bus between M and its target: M's fabric, each bridge's downstream
     fabric, and the slave."""
@@ -683,14 +701,15 @@ def check_split_write_error(where: str, address: int, data: bytes, step: int, fa
     )
 
 
-def check_read(where: str, exp: Outcome, length: int, touched: list[int]) -> None:
+def check_read(where: str, exp: Outcome, length: int, touched: list[int],
+               repeats: bool = False) -> None:  # fmt: skip
     """The beat addresses a read of LENGTH bytes at EXP.address made the slave take: all the
     words it asked for, no address twice (a read can have side effects), and nothing beyond
     what its beats can cover on the way (EXP.words). A wide slave behind a narrow fabric can
-    take two addresses in one word."""
+    take two addresses in one word, and with REPEATS (may_repeat_reads) one address twice."""
     word = exp.word_bytes
     seen = {a // word for a in touched}
-    assert len(set(touched)) == len(touched), (
+    assert repeats or len(set(touched)) == len(touched), (
         f"{where}: read an address twice: {[hex(a) for a in touched]}"
     )
     need = {a // word for a in range(exp.address, exp.address + length)}

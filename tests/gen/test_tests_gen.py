@@ -28,7 +28,9 @@ from hdl_bag.tests_gen.route_model import (
     access_bytes,
     blocking_path,
     cache_after_tie,
+    check_read,
     check_write,
+    may_repeat_reads,
     midpoint_path,
     rewrites_words,
     route,
@@ -492,15 +494,16 @@ def _behind_lite64(kind: str) -> Cfg:
 
 @pytest.mark.parametrize(
     ("kind", "whole_beat"),
-    [("axi4", False), ("ahb32", False), ("apb8", False), ("apb16", False), ("lite", True),
-     ("ahb64", True)],
+    [("axi4", False), ("ahb32", False), ("apb8", False), ("apb16", True), ("apb32", True),
+     ("lite", True), ("ahb64", True)],
 )  # fmt: skip
 def test_a_read_of_the_last_word_meets_the_error_word_only_if_its_beat_is_read_whole(
     tmp_path: Path, kind: str, whole_beat: bool
 ) -> None:
     """Seeds 005 and 009: an AXI4 downsizer starts at the address, so a 64-bit beat read at the
     last word never reads the error word below it. The AXI4-Lite downsizer reads the whole beat,
-    and a 64-bit slave answers the whole beat in one word."""
+    and a 64-bit slave answers the whole beat in one word. Seeds 024, 030 and 038: from AXI4-Lite
+    a bag_axi2apb instance is bag_axil2apb, on that AXI4-Lite downsizer, except onto 8 bits."""
     spec, findings = resolve_cfg(_behind_lite64(kind), tmp_path)
     assert findings == [] and spec is not None
     assert route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error is whole_beat
@@ -603,3 +606,24 @@ def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
     assert findings == [] and spec is not None
     name = "unaligned_axi_writes_store_only_their_bytes"
     assert (name in applicable_tests(spec)) is applies
+
+
+def test_a_read_repeats_a_word_only_where_its_path_allows() -> None:
+    exp = Outcome("s0", 0, word_bytes=8, words=frozenset({0}))
+    check_read("r", exp, 4, [0, 0], repeats=True)
+    with pytest.raises(AssertionError, match="read an address twice"):
+        check_read("r", exp, 4, [0, 0])
+
+
+@pytest.mark.parametrize(("middle", "repeats"), [(32, True), (64, False), (128, False)])
+def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: bool) -> None:
+    """Seed 016: a 64-bit read crossing a 32-bit bus becomes two transfers, and each becomes a
+    full 64-bit beat again on the AXI4-Lite fabric behind it, reading the slave's word twice."""
+    port = SimpleNamespace(port="m0")
+    spec = SimpleNamespace(
+        fabrics=[SimpleNamespace(name="f0", data_width=64, master_ports=[port]),
+                 SimpleNamespace(name="f1", data_width=middle, master_ports=[])],
+        bridges=[SimpleNamespace(name="br0", downstream="f1")],
+    )  # fmt: skip
+    exp = SimpleNamespace(bridges=("br0",), word_bytes=8)
+    assert may_repeat_reads(spec, SimpleNamespace(name="m0"), exp) is repeats  # type: ignore[arg-type]
