@@ -41,6 +41,10 @@ Mode = Literal["bmc", "prove", "cover"]
 MODES: Final = ("bmc", "prove", "cover")
 
 # SBY v0.69 is the SymbiYosys of the pinned OSS CAD Suite (tools.lock OSS_CAD_SUITE_DATE).
+# SBY takes its version from that build, so the pin cannot be derived from the lock. Bumping
+# the suite updates SymbiYosys.pinned below, the version table in
+# docs/manual/chapters/install.tex and that chapter's not-pinned example, together;
+# test_pinned_versions_match_tools_lock holds the date beside the pin to the lock.
 # The hour is padded with a space, not a zero ("SBY  0:07:46 [job] ...").
 _LINE: Final = re.compile(r"^SBY +\d{1,2}:\d\d:\d\d \[(?P<job>[^\]]+)\] (?P<msg>.*)$")
 _DONE: Final = re.compile(r"^DONE \((?P<status>[A-Z]+), rc=\d+\)$")
