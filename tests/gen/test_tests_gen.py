@@ -546,9 +546,21 @@ def test_a_wide_slave_sees_a_read_at_the_start_of_its_word(
 ) -> None:
     """Five seeds: a full-size AHB transfer must be aligned, so a 64-bit slave logs a read of
     0xFFFC at 0xFFF8. A write keeps its exact address."""
-    exp = SimpleNamespace(slave="s0", address=0xFFFC, word_bytes=8)
+    exp = SimpleNamespace(slave="s0", address=0xFFFC, word_bytes=8, bridges=())
     spec = SimpleNamespace(slaves=[SimpleNamespace(name="s0", protocol=protocol)])
     assert saw_access(spec, exp, seen, write) is matches  # type: ignore[arg-type]
+
+
+def test_a_read_that_crossed_ahb_arrives_aligned_at_any_slave() -> None:
+    """Seed 046: an AHB-Lite fabric on the way aligns the transfer before an AXI4-Lite slave."""
+    exp = SimpleNamespace(slave="s0", address=0xFFFC, word_bytes=8, bridges=("br0",))
+    spec = SimpleNamespace(
+        slaves=[SimpleNamespace(name="s0", protocol="AXI4-Lite")],
+        bridges=[SimpleNamespace(name="br0", downstream="f1")],
+        fabrics=[SimpleNamespace(name="f1", protocol="AHB-Lite")],
+    )
+    assert saw_access(spec, exp, 0xFFF8, False)  # type: ignore[arg-type]
+    assert not saw_access(spec, exp, 0xFFF8, True)  # type: ignore[arg-type]
 
 
 _WORD = Outcome("s0", 0x40, word_bytes=2)

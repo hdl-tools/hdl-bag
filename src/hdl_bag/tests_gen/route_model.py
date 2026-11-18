@@ -788,10 +788,13 @@ def split_error_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome]
 
 def saw_access(spec: Spec, exp: Any, addr: int, write: bool) -> bool:
     """Whether a slave logging ADDR saw the access EXP expects. An access keeps its address,
-    except a read on AHB-Lite, which arrives at the start of the slave's word: a full-size AHB
-    transfer must be aligned."""
+    except a read that crossed AHB-Lite, which arrives at the start of the slave's word: a
+    full-size AHB transfer must be aligned."""
     slave = next(s for s in spec.slaves if s.name == exp.slave)
-    if write or slave.protocol != "AHB-Lite":
+    downstream = {b.name: b.downstream for b in spec.bridges} if exp.bridges else {}
+    protocols = {f.name: f.protocol for f in spec.fabrics} if exp.bridges else {}
+    crossed = {protocols[downstream[b]] for b in exp.bridges}
+    if write or "AHB-Lite" not in {slave.protocol, *crossed}:
         return bool(addr == exp.address)
     return bool(addr // exp.word_bytes == exp.address // exp.word_bytes)
 
