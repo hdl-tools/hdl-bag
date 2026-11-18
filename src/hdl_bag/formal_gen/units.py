@@ -51,6 +51,12 @@ if TYPE_CHECKING:
 # br_per (a round trip through axi_cdc, no conversion) reached its last cover at step 21;
 # bridges_pulp's br_per (64 to 32 bits) passed with every cover at 24 and timed out at 28;
 # mixed_narrow_apb's br_c8 (64 to 8 bits) reached its last cover at step 33.
+# A route job's cover task searches this many times as deep as its bmc (D108). A cover search
+# ends at the last cover reached, so the margin costs nothing where every cover is reachable;
+# regress seeds reached covers just past the bmc's depth (step 8 of 8 edges, step 33 of 24
+# steps). The bmc keeps its depth, as the protocol job's does (D79): a cover reached past it
+# shows the check can fire there, but the bmc did not check that far.
+ROUTE_COVER_MARGIN = 2
 ROUTE_DEPTH = 24
 ROUTE_DEPTH_PER_HALVING = 6
 # A unit in one clock domain runs on one clock, for ROUTE_CYCLES edges plus

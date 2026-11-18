@@ -24,6 +24,7 @@ from hdl_bag.formal_gen import (
 )
 from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import (
+    ROUTE_COVER_MARGIN,
     ROUTE_CYCLES,
     ROUTE_CYCLES_PER_FIFO,
     ROUTE_CYCLES_PER_MIDPOINT_STAGE,
@@ -274,6 +275,12 @@ def test_no_formal_for_a_user_supplied_fabric_or_when_not_asked(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------- port protocol (D60)
+def _route_options(depth: int, clocks: str) -> str:
+    """A route job's options for a bmc of DEPTH (its cover searches further, D108)."""
+    cover = depth * ROUTE_COVER_MARGIN
+    return f"bmc: depth {depth}\ncover: mode cover\ncover: depth {cover}\nmulticlock {clocks}\n"
+
+
 def _protocol(tmp_path: Path, config: Path) -> str:
     spec = load(config)
     generate(spec, tmp_path, config.parent)
@@ -1049,15 +1056,15 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
     formal = tmp_path / "bp" / "formal"
     xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
-    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 16\nmulticlock off\n" in xbar
     cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
-    assert "bmc: depth 24\ncover: mode cover\ncover: depth 24\nmulticlock on\n" in cdc
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 48\nmulticlock on\n" in cdc
     generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
     mn = tmp_path / "mn" / "formal"
     for unit, depth, clocks in (("br_c8", 36, "on"), ("br_l8", 12, "off"), ("br_l16", 10, "off"),
                                 ("br_lite", 8, "off")):  # fmt: skip
         job = (mn / f"mixed_narrow_apb_route_{unit}.sby").read_text(encoding="utf-8")
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock {clocks}\n"
+        want = _route_options(depth, clocks)
         assert want in job, unit
 
 
@@ -1079,7 +1086,7 @@ def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_three_more_edges(tmp_path
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        want = _route_options(depth, "off")
         assert want in job, (config, unit)
 
 
@@ -1096,7 +1103,7 @@ def test_a_fabric_with_a_deep_mid_point_gets_an_edge_per_further_stage(tmp_path:
     for config, depth in cases:
         generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
         job = (tmp_path / config / "formal" / f"{config}_route_bus.sby").read_text(encoding="utf-8")
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        want = _route_options(depth, "off")
         assert want in job, config
 
 
@@ -1116,7 +1123,7 @@ def test_a_bridge_across_domains_that_widens_the_data_gets_32_steps(tmp_path: Pa
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        want = _route_options(depth, "on")
         assert want in job, (config, unit)
 
 
@@ -1135,7 +1142,7 @@ def test_an_axi4_lite_bridge_with_a_fifo_across_domains_gets_34_steps(tmp_path: 
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        want = _route_options(depth, "on")
         assert want in job, (config, unit)
 
 
@@ -1277,7 +1284,7 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
     # One clock domain: one clock, ROUTE_CYCLES edges.
     assert ROUTE_CYCLES == 8
-    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\n"
+    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 16\n"
             "multiclock off\n") in job  # fmt: skip
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
@@ -1388,3 +1395,17 @@ def test_a_crossing_in_front_of_a_one_at_a_time_lite_converter_hides_its_limit(
         assert (f"  // proto_{event}_m0: neither asserted nor covered, the CDC m0_cdc_2_l in front "
                 "of m0_pc_2_l takes reads of its own\n") in text  # fmt: skip
     assert "proto_multi_write_m0: cover" in text
+
+
+def test_a_route_cover_searches_twice_as_deep_as_its_bmc(tmp_path: Path) -> None:
+    """Regress seeds 014 and 005 (D108): covers reachable at step 8 of an 8-edge job and at step
+    33 of a 24-step job were reported unreached. A cover search ends at the last cover reached,
+    so the margin costs nothing where every cover is reachable. The bmc keeps its depth, as the
+    protocol job's does (D79): a cover past it shows the check can fire there."""
+    assert ROUTE_COVER_MARGIN == 2
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    formal = tmp_path / "formal"
+    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 16\nmulticlock off\n" in xbar
+    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 48\nmulticlock on\n" in cdc

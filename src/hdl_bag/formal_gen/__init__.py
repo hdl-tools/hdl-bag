@@ -1204,7 +1204,7 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     """UNIT's route job: ZipCPU's files read by Yosys's own frontend with one parameterised
     copy per checker instance, then the design, BAG's own checkers and the unit's harness
     PROPS, whose module is the top."""
-    from hdl_bag.formal_gen.units import route_depth
+    from hdl_bag.formal_gen.units import ROUTE_COVER_MARGIN, route_depth
 
     zips = unit.zipcpu
     prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
@@ -1219,7 +1219,7 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     # two solver steps an edge and the logic that models them).
     multi, depth = route_depth(unit)
     job = sby_job(top=unit.module, files=[*files, *own, props], incdirs=incdirs,
-                  depths={"bmc": depth, "cover": depth},
+                  depths={"bmc": depth, "cover": depth * ROUTE_COVER_MARGIN},
                   copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
                   multiclock=multi, prelude=prelude)  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"
