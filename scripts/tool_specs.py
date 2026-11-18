@@ -17,6 +17,10 @@ from pathlib import Path
 
 REPO = Path(__file__).parents[1]
 LOCK = REPO / "tools.lock"
+# Recorded SHA-256 of every pinned archive. A sidecar rather than more keys in tools.lock,
+# because the lock is passed verbatim to `docker build --build-arg` by tools-image.yml and
+# parsed as strict KEY=VALUE by tests/flows/test_lint.py; hashes there would break both.
+DIGESTS = REPO / "tools" / "tools.sha256"
 
 LINUX = "linux-x64"
 DARWIN = "darwin-arm64"
@@ -167,6 +171,40 @@ def read_lock(path: Path | None = LOCK, overrides: tuple[str, ...] = ()) -> dict
     # The suite's asset names carry the date without dashes; the Dockerfile used `tr -d -`.
     lock["OSS_CAD_SUITE_COMPACT"] = lock.get("OSS_CAD_SUITE_DATE", "").replace("-", "")
     return lock
+
+
+def asset_name(t: Tool, plat: str, lock: dict[str, str]) -> str:
+    """The filename of T's archive on PLAT, which is what a digest is recorded against."""
+    return asset_url(t, plat, lock).rsplit("/", 1)[-1]
+
+
+def read_digests(path: Path | None = DIGESTS) -> dict[str, str]:
+    """Recorded hashes as ``{filename: sha256}``, from ``<sha256>  <filename>`` lines.
+
+    The format is sha256sum's, so `sha256sum -c tools/tools.sha256` also works on a
+    directory of downloads. Missing file means nothing is recorded yet.
+    """
+    if path is None or not path.is_file():
+        return {}
+    out = {}
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2 or len(parts[0]) != 64:
+            raise ValueError(f"{path}:{n}: {line!r} is not '<sha256>  <filename>'")
+        out[parts[1]] = parts[0]
+    return out
+
+
+def format_digests(digests: dict[str, str]) -> str:
+    """DIGESTS as a sorted sha256sum-style file, so the diff of a pin bump is readable."""
+    body = "".join(f"{digests[name]}  {name}\n" for name in sorted(digests))
+    return (
+        "# SHA-256 of every pinned tool archive, checked before it is unpacked.\n"
+        "# Refresh with: scripts/install_tools.py --write-digests --platform <key>\n"
+        "# One line per asset, sha256sum format, sorted by filename.\n" + body
+    )
 
 
 def host_platform() -> str:
