@@ -474,7 +474,9 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                         reached.add(m.name)
                         for kind, key in coverage.access_bins(SPEC, m, addr, write, nonsec, exp):
                             coverage.hit(kind, key)
-    assert checked > 0 and errors > 0, (checked, errors)
+    # A slave with PSLVERR tied never answers an error, so a design of only those shows none.
+    can_err = not all(pslverr_tied(SPEC, s.name) for s in SPEC.slaves)
+    assert checked > 0 and (errors > 0 or not can_err), (checked, errors)
     assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
