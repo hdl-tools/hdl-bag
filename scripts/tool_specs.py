@@ -151,9 +151,14 @@ def read_lock(path: Path | None = LOCK, overrides: tuple[str, ...] = ()) -> dict
     reads no file at all.
     """
     text = path.read_text(encoding="utf-8") if path is not None else ""
-    lock = dict(
-        line.split("=", 1) for line in text.splitlines() if line and not line.startswith("#")
-    )
+    lock = {}
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(f"{path}:{n}: {line!r} is not KEY=VALUE")
+        key, value = line.split("=", 1)
+        lock[key] = value
     for item in overrides:
         if "=" not in item:
             raise ValueError(f"--set {item!r} is not KEY=VALUE")

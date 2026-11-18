@@ -21,6 +21,8 @@ dependency is missing, it prints the exact command to run and stops.
 
 import argparse
 import copy
+import http.client
+import lzma
 import os
 import shutil
 import subprocess
@@ -28,6 +30,8 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import zlib
+from collections.abc import Iterator
 from pathlib import Path
 
 from tool_specs import (
@@ -48,11 +52,17 @@ from tool_specs import (
     tool,
 )
 
-# Homebrew formulae Verilator's build needs on macOS, because Apple's bison is 2.3 and
-# Verilator needs 3 or newer. Flex is deliberately *not* here: Apple's 2.6.4 is what
-# Verilator expects, while Homebrew currently ships a 2.6.16 snapshot whose FlexLexer.h
-# does not match the scanner Verilator generates, and V3ParseLex.cpp then fails to compile.
-BREW_BUILD_DEPS = ("autoconf", "bison", "help2man")
+# Homebrew formulae Verilator's build needs on macOS. Apple's bison is 2.3 and Verilator
+# wants 3 or newer; flex has to be Homebrew's because macOS's own emits
+# `yy_create_buffer(FILE *, yy_size_t)`, which does not match Verilator's src/V3PreLex.h and
+# leaves V3PreLex's symbols undefined at link. Homebrew's own verilator formula depends on
+# flex for exactly that reason, and this mirrors the rest of its recipe: autoreconf rather
+# than autoconf, and no CPPFLAGS or LDFLAGS pointing at the keg.
+BREW_BUILD_DEPS = ("autoconf", "automake", "bison", "flex", "help2man")
+
+# A stalled connection must not hang the install for ever, and nor must a wedged tool.
+DOWNLOAD_TIMEOUT_S = 60
+VERSION_TIMEOUT_S = 30
 
 
 def _say(*parts: str) -> None:
@@ -73,21 +83,27 @@ def _installed(prefix: Path, t: Tool, want: str) -> bool:
 
 
 def _fetch(url: str, dest: Path) -> None:
-    """Download URL to DEST."""
+    """Download URL to DEST.
+
+    Every failure becomes a RuntimeError naming the URL: urllib's own messages do not
+    include it, so "HTTP Error 404" alone leaves no way to tell which pin is wrong.
+    """
     _say(f"    fetching {url}")
-    with urllib.request.urlopen(url) as src, dest.open("wb") as out:
-        shutil.copyfileobj(src, out)
+    try:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_S) as src, dest.open("wb") as out:
+            shutil.copyfileobj(src, out)
+    except (OSError, http.client.HTTPException) as exc:
+        raise RuntimeError(f"cannot download {url}: {exc}") from exc
 
 
-def _members(tar: tarfile.TarFile, strip: int) -> list[tarfile.TarInfo]:
+def _members(tar: tarfile.TarFile, strip: int) -> Iterator[tarfile.TarInfo]:
     """TAR's members with STRIP leading path components removed.
 
     A member left with no name is dropped, which is what ``tar --strip-components`` does and
     is exactly how the slang archive — one bare executable — ends up extracting nothing when
     the strip level is wrong (#130). The caller checks the result is not empty.
     """
-    out = []
-    for m in tar.getmembers():
+    for m in tar:
         parts = Path(m.name).parts
         if len(parts) <= strip:
             continue
@@ -96,8 +112,13 @@ def _members(tar: tarfile.TarFile, strip: int) -> list[tarfile.TarInfo]:
         # silently writes garbage rather than failing.
         kept = copy.copy(m)
         kept.name = "/".join(parts[strip:])
-        out.append(kept)
-    return out
+        # tar strips a hard link's target too. None of the pinned archives contains one
+        # (the suite, which has many links, is extracted whole at strip=0), so this only
+        # keeps a future one from pointing at a path that was stripped away.
+        if kept.islnk():
+            link = Path(kept.linkname).parts
+            kept.linkname = "/".join(link[strip:]) if len(link) > strip else kept.linkname
+        yield kept
 
 
 def _unpack(archive: Path, into: Path, strip: int, what: str) -> None:
@@ -106,14 +127,28 @@ def _unpack(archive: Path, into: Path, strip: int, what: str) -> None:
     ``filter="data"`` refuses absolute paths, ``..`` and device files, so a malformed or
     hostile archive cannot write outside INTO.
     """
-    with tarfile.open(archive) as tar:
-        picked = _members(tar, strip)
-        if not picked:
-            raise RuntimeError(
-                f"{what}: nothing left to extract after dropping {strip} path component(s) — "
-                f"the archive's layout changed; check Asset.strip in scripts/tool_specs.py"
-            )
-        tar.extractall(into, members=picked, filter="data")
+    if sys.version_info < (3, 11, 4):
+        raise RuntimeError(
+            f"extracting safely needs Python 3.11.4 or newer (this is "
+            f"{'.'.join(str(n) for n in sys.version_info[:3])}); run under `uv run`, which "
+            f"uses the version tools.lock pins"
+        )
+    try:
+        # Streamed, not getmembers(): the list form reads the whole compressed archive once
+        # to build it and extractall reads it again, which is half a gigabyte twice for the
+        # OSS CAD Suite.
+        with tarfile.open(archive) as tar:
+            tar.extractall(into, members=_members(tar, strip), filter="data")
+    except (tarfile.TarError, EOFError, lzma.LZMAError, zlib.error) as exc:
+        raise RuntimeError(
+            f"{what}: {archive.name} did not extract ({exc}); if the download was cut short, "
+            f"run this again"
+        ) from exc
+    if not any(into.iterdir()):
+        raise RuntimeError(
+            f"{what}: nothing left to extract after dropping {strip} path component(s) — "
+            f"the archive's layout changed; check Asset.strip in scripts/tool_specs.py"
+        )
 
 
 def _swap_in(staged: Path, prefix: Path, dest: str) -> list[str]:
@@ -133,14 +168,31 @@ def _swap_in(staged: Path, prefix: Path, dest: str) -> list[str]:
 
 
 def _install_asset(t: Tool, a: Asset, url: str, prefix: Path, want: str) -> None:
-    """Fetch and unpack T's archive into PREFIX, then record WANT."""
-    with tempfile.TemporaryDirectory(prefix="hdl-bag-tools-") as tmp:
-        archive = Path(tmp) / Path(url).name
+    """Fetch and unpack T's archive into PREFIX, then record WANT.
+
+    The staging directory lives inside the prefix, not in the system temporary directory, so
+    moving the unpacked tree into place is a rename on one filesystem rather than a copy
+    across two. That keeps the swap close to atomic and keeps a gigabyte of unpacked OSS CAD
+    Suite out of /tmp. Only the archive itself goes to the temporary directory.
+    """
+    prefix.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="hdl-bag-dl-") as dl:
+        archive = Path(dl) / Path(url).name
         _fetch(url, archive)
-        staged = Path(tmp) / "staged"
-        staged.mkdir()
-        _unpack(archive, staged, a.strip, t.name)
-        names = _swap_in(staged, prefix, a.dest)
+        with tempfile.TemporaryDirectory(prefix=".hdl-bag-stage-", dir=prefix) as tmp:
+            staged = Path(tmp) / "staged"
+            staged.mkdir()
+            _unpack(archive, staged, a.strip, t.name)
+            # Drop the stamp first: if the swap dies part-way the tree is incomplete, and a
+            # stamp still matching `want` would make the next run report "already at".
+            _stamp(prefix, t.name).unlink(missing_ok=True)
+            names = _swap_in(staged, prefix, a.dest)
+    exe = prefix / t.bin_dir / t.executable
+    if not exe.exists():
+        raise RuntimeError(
+            f"{t.name}: unpacked {', '.join(names)} but {exe} is not there — the archive's "
+            f"layout changed; check Asset.strip and Asset.dest in scripts/tool_specs.py"
+        )
     _say(f"    installed {', '.join(names)} -> {prefix / a.dest}")
     _record(prefix, t, want)
 
@@ -169,20 +221,21 @@ def _brew_prefix(formula: str) -> str | None:
 
 
 def _darwin_build_env(env: dict[str, str]) -> dict[str, str]:
-    """ENV with Homebrew's bison ahead of Apple's 2.3, which Verilator is too new for.
+    """ENV with Homebrew's bison and flex ahead of Apple's. See BREW_BUILD_DEPS for why.
 
-    Flex is left to the system on purpose: see BREW_BUILD_DEPS. Scoped to the build
-    subprocess, so it is not part of the PATH the user is told to export, which needs only
-    the installed tools.
+    Scoped to the build subprocess, so it is not part of the PATH the user is told to
+    export, which needs only the installed tools.
     """
-    missing = [f for f in BREW_BUILD_DEPS if _brew_prefix(f) is None]
+    found = {f: _brew_prefix(f) for f in BREW_BUILD_DEPS}
+    missing = sorted(f for f, where in found.items() if where is None)
     if missing:
         raise RuntimeError(
             f"Verilator's build needs {', '.join(missing)}: run "
             f"`brew install {' '.join(missing)}` (and `xcode-select --install` for the "
             f"compiler), then run this again"
         )
-    return {**env, "PATH": os.pathsep.join([f"{_brew_prefix('bison')}/bin", env.get("PATH", "")])}
+    ahead = [f"{found[f]}/bin" for f in ("bison", "flex")]
+    return {**env, "PATH": os.pathsep.join([*ahead, *filter(None, [env.get("PATH", "")])])}
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], what: str) -> None:
@@ -193,8 +246,9 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], what: str) -> None:
 
 def _build_verilator(t: Tool, version: str, prefix: Path, plat: str, jobs: int) -> None:
     """Clone T at VERSION and install it under PREFIX. Minutes, not seconds."""
-    if shutil.which("git") is None:
-        raise RuntimeError("Verilator is built from source and git is not on PATH")
+    for need in ("git", "autoconf", "make"):
+        if shutil.which(need) is None:
+            raise RuntimeError(f"Verilator is built from source and {need} is not on PATH")
     env = dict(os.environ)
     if plat == DARWIN:
         env = _darwin_build_env(env)
@@ -202,11 +256,14 @@ def _build_verilator(t: Tool, version: str, prefix: Path, plat: str, jobs: int) 
         src = Path(tmp) / "verilator"
         _say(f"    cloning {t.source} at {version}")
         _run(
-            ["git", "clone", "--depth", "1", "--branch", version, t.source, str(src)],
+            ["git", "clone", "--depth", "1", "--branch", version, "--", t.source, str(src)],
             Path(tmp), env, "verilator clone",
         )  # fmt: skip
         target = (prefix / "verilator").resolve()
         _say(f"    building with -j{jobs} (this takes a while)")
+        # autoconf, not autoreconf: Verilator's own headers refuse the latter with
+        # "Something failed during ./configure as config_package.h is incomplete. Perhaps
+        # you used autoreconf, don't." The tools image does the same.
         _run(["autoconf"], src, env, "verilator autoconf")
         _run([f"{src}/configure", f"--prefix={target}"], src, env, "verilator configure")
         _run(["make", f"-j{jobs}"], src, env, "verilator make")
@@ -222,7 +279,15 @@ def _reported_version(t: Tool, prefix: Path) -> str | None:
     exe = prefix / t.bin_dir / t.executable
     if not exe.exists():
         return None
-    proc = subprocess.run([str(exe), *t.version_args], capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(
+            [str(exe), *t.version_args], capture_output=True, text=True,
+            check=False, timeout=VERSION_TIMEOUT_S,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        # Present but unrunnable: the wrong architecture, no execute bit, or a corrupt
+        # extract. --check must report that, not raise.
+        return None
     text = (proc.stdout + proc.stderr).strip()
     return text.splitlines()[0] if text else None
 
@@ -234,7 +299,7 @@ def _wanted(t: Tool, lock: dict[str, str]) -> str:
         raise KeyError(f"{t.name}: tools.lock has no {t.lock_key}") from None
 
 
-def _check(chosen: list[Tool], prefix: Path, lock: dict[str, str]) -> int:
+def _check(chosen: list[Tool], prefix: Path, wants: dict[str, str]) -> int:
     """Print each tool's reported version and whether the pin appears in it.
 
     Deliberately a substring test, not a parse: the authoritative version check is
@@ -242,7 +307,7 @@ def _check(chosen: list[Tool], prefix: Path, lock: dict[str, str]) -> int:
     """
     bad = []
     for t in chosen:
-        want = _wanted(t, lock).removeprefix("v")
+        want = wants[t.name].removeprefix("v")
         got = _reported_version(t, prefix)
         # A tool whose pin is not a version can only be confirmed present.
         ok = got is not None and (want in got or not t.versioned)
@@ -294,18 +359,25 @@ def main(argv: list[str]) -> int:
     try:
         lock = read_lock(None if args.lock == "-" else Path(args.lock), tuple(args.set))
         chosen = [tool(n) for n in args.tools] if args.tools else list(TOOLS)
+        # Resolved here, not at each use: _wanted raises for a pin the lock lacks, and every
+        # later call site sits outside this block.
+        wants = {t.name: _wanted(t, lock) for t in chosen}
     except (KeyError, ValueError, OSError) as exc:
         _say(str(exc))
         return 2
 
+    if args.jobs < 1:
+        _say(f"--jobs must be at least 1, not {args.jobs}")
+        return 2
+
     if args.check:
-        return _check(chosen, prefix, lock)
+        return _check(chosen, prefix, wants)
 
     if args.list:
         for t in chosen:
             a = asset_for(t, plat)
             where = asset_url(t, plat, lock) if a else f"{t.source} (source build)"
-            print(f"{t.name:14} {_wanted(t, lock):28} -> {prefix / t.bin_dir}")
+            print(f"{t.name:14} {wants[t.name]:28} -> {prefix / t.bin_dir}")
             print(f"{'':14} {where}")
         return 0
 
@@ -317,7 +389,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     for t in chosen:
-        want = _wanted(t, lock)
+        want = wants[t.name]
         if not args.force and _installed(prefix, t, want):
             _say(f"  {t.name}: already at {want}")
             continue

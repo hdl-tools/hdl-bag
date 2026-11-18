@@ -193,6 +193,27 @@ def test_unpack_refuses_an_archive_that_strips_to_nothing(tmp_path: Path) -> Non
         inst._unpack(archive, into, 1, "slang")
 
 
+def test_a_missing_pin_is_a_message_not_a_traceback(tmp_path: Path) -> None:
+    """The CLI never shows a raw traceback (AGENTS.md), and every pin is resolved before any
+    work starts, so a lock without the pin fails immediately and says which one."""
+    inst = _installer()
+    assert inst.main(["slang", "--lock", "-", "--prefix", str(tmp_path)]) == 2
+
+
+def test_jobs_below_one_is_refused(tmp_path: Path) -> None:
+    """`make -j0` fails with something baffling, so it is caught here instead."""
+    inst = _installer()
+    assert inst.main(["--jobs", "0", "--prefix", str(tmp_path)]) == 2
+
+
+def test_an_unparsable_lock_line_names_the_file_and_line(tmp_path: Path) -> None:
+    s = _specs()
+    lock = tmp_path / "tools.lock"
+    lock.write_text("# fine\nGOOD=1\nnonsense\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"tools\.lock:3"):
+        s.read_lock(lock)
+
+
 def test_swap_in_replaces_what_is_already_there(tmp_path: Path) -> None:
     """Reinstalling must not leave a half-merged tree of old and new files."""
     inst = _installer()
