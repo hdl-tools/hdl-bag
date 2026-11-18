@@ -235,7 +235,37 @@ def _darwin_build_env(env: dict[str, str]) -> dict[str, str]:
             f"compiler), then run this again"
         )
     ahead = [f"{found[f]}/bin" for f in ("bison", "flex")]
-    return {**env, "PATH": os.pathsep.join([*ahead, *filter(None, [env.get("PATH", "")])])}
+    out = {**env, "PATH": os.pathsep.join([*ahead, *filter(None, [env.get("PATH", "")])])}
+    _refuse_a_broken_flex(f"{found['flex']}/bin/flex")
+    return out
+
+
+def _refuse_a_broken_flex(flex: str) -> None:
+    """Stop before a build that cannot succeed, rather than after fifteen minutes of it.
+
+    Verilator up to v5.054 only builds against flex 2.6.4. Newer flex emits a scanner using
+    ``yy_hold_ptr``, which verilog.l does not declare, and macOS 27's own flex emits
+    ``yy_create_buffer(FILE *, yy_size_t)``, which does not match src/V3PreLex.h and leaves
+    V3PreLex undefined at link. Upstream fixed this after the pin.
+    """
+    try:
+        proc = subprocess.run(
+            [flex, "--version"], capture_output=True, text=True, check=False,
+            timeout=VERSION_TIMEOUT_S,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return  # let the build report it
+    version = (proc.stdout + proc.stderr).strip().removeprefix("flex ")
+    if version.startswith("2.6.4"):
+        return
+    raise RuntimeError(
+        f"{flex} is flex {version}, and Verilator's pinned version only builds against "
+        f"2.6.4: a newer flex emits a scanner using 'yy_hold_ptr', which verilog.l does not "
+        f"declare. macOS's own flex does not work either, emitting a yy_create_buffer that "
+        f"does not match src/V3PreLex.h. Install flex 2.6.4, or install every other tool "
+        f"and use the Verilator the OSS CAD Suite ships, which is a working darwin-arm64 "
+        f"build one patch version off the pin"
+    )
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], what: str) -> None:
