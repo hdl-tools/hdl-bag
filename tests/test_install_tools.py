@@ -66,6 +66,31 @@ def test_the_installers_path_is_the_tools_images_path() -> None:
     assert s.path_line("/opt", s.LINUX, "${PATH}") == m[1]
 
 
+def test_the_dockerfiles_arg_defaults_match_tools_lock() -> None:
+    """The Dockerfile says its defaults must match tools.lock, and CI always overrides them
+    with --build-arg, so a stale default breaks nothing until someone builds the image by
+    hand and gets a different tool. #119 left one behind exactly that way."""
+    s = _specs()
+    lock = s.read_lock()
+    dockerfile = (REPO / "tools" / "Dockerfile").read_text(encoding="utf-8")
+    defaults = dict(re.findall(r"^ARG (\w+)=(\S+)$", dockerfile, re.M))
+    shared = sorted(set(defaults) & set(lock))
+    assert shared, "no ARG in tools/Dockerfile names a tools.lock key"
+    assert {k: defaults[k] for k in shared} == {k: lock[k] for k in shared}
+
+
+def test_the_image_installs_every_tool_it_puts_on_path() -> None:
+    """Each tool needs its own installer invocation in the Dockerfile; a tool added to the
+    table but not to the image would sit on PATH as an empty directory, which is how the
+    pinned slang went missing (#130)."""
+    s = _specs()
+    dockerfile = (REPO / "tools" / "Dockerfile").read_text(encoding="utf-8")
+    for t in s.TOOLS:
+        assert re.search(
+            rf"install_tools\.py[^\n]*(\\\n[^\n]*)*\b{re.escape(t.name)}\b", dockerfile
+        ), f"tools/Dockerfile never installs {t.name}"
+
+
 def test_the_oss_cad_suite_comes_last_on_path() -> None:
     """Its bundled copies of the separately pinned tools must stay shadowed (the image's
     PATH order), so the pinned Verilator wins over the suite's."""
