@@ -11,7 +11,7 @@ from typing import Literal
 import pytest
 
 from hdl_bag.flows import Report, prove, run_formal, run_sby
-from hdl_bag.flows.formal import Mode
+from hdl_bag.flows.formal import Mode, SymbiYosys
 from hdl_bag.formal_gen import props_module
 from hdl_bag.gen import generate
 from hdl_bag.ir import load
@@ -49,6 +49,17 @@ def _tiny(root: Path, check: str, cover: str = "q") -> None:
 def _prove(root: Path, mode: Mode = "bmc") -> Report:
     return prove([Path("rtl/t.sv")], "t", root, properties=[Path("t_props.sv")], depth=8,
                  mode=mode)  # fmt: skip
+
+
+def test_tools_image_has_the_pinned_sby() -> None:
+    """Where formal runs (CI, the tools image), SBY reports the pinned version, so no report
+    carries the not-pinned note and the bounded-task notes mean what they say. The lint tools
+    have the same check in test_lint.py, which also holds this pin to tools.lock."""
+    from hdl_bag.flows.base import tool_version
+
+    backend = SymbiYosys()
+    version = tool_version(backend)
+    assert backend.is_pinned(version), f"sby reports {version}, pinned {backend.pinned}"
 
 
 def test_prove_passes_a_property_that_holds(tmp_path: Path) -> None:
