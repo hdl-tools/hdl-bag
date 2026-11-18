@@ -3,9 +3,23 @@ name: tools-image
 on:
   push:
     branches: [main]
-    paths: [tools.lock, tools/Dockerfile, .github/workflows/tools-image.yml]
+    paths:
+      - tools.lock
+      - tools/Dockerfile
+      - tools/tools.sha256
+      - scripts/tool_specs.py
+      - scripts/install_tools.py
+      - .dockerignore
+      - .github/workflows/tools-image.yml
   pull_request:
-    paths: [tools.lock, tools/Dockerfile, .github/workflows/tools-image.yml]
+    paths:
+      - tools.lock
+      - tools/Dockerfile
+      - tools/tools.sha256
+      - scripts/tool_specs.py
+      - scripts/install_tools.py
+      - .dockerignore
+      - .github/workflows/tools-image.yml
   workflow_dispatch:
 
 permissions:
@@ -34,11 +48,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: tools
+          # The repository root, because the installer and tools.lock live there;
+          # .dockerignore keeps the context down to the four files the build needs.
+          context: .
+          file: tools/Dockerfile
           build-args: ${{ steps.args.outputs.list }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ghcr.io/hdl-tools/hdl-bag-tools:${{ hashFiles('tools.lock', 'tools/Dockerfile') }}
+            ghcr.io/hdl-tools/hdl-bag-tools:${{ hashFiles('tools.lock', 'tools/Dockerfile', 'tools/tools.sha256', 'scripts/tool_specs.py', 'scripts/install_tools.py') }}
             ghcr.io/hdl-tools/hdl-bag-tools:main
           cache-from: type=gha
           cache-to: type=gha,mode=max

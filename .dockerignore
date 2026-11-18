@@ -1,0 +1,9 @@
+# The tools image is built with the repository root as its context, because
+# scripts/install_tools.py and tools.lock live there. Only those four files belong in it:
+# anything else would be sent to the daemon and, worse, would bust the image's build cache
+# on an unrelated commit.
+*
+!tools.lock
+!tools/tools.sha256
+!scripts/tool_specs.py
+!scripts/install_tools.py
