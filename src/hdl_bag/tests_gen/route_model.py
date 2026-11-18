@@ -654,8 +654,8 @@ def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
 
 def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, int]]:
     """(name, address, burst, size, beats) of the bursts AXI4 master M can send to slave S,
-    each beat reaching S cleanly: full-width INCR, FIXED and WRAP; narrow INCR (where S can take
-    a partial write); and an INCR that ends exactly on a 4 KB boundary. WRAP and FIXED stay full
+    each beat reaching S cleanly: full-width INCR, FIXED and WRAP; narrow INCR (where the path
+    stores a partial write as one); and an INCR that ends exactly on a 4 KB boundary. WRAP and FIXED stay full
     width because cocotbext-axi places lanes as if a burst only increments."""
     found = plain_word(spec, m, s) if m.protocol == "AXI4" else None
     if found is None:
@@ -671,7 +671,7 @@ def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, i
         ("wrap", block + bus, WRAP, full, 4),
         ("4k-edge", (word | 0xFFF) + 1 - 4 * bus, INCR, full, 4),
     ]
-    if takes_partial_writes(spec, s):
+    if stores_single_bytes(spec, found[1]):
         shapes += [(f"narrow-{1 << z}", word, INCR, z, 4) for z in range(full) if z <= 2]
 
     def clean(addr: int, size: int, beats: int, burst: int) -> bool:

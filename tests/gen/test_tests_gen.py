@@ -27,6 +27,7 @@ from hdl_bag.tests_gen.route_model import (
     Outcome,
     access_bytes,
     blocking_path,
+    burst_shapes,
     cache_after_tie,
     check_read,
     check_write,
@@ -714,3 +715,26 @@ def test_a_midpoint_that_holds_requests_decides_their_order(
     adapter chain first, so a fixed-priority round cannot be judged by priority there."""
     mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
     assert midpoint_buffers(SimpleNamespace(midpoint=mid)) is buffers
+
+
+@pytest.mark.parametrize(("pstrb", "narrow"), [("drive", True), ("tie-default", False)])
+def test_a_narrow_burst_needs_a_path_that_keeps_strobes(
+    tmp_path: Path, pstrb: str, narrow: bool
+) -> None:
+    """Seed 022: behind a bridge with PSTRB tied a narrow beat stores the whole word."""
+    c = Cfg("nstrobes", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("br", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "br", 0).link("br", "p", 0).decode("br", "PSLVERR")
+    c.option("br", **{**APB4_NA, "pstrb": pstrb})
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    shapes = [shape[0] for shape in burst_shapes(spec, spec.masters[0], spec.slaves[0])]
+    assert any(name.startswith("narrow") for name in shapes) is narrow

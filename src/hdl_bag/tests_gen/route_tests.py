@@ -1503,8 +1503,8 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
 
     def refused(master: str, r: Any) -> bool:
         """D104: a converter on the way refuses this master's words, so no traffic is possible."""
-        return (
-            r.base < 1 << width[master] and route(SPEC, master, r.base, True, False, {}).may_refuse
+        return r.base < 1 << width[master] and any(
+            route(SPEC, master, r.base, write, False, {}).may_refuse for write in (True, False)
         )
 
     found: list[_Target] = []
