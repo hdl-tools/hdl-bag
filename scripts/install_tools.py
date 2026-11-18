@@ -48,9 +48,11 @@ from tool_specs import (
     tool,
 )
 
-# Homebrew formulae Verilator's build needs on macOS. Apple's bison is 2.3 and its flex
-# 2.5.35; Verilator needs bison >= 3 and flex >= 2.6, so brew's must come first on PATH.
-BREW_BUILD_DEPS = ("autoconf", "bison", "flex", "help2man")
+# Homebrew formulae Verilator's build needs on macOS, because Apple's bison is 2.3 and
+# Verilator needs 3 or newer. Flex is deliberately *not* here: Apple's 2.6.4 is what
+# Verilator expects, while Homebrew currently ships a 2.6.16 snapshot whose FlexLexer.h
+# does not match the scanner Verilator generates, and V3ParseLex.cpp then fails to compile.
+BREW_BUILD_DEPS = ("autoconf", "bison", "help2man")
 
 
 def _say(*parts: str) -> None:
@@ -167,10 +169,11 @@ def _brew_prefix(formula: str) -> str | None:
 
 
 def _darwin_build_env(env: dict[str, str]) -> dict[str, str]:
-    """ENV with brew's bison and flex ahead of Apple's, and flex's headers findable.
+    """ENV with Homebrew's bison ahead of Apple's 2.3, which Verilator is too new for.
 
-    Scoped to the build subprocess: it is deliberately not part of the PATH the user is told
-    to export, which needs only the installed tools.
+    Flex is left to the system on purpose: see BREW_BUILD_DEPS. Scoped to the build
+    subprocess, so it is not part of the PATH the user is told to export, which needs only
+    the installed tools.
     """
     missing = [f for f in BREW_BUILD_DEPS if _brew_prefix(f) is None]
     if missing:
@@ -179,14 +182,7 @@ def _darwin_build_env(env: dict[str, str]) -> dict[str, str]:
             f"`brew install {' '.join(missing)}` (and `xcode-select --install` for the "
             f"compiler), then run this again"
         )
-    ahead = [f"{_brew_prefix(f)}/bin" for f in ("bison", "flex")]
-    flex = _brew_prefix("flex")
-    return {
-        **env,
-        "PATH": os.pathsep.join([*ahead, env.get("PATH", "")]),
-        "CPPFLAGS": f"-I{flex}/include {env.get('CPPFLAGS', '')}".strip(),
-        "LDFLAGS": f"-L{flex}/lib {env.get('LDFLAGS', '')}".strip(),
-    }
+    return {**env, "PATH": os.pathsep.join([f"{_brew_prefix('bison')}/bin", env.get("PATH", "")])}
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], what: str) -> None:
@@ -248,8 +244,11 @@ def _check(chosen: list[Tool], prefix: Path, lock: dict[str, str]) -> int:
     for t in chosen:
         want = _wanted(t, lock).removeprefix("v")
         got = _reported_version(t, prefix)
-        ok = got is not None and want in got
-        print(f"{'ok  ' if ok else 'BAD '} {t.name:14} wants {want:28} {got or '(not installed)'}")
+        # A tool whose pin is not a version can only be confirmed present.
+        ok = got is not None and (want in got or not t.versioned)
+        mark = "ok  " if ok else "BAD "
+        shown = want if t.versioned else f"{want} (a build date)"
+        print(f"{mark} {t.name:14} wants {shown:28} {got or '(not installed)'}")
         if not ok:
             bad.append(t.name)
     if bad:

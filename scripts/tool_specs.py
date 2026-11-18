@@ -58,6 +58,11 @@ class Tool:
     version_args: tuple[str, ...] = ("--version",)
     tail: bool = False
     source: str = ""
+    # Whether the pin can be compared with what the tool reports. False for the OSS CAD
+    # Suite, whose pin is a build date while its tools report their own versions, with no
+    # relation between the two; --check then only confirms it is installed and prints the
+    # version for the record. tests/flows/test_lint.py is what ties that version to the lock.
+    versioned: bool = True
 
 
 _SLANG = "https://github.com/MikePopoloski/slang/releases/download/{SLANG_VERSION}"
@@ -124,6 +129,7 @@ TOOLS: tuple[Tool, ...] = (
         },
         version_args=("--version",),
         tail=True,
+        versioned=False,
     ),
 )
 

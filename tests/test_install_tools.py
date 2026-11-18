@@ -75,6 +75,15 @@ def test_the_oss_cad_suite_comes_last_on_path() -> None:
     assert "/opt/verilator/bin" in head and "/opt/oss-cad-suite/bin" not in head
 
 
+def test_only_the_suite_has_a_pin_that_is_not_a_version() -> None:
+    """The OSS CAD Suite is pinned by build date while its tools report their own versions,
+    with nothing derivable between them, so --check can only confirm it is installed. Every
+    other tool's pin is comparable, and treating one as unversioned by mistake would quietly
+    stop checking it."""
+    s = _specs()
+    assert [t.name for t in s.TOOLS if not t.versioned] == ["oss-cad-suite"]
+
+
 def test_read_lock_overrides_and_derives_the_compact_date() -> None:
     """The Dockerfile passes one pin per build stage with --set instead of copying the whole
     lock in, which is what keeps its Verilator layer cached."""
