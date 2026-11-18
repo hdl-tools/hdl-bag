@@ -34,15 +34,15 @@ from hdl_bag.tests_gen.route_model import (
     pstrb_path,
     region_edges,
     split_error_word,
-    takes_partial_writes,
+    stores_single_bytes,
 )
 
 _AXI = ("AXI4", "AXI4-Lite")
 
 
 def _unaligned_path(spec: Spec) -> bool:
-    """An AXI master reaches, without error, a slave that can take a partial write."""
-    return any(plain_word(spec, m, s) and takes_partial_writes(spec, s)
+    """An AXI master reaches, without error, a slave that stores a partial write as one."""
+    return any((found := plain_word(spec, m, s)) and stores_single_bytes(spec, found[1])
                for m in spec.masters if m.protocol in _AXI for s in spec.slaves)  # fmt: skip
 
 

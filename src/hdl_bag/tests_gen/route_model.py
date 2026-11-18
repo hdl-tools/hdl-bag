@@ -581,6 +581,20 @@ def stores_single_bytes(spec: Spec, exp: Outcome) -> bool:
     return takes_partial_writes(spec, slave) and not tied
 
 
+def writes_whole_words(spec: Spec, exp: Outcome) -> bool:
+    """Whether a partial write that EXP routes stores the whole slave word, as configured: the
+    slave has no strobes, or a bridge on the way has PSTRB tied."""
+    return not stores_single_bytes(spec, exp)
+
+
+def rewrites_words(spec: Spec, exp: Outcome) -> bool:
+    """Whether EXP's write can store one slave word several times: bag_axi2ahb makes one AHB
+    write per set strobe, and each of them stores the whole word on a slave with no strobes."""
+    templates = {b.name: b.template for b in spec.bridges}
+    through = any(templates[b] == "bag_axi2ahb" for b in exp.bridges)
+    return through and writes_whole_words(spec, exp)
+
+
 def takes_partial_writes(spec: Spec, slave: Any) -> bool:
     """False when a partial write onto SLAVE's word cannot be expressed: an APB slave wider
     than a byte with no PSTRB (APB3, or PSTRB tied)."""
@@ -625,13 +639,24 @@ def access_bytes(master: Any) -> int:
     return min(4, int(master.data_width) // 8)
 
 
-def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]]) -> None:
+def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]],
+                whole_word: bool = False, rewrites: bool = False) -> None:  # fmt: skip
     """The bytes the slave stored for a write of DATA at EXP.address: exactly those, each once.
     After an error a split access can have stored only part of it, but nothing else. A beat
-    with no strobes stores nothing, so one a width converter adds is not visible here."""
+    with no strobes stores nothing, so one a width converter adds is not visible here.
+
+    With WHOLE_WORD the rest of each word written may be stored too (writes_whole_words), and
+    with REWRITES a byte may be stored again, with the same value (rewrites_words).
+    """
     want = {exp.address + k: b for k, b in enumerate(data)}
     got = dict(written)
-    assert len(got) == len(written), f"{where}: a byte written twice: {_bytes(written)}"
+    stores = set(written) if rewrites else written
+    assert len(got) == len(stores), f"{where}: a byte written twice: {_bytes(written)}"
+    if whole_word:
+        words = {a // exp.word_bytes for a in want}
+        outside = [(a, v) for a, v in got.items() if a // exp.word_bytes not in words]
+        assert not outside, f"{where}: stored {_bytes(outside)}, outside the words written"
+        got = {a: v for a, v in got.items() if a in want}
     if exp.hits_error_word:
         assert got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"

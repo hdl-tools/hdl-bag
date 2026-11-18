@@ -77,12 +77,13 @@ from hdl_bag.tests_gen.route_model import (
     pslverr_tied,
     pstrb_path,
     region_edges,
+    rewrites_words,
     route,
     saw_access,
     split_error_word,
     stores_single_bytes,
-    takes_partial_writes,
     widest_on_path,
+    writes_whole_words,
 )
 
 SPEC: Spec
@@ -442,7 +443,9 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             )
                             if write:
                                 check_write(where, exp, data.to_bytes(access_bytes(m), "little"),
-                                            slaves[exp.slave].written[stored[exp.slave] :])  # fmt: skip
+                                            slaves[exp.slave].written[stored[exp.slave] :],
+                                            whole_word=writes_whole_words(SPEC, exp),
+                                            rewrites=rewrites_words(SPEC, exp))  # fmt: skip
                             else:
                                 check_read(where, exp, access_bytes(m),
                                            _read_beats(new, exp.word_bytes))  # fmt: skip
@@ -1208,8 +1211,8 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
 
 async def unaligned_axi_writes_store_only_their_bytes(dut: Any) -> None:
     """Every AXI master to every slave it reaches: a write starting 1, 2 and 3 bytes into a
-    word stores exactly the bytes from there to the end of the word, and reads back. APB3 has
-    no PSTRB, so a partial write onto a word wider than a byte cannot be expressed."""
+    word stores exactly the bytes from there to the end of the word, and reads back. With no
+    PSTRB on the way, a partial write onto a word wider than a byte cannot be expressed."""
     masters, slaves, _ = await _bring_up(dut)
     checked = 0
     for m in SPEC.masters:
@@ -1217,7 +1220,7 @@ async def unaligned_axi_writes_store_only_their_bytes(dut: Any) -> None:
             continue
         for s in SPEC.slaves:
             found = plain_word(SPEC, m, s)
-            if found is None or not takes_partial_writes(SPEC, s):
+            if found is None or not stores_single_bytes(SPEC, found[1]):
                 continue
             word, exp = found
             drv, sl = masters[m.name], slaves[s.name]

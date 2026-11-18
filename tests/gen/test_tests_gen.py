@@ -24,13 +24,17 @@ from hdl_bag.regress.dsl import AHB_MASTER_NA, AHB_SLAVE_NA
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
 from hdl_bag.tests_gen.bfm_axi import AxiPortMaster
 from hdl_bag.tests_gen.route_model import (
+    Outcome,
     access_bytes,
     blocking_path,
     cache_after_tie,
+    check_write,
     midpoint_path,
+    rewrites_words,
     route,
     saw_access,
     split_error_word,
+    writes_whole_words,
 )
 
 TESTS_DIR = Path(__file__).parents[1]
@@ -530,3 +534,72 @@ def test_a_wide_slave_sees_a_read_at_the_start_of_its_word(
     0xFFFC at 0xFFF8. A write keeps its exact address."""
     exp = SimpleNamespace(address=0xFFFC, word_bytes=8)
     assert saw_access(exp, seen, write) is matches
+
+
+_WORD = Outcome("s0", 0x40, word_bytes=2)
+
+
+@pytest.mark.parametrize(
+    ("written", "whole_word", "rewrites", "accepted"),
+    [
+        ([(0x40, 0x7B)], False, False, True),
+        ([(0x40, 0x7B), (0x41, 0x00)], False, False, False),  # a neighbour, not asked for
+        ([(0x40, 0x7B), (0x41, 0x00)], True, False, True),  # seed 019: the tie stores the word
+        ([(0x40, 0x7B), (0x42, 0x00)], True, False, False),  # outside the word
+        ([(0x40, 0x11), (0x41, 0x00)], True, False, False),  # the wrong value
+        ([(0x41, 0x00)], True, False, False),  # the byte itself is missing
+        ([(0x40, 0x7B), (0x40, 0x7B)], False, False, False),  # twice
+        ([(0x40, 0x7B), (0x40, 0x7B)], False, True, True),  # seed 048: one write per strobe
+        ([(0x40, 0x7B), (0x40, 0x11), (0x40, 0x7B)], False, True, False),  # two values
+    ],
+)  # fmt: skip
+def test_a_write_stores_what_its_path_can_express(
+    written: list[tuple[int, int]], whole_word: bool, rewrites: bool, accepted: bool
+) -> None:
+    """A tied PSTRB stores the whole slave word, and bag_axi2ahb repeats a word onto a slave with
+    no strobes; neither licenses a wrong value or a byte outside the word."""
+    if accepted:
+        check_write("w", _WORD, b"\x7b", written, whole_word=whole_word, rewrites=rewrites)
+    else:
+        with pytest.raises(AssertionError):
+            check_write("w", _WORD, b"\x7b", written, whole_word=whole_word, rewrites=rewrites)
+
+
+@pytest.mark.parametrize(
+    ("protocol", "template", "whole", "rewrites"),
+    [("APB3", "bag_axi2ahb", True, True), ("APB3", "bag_ahb2apb", True, False),
+     ("APB4", "bag_axi2ahb", False, False), ("AXI4", "bag_axi2ahb", False, False)],
+)  # fmt: skip
+def test_a_path_says_how_it_stores_a_partial_write(
+    protocol: str, template: str, whole: bool, rewrites: bool
+) -> None:
+    slave = SimpleNamespace(name="s0", protocol=protocol, data_width=32)
+    bridge = SimpleNamespace(name="br0", template=template)
+    spec = SimpleNamespace(slaves=[slave], bridges=[bridge], port_options=[])
+    exp = SimpleNamespace(slave="s0", bridges=("br0",))
+    assert writes_whole_words(spec, exp) is whole  # type: ignore[arg-type]
+    assert rewrites_words(spec, exp) is rewrites  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("pstrb", "applies"), [("drive", True), ("tie-default", False)])
+def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
+    tmp_path: Path, pstrb: str, applies: bool
+) -> None:
+    """Seed 022: a bridge with PSTRB tied stores whole words, so an unaligned write through it
+    cannot store only its own bytes."""
+    c = Cfg("strobes", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("br", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "br", 0).link("br", "p", 0).decode("br", "PSLVERR")
+    c.option("br", **{**APB4_NA, "pstrb": pstrb})
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    name = "unaligned_axi_writes_store_only_their_bytes"
+    assert (name in applicable_tests(spec)) is applies
