@@ -289,10 +289,16 @@ def test_golden_collateral_snapshot(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- the header compiles (eda)
 
 
+# gcc first, so the tools image keeps compiling the header with GCC. A host can have a C
+# compiler under another name: on macOS `gcc` is an Apple clang shim, and `clang` or `cc`
+# may be all there is. Every flag below is supported by both front ends.
+COMPILERS = ("gcc", "clang", "cc")
+
+
 @pytest.mark.eda
 def test_c_header_compiles(tmp_path: Path) -> None:
-    gcc = shutil.which("gcc")
-    assert gcc, "gcc not installed"
+    cc = next((found for name in COMPILERS if (found := shutil.which(name))), None)
+    assert cc, f"no C compiler on PATH (tried {', '.join(COMPILERS)})"
     spec = load(GOLDEN_IR)
     root = _generate(spec, GOLDEN_IR, tmp_path / "out")
     asserts = "\n".join(
@@ -301,7 +307,7 @@ def test_c_header_compiles(tmp_path: Path) -> None:
     )
     c = tmp_path / "use.c"
     c.write_text(f'#include "demo_ss_memmap.h"\n#include "demo_ss_memmap.h"\n{asserts}\n')
-    cmd = [gcc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-fsyntax-only",
+    cmd = [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-fsyntax-only",
            "-I", str(root / "sw"), str(c)]  # fmt: skip
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
