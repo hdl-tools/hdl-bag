@@ -26,6 +26,7 @@ from typing import Any
 
 from hdl_bag.bursts import FIXED, INCR, WRAP, refusing_converter
 from hdl_bag.ir import Spec
+from hdl_bag.protocols import tie_value
 
 ERROR_WORD = 8  # region end - 8 answers with a slave error
 
@@ -62,6 +63,12 @@ def pin_sets(spec: Spec) -> list[dict[str, bool]]:
 
 def prot_tied(spec: Spec, port: str) -> bool:
     return _option(spec, port, "prot") in ("tie-0", "tie-default")
+
+
+def cache_after_tie(spec: Spec, port: str, cache: int) -> int:
+    """The AxCACHE[1:0] PORT sends for CACHE: what Port_Options ties it to, if it does."""
+    tie = _option(spec, port, "cache")
+    return tie_value("awcache", tie) & 0b11 if tie in ("tie-0", "tie-default") else cache
 
 
 def pslverr_tied(spec: Spec, port: str) -> bool:

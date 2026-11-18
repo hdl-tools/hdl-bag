@@ -3,6 +3,7 @@
 """The generated cocotb tests: what `bag generate` writes, and which tests apply."""
 
 import ast
+import asyncio
 import re
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
+from cocotbext.axi import AxiProt
 from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag.tests_gen
@@ -19,9 +21,11 @@ from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import Spec, load
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
+from hdl_bag.tests_gen.bfm_axi import AxiPortMaster
 from hdl_bag.tests_gen.route_model import (
     access_bytes,
     blocking_path,
+    cache_after_tie,
     midpoint_path,
     split_error_word,
 )
@@ -396,3 +400,51 @@ def test_the_split_error_test_needs_a_slave_that_can_answer_an_error(
     assert (split_error_word(spec, spec.masters[0], spec.slaves[0]) is not None) is applies
     name = "an_error_on_any_beat_of_a_split_access_reaches_the_master"
     assert (name in applicable_tests(spec)) is applies
+
+
+class _Recorder:
+    """Stands in for cocotbext-axi's master and keeps the keywords of each call."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def write(self, addr: int, data: bytes, **kw: object) -> SimpleNamespace:
+        self.calls.append(kw)
+        return SimpleNamespace(resp=0)
+
+    async def read(self, addr: int, length: int, **kw: object) -> SimpleNamespace:
+        self.calls.append(kw)
+        return SimpleNamespace(resp=0, data=bytes(length))
+
+
+def test_a_burst_is_a_secure_access_like_every_other_helper() -> None:
+    """Seed 029: cocotbext-axi's default PROT is non-secure, so a burst to a secure-only
+    region, which the paths are chosen as a secure access, was answered DECERR."""
+    port = AxiPortMaster.__new__(AxiPortMaster)
+    recorder = _Recorder()
+    port.master, port.has_prot = recorder, True
+    asyncio.run(port.burst_write(0x40, bytes(8)))
+    asyncio.run(port.burst_read(0x40, 8))
+    assert [c["prot"] for c in recorder.calls] == [AxiProt(0), AxiProt(0)]
+
+
+@pytest.mark.parametrize(
+    ("option", "cache"), [("drive", 0b11), ("tie-0", 0), ("tie-default", 0b11)]
+)
+def test_a_cache_tie_sets_the_axcache_a_port_sends(option: str, cache: int) -> None:
+    """Seed 022: a port with CACHE tied to 0 sends AxCACHE 0, whatever its master drives."""
+    spec = SimpleNamespace(port_options=[SimpleNamespace(port="m0", cache=option)])
+    assert cache_after_tie(spec, "m0", 0b11) == cache  # type: ignore[arg-type]
+
+
+@pytest.mark.eda
+def test_the_route_test_passes_when_no_slave_can_answer_an_error(tmp_path: Path) -> None:
+    """Seed 004: with PSLVERR tied on the only slave no access can see a slave error, so the
+    route test must not require one."""
+    c = _narrow_master(16, False)
+    c.data.port_options = [r for r in c.data.port_options if r[0] != "s0"]
+    c.option("s0", **{**APB4_NA, "pslverr": "tie-0"})
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    report = run_tests(generate(spec, tmp_path / "out", tmp_path))
+    assert [f.format() for f in report.unwaived] == []

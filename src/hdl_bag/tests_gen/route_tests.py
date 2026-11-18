@@ -56,6 +56,7 @@ from hdl_bag.tests_gen.route_model import (
     burst_path,
     burst_refused,
     burst_shapes,
+    cache_after_tie,
     check_burst_write,
     check_read,
     check_split_write_error,
@@ -249,13 +250,14 @@ def _attributes(m: Any, prot: int, nonsec: bool,
         attrs = from_prot(0b010, 0b11)
     else:  # AXI masters leave AxCACHE at 0b0011 (cocotbext-axi; the tie default)
         sig = "awprot" if m.protocol in AXI else "pprot"
-        attrs = from_prot(_tie(SPEC, m.name, sig) if tied else prot, 0b11)
+        attrs = from_prot(_tie(SPEC, m.name, sig) if tied else prot,
+                          cache_after_tie(SPEC, m.name, 0b11))  # fmt: skip
     for b in bridges:
         priv, ns, instr, cache = attrs
         cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
         if downstream[b] == "AXI4-Lite":
             cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
-        attrs = (priv, ns, instr, cache)
+        attrs = (priv, ns, instr, cache_after_tie(SPEC, b, cache))
         if prot_tied(SPEC, b):  # the bridge's downstream end has its PROT tied
             if downstream[b] == "AHB-Lite":
                 attrs = from_ahb(_tie(SPEC, b, "hprot"), 1)
