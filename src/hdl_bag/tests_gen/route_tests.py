@@ -78,6 +78,7 @@ from hdl_bag.tests_gen.route_model import (
     pstrb_path,
     region_edges,
     route,
+    saw_access,
     split_error_word,
     stores_single_bytes,
     takes_partial_writes,
@@ -425,7 +426,8 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             # A width converter may add beats (zero-strobe halves), so the
                             # access must be among what the slave saw, not necessarily last.
                             new = slaves[exp.slave].log[before[exp.slave] :]
-                            match = [e for e in new if e.addr == exp.address and e.write == write]
+                            match = [e for e in new
+                                     if e.write == write and saw_access(exp, e.addr, write)]  # fmt: skip
                             assert match, (
                                 f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]} "
                                 f"write={write}, expected {exp.address:#x}"

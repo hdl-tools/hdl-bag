@@ -29,6 +29,8 @@ from hdl_bag.ir import Spec
 from hdl_bag.protocols import tie_value
 
 ERROR_WORD = 8  # region end - 8 answers with a slave error
+# Bridges that narrow on AXI4 ports with axi_dw_converter (bag_axil2apb uses the AXI4-Lite one).
+AXI4_CONVERTING_BRIDGES = ("bag_axi2ahb", "bag_axi2apb", "bag_axi2axil")
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,19 @@ def decide(spec: Spec, fabric: Any, master: str, addr: int, write: bool,
     return fallback(fabric, master, region)
 
 
+def _axi4_downsizer_in_front(spec: Spec, port: str, fabric: Any) -> bool:
+    """Whether a dw adapter narrows the AXI4 path from FABRIC to PORT. Walked from the fabric, as
+    the adapters are in order from the port side: a pc changes the protocol the next one sees."""
+    chain = [a for a in spec.adapters if a.port == port and a.fabric == fabric.name]
+    protocol = fabric.protocol
+    for a in sorted(chain, key=lambda a: -a.chain_index):
+        if a.type == "pc":
+            protocol = a.params["to"]
+        elif a.type == "dw" and protocol == "AXI4" and int(a.params["to"]) < int(a.params["from"]):
+            return True
+    return False
+
+
 def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
           pins: dict[str, bool]) -> Outcome:  # fmt: skip
     fabrics = {f.name: f for f in spec.fabrics}
@@ -169,16 +184,17 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
+            narrows = fabrics[b.upstream].data_width > fabrics[b.downstream].data_width
+            if _axi4_downsizer_in_front(spec, target, fabric) or (
+                narrows and b.template in AXI4_CONVERTING_BRIDGES
+            ):
+                lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
-            elif b.template == "bag_axi2apb" and fabric.data_width == 8:
-                # From AXI4-Lite this path runs on AXI4 ports at full size: axi_dw_downsizer
-                # starts at the address, so the bytes of the beat below it are not accessed.
-                lo = max(lo, 0)
             nonsec = nonsec or prot_tied(spec, b.name)
             masked = masked or pslverr_tied(spec, b.name)
             crossed.append(b.name)
@@ -186,6 +202,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         word = slaves[target].data_width // 8  # a slave answers per data word
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
+        if _axi4_downsizer_in_front(spec, target, fabric):
+            lo = max(lo, 0)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
         # converters read all of it.
@@ -205,18 +223,20 @@ def _read_cover(spec: Spec, master: str, fabric: Any, addr: int) -> tuple[int, i
 
     AXI4 masters issue narrow (size 2) transfers: the 4 addressed bytes. An AXI4-Lite beat is
     always full width: on an AXI4-Lite fabric (whose upsizers keep the full width) it covers
-    the whole aligned beat; behind a pc onto an AXI4 fabric it becomes an AXI4 transfer of
-    the Lite width, which covers from the address to the end of its aligned beat (AXI
-    unaligned-transfer rule). Width converters further on read all of what is covered.
+    the whole aligned beat, also for an AXI4 master, whose pc makes each read such a beat.
+    Behind a pc onto an AXI4 fabric an AXI4-Lite beat becomes an AXI4 transfer of the Lite
+    width, which covers from the address to the end of its aligned beat (AXI unaligned-transfer
+    rule). route() narrows this where an AXI4 downsizer starts at the address.
     """
     m = next(x for x in spec.masters if x.name == master)
+    if fabric.protocol == "AXI4-Lite" and m.protocol in ("AXI4", "AXI4-Lite"):
+        lite_master = m.data_width // 8 if m.protocol == "AXI4-Lite" else 0
+        beat = max(lite_master, fabric.data_width // 8)
+        start = addr // beat * beat
+        return start - addr, start + beat - addr
     if m.protocol != "AXI4-Lite":
         return 0, 4
     beat = m.data_width // 8
-    if fabric.protocol == "AXI4-Lite":
-        beat = max(beat, fabric.data_width // 8)
-        start = addr // beat * beat
-        return start - addr, start + beat - addr
     return 0, addr // beat * beat + beat - addr
 
 
@@ -589,6 +609,14 @@ def split_error_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome]
     if slave.data_width >= 32 or pslverr_tied(spec, slave.name):
         return None
     return plain_word(spec, master, slave)
+
+
+def saw_access(exp: Any, addr: int, write: bool) -> bool:
+    """Whether a slave logging ADDR saw the access EXP expects. A write keeps its address. A read
+    can arrive at the start of the slave's word: a full-size AHB transfer must be aligned."""
+    if write:
+        return bool(addr == exp.address)
+    return bool(addr // exp.word_bytes == exp.address // exp.word_bytes)
 
 
 def access_bytes(master: Any) -> int:

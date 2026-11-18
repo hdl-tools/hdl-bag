@@ -20,6 +20,7 @@ from hdl_bag.cli import main
 from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import Spec, load
+from hdl_bag.regress.dsl import AHB_MASTER_NA, AHB_SLAVE_NA
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
 from hdl_bag.tests_gen.bfm_axi import AxiPortMaster
 from hdl_bag.tests_gen.route_model import (
@@ -27,6 +28,8 @@ from hdl_bag.tests_gen.route_model import (
     blocking_path,
     cache_after_tie,
     midpoint_path,
+    route,
+    saw_access,
     split_error_word,
 )
 
@@ -448,3 +451,82 @@ def test_the_route_test_passes_when_no_slave_can_answer_an_error(tmp_path: Path)
     assert findings == [] and spec is not None
     report = run_tests(generate(spec, tmp_path / "out", tmp_path))
     assert [f.format() for f in report.unwaived] == []
+
+
+def _behind_lite64(kind: str) -> Cfg:
+    """A 32-bit APB4 master reaching slave s0 (region 0x4000_0000, 4 KiB) over a 64-bit AXI4-Lite
+    fabric, so each read is a full 64-bit beat. KIND says what s0 is and how it is reached."""
+    c = Cfg(f"lite64{kind}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.master("m0", "APB4", 32, 32, "D0").link("m0", "p", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("br", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "br", 0).link("br", "l", 0).decode("br", "DECERR").option("br", **AXIL_NA)
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    if kind == "axi4":
+        c.slave("s0", "AXI4", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXI4_NA)
+    elif kind == "lite":
+        c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
+    else:
+        dw = int(kind[3:])
+        proto, template = (
+            ("AHB-Lite", "bag_axi2ahb") if kind[:3] == "ahb" else ("APB4", "bag_axi2apb")
+        )
+        c.fabric("d", proto, dw, 32, "D0")
+        c.bridge("b2", 0x4000_0000, template=template)
+        c.link("l", "b2", 0).link("b2", "d", 0).decode(
+            "b2", "HRESP_ERROR" if proto != "APB4" else "PSLVERR"
+        )
+        c.option("b2", **(AHB_MASTER_NA if proto != "APB4" else APB4_NA))
+        c.region("b2", "win2", 0x4000_0000, 0x1_0000)
+        na = AHB_SLAVE_NA if proto != "APB4" else APB4_NA
+        c.slave("s0", proto, dw, 32, "D0").link("d", "s0", 0).option("s0", **na)
+    return c.region("s0", "regs", 0x4000_0000, 0x1000)
+
+
+@pytest.mark.parametrize(
+    ("kind", "whole_beat"),
+    [("axi4", False), ("ahb32", False), ("apb8", False), ("apb16", False), ("lite", True),
+     ("ahb64", True)],
+)  # fmt: skip
+def test_a_read_of_the_last_word_meets_the_error_word_only_if_its_beat_is_read_whole(
+    tmp_path: Path, kind: str, whole_beat: bool
+) -> None:
+    """Seeds 005 and 009: an AXI4 downsizer starts at the address, so a 64-bit beat read at the
+    last word never reads the error word below it. The AXI4-Lite downsizer reads the whole beat,
+    and a 64-bit slave answers the whole beat in one word."""
+    spec, findings = resolve_cfg(_behind_lite64(kind), tmp_path)
+    assert findings == [] and spec is not None
+    assert route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error is whole_beat
+
+
+def test_an_axi4_master_on_an_axi4_lite_fabric_reads_whole_beats(tmp_path: Path) -> None:
+    """Seed 037: the protocol converter turns any read into a full beat of the fabric."""
+    c = Cfg("pcbeat", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 64, 32, "D0").link("m0", "l", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    first = route(spec, "m0", 0x4000_0000, False, False, {})
+    assert first.words == {0x4000_0000 // 4, 0x4000_0004 // 4}
+    assert route(spec, "m0", 0x4000_0FFF, False, False, {}).slave_error
+
+
+@pytest.mark.parametrize(
+    ("seen", "write", "matches"),
+    [(0xFFF8, False, True), (0xFFFC, False, True), (0xFFF0, False, False), (0xFFF8, True, False),
+     (0xFFFC, True, True)],
+)  # fmt: skip
+def test_a_wide_slave_sees_a_read_at_the_start_of_its_word(
+    seen: int, write: bool, matches: bool
+) -> None:
+    """Five seeds: a full-size AHB transfer must be aligned, so a 64-bit slave logs a read of
+    0xFFFC at 0xFFF8. A write keeps its exact address."""
+    exp = SimpleNamespace(address=0xFFFC, word_bytes=8)
+    assert saw_access(exp, seen, write) is matches
