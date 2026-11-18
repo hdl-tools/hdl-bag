@@ -341,7 +341,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
     i, k = (int(x) for x in (os.environ.get("BAG_ROUTE_MASTERS") or "0/1").split("/"))
     masters, slaves, _ = await _bring_up(dut)
     secure = any(r.secure for r in SPEC.memory_map)
-    checked = errors = 0
+    checked = errors = refused_errors = 0
     reached: set[str] = set()
     for pins in _pin_sets():
         for x, on in pins.items():
@@ -377,6 +377,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             # D104: a non-modifiable access a converter would have to split.
                             assert err and not grew, f"{where}: not refused: err={err} at {grew}"
                             assert m.protocol not in AXI or resp == 2, f"{where}: response {resp}"
+                            refused_errors += exp.slave_error
                             checked += 1
                             reached.add(m.name)
                             continue
@@ -449,9 +450,10 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                         reached.add(m.name)
                         for kind, key in coverage.access_bins(SPEC, m, addr, write, nonsec, exp):
                             coverage.hit(kind, key)
-    # A slave with PSLVERR tied never answers an error, so a design of only those shows none.
+    # A slave with PSLVERR tied never answers an error, so a design of only those shows none;
+    # nor does one whose error words only accesses a converter refuses would reach (D104).
     can_err = not all(pslverr_tied(SPEC, s.name) for s in SPEC.slaves)
-    assert checked > 0 and (errors > 0 or not can_err), (checked, errors)
+    assert checked > 0 and (errors > 0 or refused_errors > 0 or not can_err), (checked, errors)
     assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
 
