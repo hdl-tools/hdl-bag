@@ -55,11 +55,13 @@ not have them. Nothing may depend on them, and tests that need them skip when th
   logic goes in the package.
 - **The manual.** Its rules are the docstring of `tests/manual/test_manual.py`. Every example is a
   file under `docs/manual/examples/` that a test replays; no example is typed into the text. A
-  change of behaviour updates the manual in the same PR.
+  change of behaviour updates the manual in the same PR. Paths that docstring cites in `design/`,
+  `plan/` or `../hdl-vet` are not in a clone: the code wins.
 - **Template changes** (`template/builder.py`) need the golden workbook refreshed from the CI
-  `golden-demo_ss` artifact, then the golden IR (`bag ir tests/golden/demo_ss.xlsx -o
-  tests/golden/demo_ss.ir.yaml`) and the collateral snapshots (`BAG_UPDATE_SNAPSHOTS=1`). Their
-  text diffs should be hash lines only.
+  `golden-demo_ss` artifact (its `demo_ss.recalc.xlsx` replaces `tests/golden/demo_ss.xlsx`), then
+  the golden IR (`uv run bag ir tests/golden/demo_ss.xlsx -o tests/golden/demo_ss.ir.yaml`) and the
+  collateral snapshots (`BAG_UPDATE_SNAPSHOTS=1`). The snapshot diffs should be hash lines only.
+  The maintainer also runs the private reference-workbook comparison for template changes.
 - **Licences.** Only permissive third-party RTL. Every `.py`, `.sv` and Dockerfile carries an SPDX
   header (`scripts/check_spdx.py`); vendored files keep their upstream headers.
 
@@ -82,31 +84,41 @@ not have them. Nothing may depend on them, and tests that need them skip when th
 
 ## Commands
 
+You need `uv`, and for the manual TeX Live or MiKTeX with `latexmk`.
+
 ```sh
 uv sync
 uv run ruff check && uv run ruff format --check && uv run mypy src tests scripts
+uv run python scripts/check_spdx.py \
+  $(git ls-files '*.py' '*.sv' ':(exclude)src/hdl_bag/rtl/vendor') tools/Dockerfile
 uv run pytest -m "not eda" -n 4          # host tests, no EDA tools
 cd docs/manual && latexmk -pdf -interaction=nonstopmode -halt-on-error hdl-bag.tex
 ```
 
 Run the full host suite before every push, not only the tests you changed.
 
-`BAG_MANUAL_UPDATE=1` rewrites the manual's transcripts and `docs/manual/checks.tex` from what the
-code prints now. `BAG_UPDATE_SNAPSHOTS=1` rewrites the collateral snapshots. Read the diff before
-committing either.
+`BAG_MANUAL_UPDATE=1 uv run pytest tests/manual` rewrites the manual's host transcripts and
+`docs/manual/checks.tex` from what the code prints now. Transcripts under
+`docs/manual/examples/console/eda/` need the same variable with `-m eda` in the tools image.
+`BAG_UPDATE_SNAPSHOTS=1` rewrites the collateral snapshots. Read the diff before committing either.
 
-EDA tests need the pinned tools in `tools.lock`. The tools image has them all:
+EDA tests need the pinned tools in `tools.lock`. Build the tools image once, then run in it. The
+named volume keeps the container's Python environment apart from the host's `.venv`:
 
 ```sh
-docker run --rm -v "$PWD:/work" -w /work ghcr.io/hdl-tools/hdl-bag-tools:main \
+docker build -t hdl-bag-tools:local tools
+docker run --rm -v "$PWD:/work" -v hdl-bag-venv:/venv -e UV_PROJECT_ENVIRONMENT=/venv \
+  -e UV_LINK_MODE=copy -w /work hdl-bag-tools:local \
   sh -c 'uv run pytest -m eda -n 2 -q <targets>'
 ```
 
-CI is the EDA evidence:
+CI is the EDA evidence. Dispatching a workflow needs write access to the repository; without it,
+ask the maintainer to run it.
 
 | Command | Runs |
 | --- | --- |
 | A pull request | Host tests and the smoke subset (`eda and smoke`) |
+| The `full-eda` label on a pull request | The full list, on that push and every later one |
 | `gh workflow run pr.yml --ref <branch> -f suite=full` | The full list (`eda and not deep`) |
 | `gh workflow run pr.yml --ref <branch> -f select=<pytest -k>` | Only the matching EDA tests |
 | `gh workflow run pr.yml --ref <branch> -f suite=deep` | Only the deep tests |
@@ -116,22 +128,26 @@ CI is the EDA evidence:
 complete run only. After a partial run, set the measured entries by hand. A new EDA test gets a
 provisional entry until CI measures it.
 
-`bag regress --seed S -o out/regress` reruns one random seed. Mutations on hand-written RTL go on a
-scratch copy, never in the repository.
+`uv run bag regress --seed S -o out/regress` reruns one random seed. Run it in the tools image;
+`--no-formal` skips formal. Mutations on hand-written RTL go on a scratch copy, never in the
+repository.
 
 ## Workflow
 
-- **One PR per topic**, on a `phase<N>/<topic>` branch from an up-to-date `main`. The maintainer
-  merges. State the next item before starting it, and don't start it until the current PR is merged.
+- **One PR per topic**, on a `phase<N>/<topic>` branch from an up-to-date `main` (ask the
+  maintainer for the current phase). The maintainer merges. State your next item to the maintainer,
+  and don't start it until your current PR is merged.
 - **Reviews.** Every RTL, verification or documentation PR gets an independent, review-only pass by
-  someone who did not write it. Fix the findings in the same PR, with a failing test first for bugs,
-  and summarise the review in the PR description.
+  a person or agent that did not write it. Fix the findings in the same PR, with a failing test
+  first for bugs, and summarise the review in the PR description.
 - **CI.** A PR is ready only when CI passes on its final commit. Record the run link and the slowest
   EDA shard in the PR description.
 - **Attribution.** None in commit messages or PR descriptions.
 - **Reporting.** State results plainly, including your own mistakes, and say what was verified
   locally and what in CI.
-- **Decisions.** Settled design decisions are not re-argued. Ask the maintainer when a choice is
-  genuinely theirs, such as user-visible behaviour, and offer options with a recommendation.
+- **Decisions.** Decisions cited in the code as D-numbers are settled and are not re-argued. Their
+  full record is private, so ask the maintainer if the code comment does not explain one. Ask too
+  when a choice is genuinely theirs, such as user-visible behaviour, and offer options with a
+  recommendation.
 - **Privacy.** This repository is public. Keep personal details, local paths, credentials and
   private planning material out of commits, PRs and issues.
