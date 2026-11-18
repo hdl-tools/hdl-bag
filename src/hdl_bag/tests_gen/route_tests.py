@@ -50,13 +50,13 @@ from hdl_bag.tests_gen.bfm import (
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
     access_bytes,
+    attributes,
     blocking_path,
     burst_addresses,
     burst_bytes,
     burst_path,
     burst_refused,
     burst_shapes,
-    cache_after_tie,
     check_burst_write,
     check_read,
     check_split_write_error,
@@ -77,6 +77,7 @@ from hdl_bag.tests_gen.route_model import (
     prot_tied,
     pslverr_tied,
     pstrb_path,
+    refused_access,
     region_edges,
     rewrites_words,
     route,
@@ -225,49 +226,9 @@ async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str,
     return masters, slaves, clocks
 
 
-def _tie(spec: Spec, port: str, sig: str) -> int:
-    """Value a Port_Options-tied PROT signal carries (D28: security bits non-secure)."""
-    opt = next(o for o in spec.port_options if o.port == port)
-    default = {"hprot": 0b0011, "pprot": 0}.get(sig, 0) if opt.prot == "tie-default" else 0
-    return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
-
-
 def _attributes(m: Any, prot: int, nonsec: bool,
                 bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
-    """(privileged, non-secure, instruction, AxCACHE[1:0]) of an access as it leaves the last
-    bridge: each bridge maps them to its downstream protocol."""
-    templates = {b.name: b.template for b in SPEC.bridges}
-    downstream = {b.name: next(f.protocol for f in SPEC.fabrics if f.name == b.downstream)
-                  for b in SPEC.bridges}  # fmt: skip
-
-    def from_ahb(h: int, ns: int) -> tuple[int, int, int, int]:
-        return h >> 1 & 1, ns, 1 - (h & 1), h >> 2 & 3
-
-    def from_prot(p: int, cache: int) -> tuple[int, int, int, int]:
-        return p & 1, p >> 1 & 1, p >> 2 & 1, cache
-
-    tied = prot_tied(SPEC, m.name)
-    if m.protocol == "AHB-Lite":
-        attrs = from_ahb(_tie(SPEC, m.name, "hprot") if tied else prot, 1 if tied else int(nonsec))
-    elif m.protocol == "APB3":  # no PPROT: a bridge takes 3'b010 (non-secure, D28)
-        attrs = from_prot(0b010, 0b11)
-    else:  # AXI masters leave AxCACHE at 0b0011 (cocotbext-axi; the tie default)
-        sig = "awprot" if m.protocol in AXI else "pprot"
-        attrs = from_prot(_tie(SPEC, m.name, sig) if tied else prot,
-                          cache_after_tie(SPEC, m.name, 0b11))  # fmt: skip
-    for b in bridges:
-        priv, ns, instr, cache = attrs
-        cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
-        if downstream[b] == "AXI4-Lite":
-            cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
-        attrs = (priv, ns, instr, cache_after_tie(SPEC, b, cache))
-        if prot_tied(SPEC, b):  # the bridge's downstream end has its PROT tied
-            if downstream[b] == "AHB-Lite":
-                attrs = from_ahb(_tie(SPEC, b, "hprot"), 1)
-            else:  # a PROT tie leaves the cache attributes alone
-                tie = _tie(SPEC, b, "awprot" if downstream[b] in AXI else "pprot")
-                attrs = from_prot(tie, attrs[3])
-    return attrs
+    return attributes(SPEC, m, prot, nonsec, bridges)
 
 
 def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,
@@ -412,6 +373,13 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                         want_resp = _expected_resp(m, exp, write)
                         where = f"{m.name} {'W' if write else 'R'} {addr:#x} nonsec={nonsec} pins={pins}"
                         grew = {n for n, s in slaves.items() if len(s.log) != before[n]}
+                        if refused_access(SPEC, m, exp, prot, ns, addr, access_bytes(m)):
+                            # D104: a non-modifiable access a converter would have to split.
+                            assert err and not grew, f"{where}: not refused: err={err} at {grew}"
+                            assert m.protocol not in AXI or resp == 2, f"{where}: response {resp}"
+                            checked += 1
+                            reached.add(m.name)
+                            continue
                         if exp.slave is None:
                             assert err == (not exp.masked) and not grew, (
                                 f"{where}: expected {'a masked' if exp.masked else 'an'} error, "
@@ -1522,7 +1490,7 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         if r.base + 48 >= 1 << width[master] or (r.secure and master not in able):
             return False
         return all((e := route(SPEC, master, r.base + 4 * k, write, False, {})).slave == r.slave
-                   and not e.slave_error for k in range(12))  # fmt: skip
+                   and not e.slave_error and not e.may_refuse for k in range(12))  # fmt: skip
 
     def target(r: Any, master: str) -> _Target | None:
         writes, reads = reach(master, r, True), reach(master, r, False)
@@ -1530,10 +1498,20 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
 
     regions = sorted((r for r in SPEC.memory_map if r.slave in slave_names),
                      key=lambda r: (r.access != "RW", r.secure, r.base))  # fmt: skip
+
+    def refused(master: str, r: Any) -> bool:
+        """D104: a converter on the way refuses this master's words, so no traffic is possible."""
+        return (
+            r.base < 1 << width[master] and route(SPEC, master, r.base, True, False, {}).may_refuse
+        )
+
     found: list[_Target] = []
     for s in sorted(_axi_names(SPEC.slaves)):
         options = [t for r in regions if r.slave == s for m in SPEC.masters
                    if (t := target(r, m.name)) is not None]  # fmt: skip
+        if not options and any(refused(m.name, r) for r in regions if r.slave == s
+                               for m in SPEC.masters):  # fmt: skip
+            continue
         assert options, f"AXI slave {s}: no master reaches it, so no ordering can be checked"
         found.append(max(options, key=lambda t: (t.writes and t.reads, t.writes, t.reads)))
         # A read-only and a write-only way in together cover all three of its channels.
@@ -1541,6 +1519,8 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
             found += [t for t in options if t.writes != found[-1].writes][:1]
     for name in sorted(_axi_names(SPEC.masters)):
         options = [t for r in regions if (t := target(r, name)) is not None]
+        if not options and any(refused(name, r) for r in regions):
+            continue
         assert options, f"AXI master {name}: it reaches no slave, so no ordering can be checked"
         if not any(t.master == name and t.writes and t.reads for t in found):
             found.append(max(options, key=lambda t: (t.writes and t.reads, t.writes, t.reads)))

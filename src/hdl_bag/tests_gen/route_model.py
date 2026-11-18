@@ -43,6 +43,7 @@ class Outcome:
     hits_error_word: bool = False  # the slave answers with an error, masked or not
     word_bytes: int = 4  # the slave's data width
     words: frozenset[int] = frozenset()  # slave words (index) the access may reach
+    may_refuse: bool = False  # D104: a converter on the way can answer SLVERR
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -174,6 +175,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     fabrics = {f.name: f for f in spec.fabrics}
     bridges = {b.name: b for b in spec.bridges}
     slaves = {s.name: s for s in spec.slaves}
+    origin = master
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
     # Bytes the access covers, relative to addr: [lo, hi). A write covers its 4 bytes
     # (added zero-strobe beats write nothing); a read can cover more (_read_cover).
@@ -222,6 +224,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         return Outcome(
             target, visible, masked=masked, slave_error=error and not masked, nonsec=nonsec,
             bridges=tuple(crossed), hits_error_word=error, word_bytes=word, words=frozenset(words),
+            may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -390,6 +393,7 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
             # takes would not read back).
             ok &= wr.slave is not None and not wr.slave_error and not wr.masked
             ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
+            ok &= not wr.may_refuse and not rd.may_refuse
             if direct:
                 ok &= not wr.bridges and wr.slave in axi_slaves
             if unadapted:
@@ -505,6 +509,120 @@ def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> b
     """Whether a converter on the way answers this AXI4 burst with SLVERR (hdl_bag.bursts, which
     bag check's WRAP warning uses too)."""
     return refusing_converter(spec, m.name, exp.bridges, exp.slave, burst, beats) is not None
+
+
+def _tie(spec: Spec, port: str, sig: str) -> int:
+    """Value a Port_Options-tied PROT signal carries (D28: security bits non-secure)."""
+    opt = next(o for o in spec.port_options if o.port == port)
+    default = {"hprot": 0b0011, "pprot": 0}.get(sig, 0) if opt.prot == "tie-default" else 0
+    return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
+
+
+def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
+               bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
+    """(privileged, non-secure, instruction, AxCACHE[1:0]) of an access as it leaves the last
+    bridge: each bridge maps them to its downstream protocol."""
+    templates = {b.name: b.template for b in spec.bridges}
+    downstream = {b.name: next(f.protocol for f in spec.fabrics if f.name == b.downstream)
+                  for b in spec.bridges}  # fmt: skip
+
+    def from_ahb(h: int, ns: int) -> tuple[int, int, int, int]:
+        return h >> 1 & 1, ns, 1 - (h & 1), h >> 2 & 3
+
+    def from_prot(p: int, cache: int) -> tuple[int, int, int, int]:
+        return p & 1, p >> 1 & 1, p >> 2 & 1, cache
+
+    tied = prot_tied(spec, m.name)
+    if m.protocol == "AHB-Lite":
+        attrs = from_ahb(_tie(spec, m.name, "hprot") if tied else prot, 1 if tied else int(nonsec))
+    elif m.protocol == "APB3":  # no PPROT: a bridge takes 3'b010 (non-secure, D28)
+        attrs = from_prot(0b010, 0b11)
+    else:  # AXI masters leave AxCACHE at 0b0011 (cocotbext-axi; the tie default)
+        sig = "awprot" if m.protocol in ("AXI4", "AXI4-Lite") else "pprot"
+        attrs = from_prot(_tie(spec, m.name, sig) if tied else prot,
+                          cache_after_tie(spec, m.name, 0b11))  # fmt: skip
+    for b in bridges:
+        priv, ns, instr, cache = attrs
+        cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
+        if downstream[b] == "AXI4-Lite":
+            cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
+        attrs = (priv, ns, instr, cache_after_tie(spec, b, cache))
+        if prot_tied(spec, b):  # the bridge's downstream end has its PROT tied
+            if downstream[b] == "AHB-Lite":
+                attrs = from_ahb(_tie(spec, b, "hprot"), 1)
+            else:  # a PROT tie leaves the cache attributes alone
+                tie = _tie(spec, b, "awprot" if downstream[b] in ("AXI4", "AXI4-Lite") else "pprot")
+                attrs = from_prot(tie, attrs[3])
+    return attrs
+
+
+def split_refused(cache: int, size: int, addr: int, beats: int, width: int) -> bool:
+    """Whether PULP axi_to_axi_lite answers SLVERR (D104): its burst splitter refuses a
+    non-modifiable transaction (AxCACHE[1] low) of AxLEN 1 to 16. SIZE bytes per beat at ADDR
+    reach it through axi_dw_downsizer, which makes more beats of a transfer wider than WIDTH."""
+    if cache & 0b10:
+        return False
+    ratio = (size + width - 1) // width
+    align = (addr & (size - 1) & ~(width - 1)) // width
+    return 2 <= beats * ratio - align <= 17
+
+
+def _pc_width(spec: Spec, port: str, fabric: Any, start: int, from_port: bool) -> int | None:
+    """The data width (bits) at the AXI4 to AXI4-Lite pc adapter between PORT and FABRIC, in the
+    direction of travel from a width of START, or None if there is none."""
+    chain = sorted((a for a in spec.adapters if a.port == port and a.fabric == fabric.name),
+                   key=lambda a: a.chain_index, reverse=not from_port)  # fmt: skip
+    width = start
+    for a in chain:
+        if a.type == "dw":
+            width = int(a.params["to"])
+        elif a.type == "pc" and a.params["from"] == "AXI4":
+            return width
+    return None
+
+
+def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
+               slave: str) -> list[tuple[int, int, int]]:  # fmt: skip
+    """Each axi_to_axi_lite on the way from MASTER to SLAVE: (the bridges crossed before it, the
+    bytes per beat at most on its way there, its data width in bytes)."""
+    by_name = {f.name: f for f in spec.fabrics}
+    m = next(x for x in spec.masters if x.name == master)
+    fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
+    out: list[tuple[int, int, int]] = []
+    narrowest = m.data_width
+    if (w := _pc_width(spec, master, fabric, m.data_width, True)) is not None:
+        out.append((0, min(narrowest, w) // 8, w // 8))
+    for k, name in enumerate(bridges):
+        narrowest = min(narrowest, fabric.data_width)
+        b = next(x for x in spec.bridges if x.name == name)
+        down = by_name[b.downstream]
+        if (w := _pc_width(spec, name, fabric, fabric.data_width, False)) is not None:
+            out.append((k, min(narrowest, w) // 8, w // 8))
+        elif fabric.protocol == "AXI4" and b.template in ("bag_axi2apb", "bag_axi2axil"):
+            out.append((k, narrowest // 8, min(fabric.data_width, down.data_width) // 8))
+        fabric = down
+    narrowest = min(narrowest, fabric.data_width)
+    if (w := _pc_width(spec, slave, fabric, fabric.data_width, False)) is not None:
+        out.append((len(bridges), min(narrowest, w) // 8, w // 8))
+    return out
+
+
+def _may_refuse(spec: Spec, master: str, bridges: tuple[str, ...], slave: str) -> bool:
+    """Whether a converter on this path can see a non-modifiable transaction (D104)."""
+    m = next(x for x in spec.masters if x.name == master)
+    prots = range(16) if m.protocol == "AHB-Lite" else (0,)
+    return any(not attributes(spec, m, prot, False, bridges[:k])[3] & 0b10
+               for k, _, _ in _splitters(spec, master, bridges, slave) for prot in prots)  # fmt: skip
+
+
+def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, addr: int,
+                   size: int, beats: int = 1) -> bool:  # fmt: skip
+    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104)."""
+    if exp.slave is None:
+        return False
+    return any(split_refused(attributes(spec, m, prot, nonsec, exp.bridges[:k])[3],
+                             min(size, most), addr, beats, width)
+               for k, most, width in _splitters(spec, m.name, exp.bridges, exp.slave))  # fmt: skip
 
 
 def may_repeat_reads(spec: Spec, m: Any, exp: Outcome) -> bool:
@@ -626,12 +744,13 @@ def takes_partial_writes(spec: Spec, slave: Any) -> bool:
 
 def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
-    no error."""
+    no error, on a path where no converter can refuse them (D104)."""
     word = next(r for r in spec.memory_map if r.slave == slave.name).base + 0x40
     if word >= 1 << master.addr_width:
         return None
     outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]
-    ok = all(o.slave == slave.name and not (o.slave_error or o.masked) for o in outs)
+    ok = all(o.slave == slave.name and not (o.slave_error or o.masked or o.may_refuse)
+             for o in outs)  # fmt: skip
     return (word, outs[0]) if ok else None
 
 

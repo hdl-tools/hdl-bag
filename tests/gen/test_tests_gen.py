@@ -32,10 +32,13 @@ from hdl_bag.tests_gen.route_model import (
     check_write,
     may_repeat_reads,
     midpoint_path,
+    plain_word,
+    refused_access,
     rewrites_words,
     route,
     saw_access,
     split_error_word,
+    split_refused,
     writes_whole_words,
 )
 
@@ -627,3 +630,66 @@ def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: b
     )  # fmt: skip
     exp = SimpleNamespace(bridges=("br0",), word_bytes=8)
     assert may_repeat_reads(spec, SimpleNamespace(name="m0"), exp) is repeats  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("cache", "size", "addr", "beats", "width", "refused"),
+    [
+        (0b11, 4, 0, 1, 1, False),  # modifiable: split freely
+        (0b00, 4, 0, 1, 1, True),  # seed 032: four bytes onto an 8-bit bus
+        (0b01, 4, 0, 1, 1, True),  # AxCACHE[1] decides, not bufferable
+        (0b00, 4, 0, 1, 4, False),  # one beat: nothing to split
+        (0b00, 4, 2, 1, 2, False),  # the downsizer starts at the address: one beat left
+        (0b00, 1, 0, 1, 1, False),
+        (0b00, 4, 0, 4, 4, True),  # seed 022: an INCR burst
+        (0b00, 4, 0, 17, 4, True),  # AxLEN 16
+        (0b00, 4, 0, 18, 4, False),  # AxLEN 17: AXI allows splitting so long a burst
+    ],
+)  # fmt: skip
+def test_a_non_modifiable_transaction_is_refused_where_it_would_be_split(
+    cache: int, size: int, addr: int, beats: int, width: int, refused: bool
+) -> None:
+    """D104: PULP axi_burst_splitter's txn_supported, after axi_dw_downsizer's beat count."""
+    assert split_refused(cache, size, addr, beats, width) is refused
+
+
+def _tied_cache(cache: str) -> Cfg:
+    """An AXI4 master with CACHE as given, reaching an 8-bit APB4 slave through bag_axi2apb."""
+    c = Cfg(f"cache{cache.replace('-', '')}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": cache})
+    c.fabric("p", "APB4", 8, 32, "D0")
+    c.bridge("br", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "br", 0).link("br", "p", 0).decode("br", "PSLVERR").option("br", **APB4_NA)
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 8, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    return c.region("s0", "regs", 0x4000_0000, 0x1000)
+
+
+@pytest.mark.parametrize(
+    ("cache", "refused"), [("drive", False), ("tie-0", True), ("tie-default", False)]
+)
+def test_a_tied_cache_makes_a_path_refuse_what_it_must_split(
+    tmp_path: Path, cache: str, refused: bool
+) -> None:
+    """Seeds 022, 027, 032 (D104): CACHE tie-0 makes every access non-modifiable, so a word onto
+    an 8-bit bus is answered SLVERR. The tests that need clean traffic keep off such a path."""
+    spec, findings = resolve_cfg(_tied_cache(cache), tmp_path)
+    assert findings == [] and spec is not None
+    m, s, word = spec.masters[0], spec.slaves[0], 0x4000_0040
+    exp = route(spec, "m0", word, True, False, {})
+    assert exp.may_refuse is refused
+    assert refused_access(spec, m, exp, 0, False, word, 4) is refused
+    assert refused_access(spec, m, exp, 0, False, word, 1) is False
+    assert (plain_word(spec, m, s) is None) is refused
+
+
+@pytest.mark.eda
+def test_the_generated_tests_pass_when_a_tied_cache_refuses_splits(tmp_path: Path) -> None:
+    """Seeds 022, 027 and 032 (D104), on a correct design."""
+    spec, findings = resolve_cfg(_tied_cache("tie-0"), tmp_path)
+    assert findings == [] and spec is not None
+    report = run_tests(generate(spec, tmp_path / "out", tmp_path))
+    assert [f.format() for f in report.unwaived] == []

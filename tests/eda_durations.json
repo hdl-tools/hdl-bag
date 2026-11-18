@@ -750,6 +750,7 @@
  "tests/gen/test_tests_gen.py::test_the_generated_tests_pass_on_a_master_narrower_than_a_word[16-True]": 20.0,
  "tests/gen/test_tests_gen.py::test_the_generated_tests_pass_on_a_master_narrower_than_a_word[8-False]": 20.0,
  "tests/gen/test_tests_gen.py::test_the_generated_tests_pass_on_a_master_narrower_than_a_word[8-True]": 20.0,
+ "tests/gen/test_tests_gen.py::test_the_generated_tests_pass_when_a_tied_cache_refuses_splits": 20.0,
  "tests/gen/test_tests_gen.py::test_the_route_test_passes_when_no_slave_can_answer_an_error": 20.0,
  "tests/gen/test_wrapper_sim.py::test_cli_flow": 11.74,
  "tests/gen/test_wrapper_sim.py::test_generated_design[flat-ahb2apb_nested]": 2.91,
