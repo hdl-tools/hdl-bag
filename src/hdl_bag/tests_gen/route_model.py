@@ -403,6 +403,13 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
     return []
 
 
+def midpoint_buffers(f: Any) -> bool:
+    """Whether shared bus F's mid-point absorbs requests while its slave is stalled: they then
+    leave in the order they arrived, not in the order the arbiter would have served them."""
+    mid = f.midpoint
+    return mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
+
+
 def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
     """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
     of an AXI slave right behind the mid-point, and how many reads the mid-point holds. Master

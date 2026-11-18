@@ -31,6 +31,7 @@ from hdl_bag.tests_gen.route_model import (
     check_read,
     check_write,
     may_repeat_reads,
+    midpoint_buffers,
     midpoint_path,
     plain_word,
     refused_access,
@@ -700,3 +701,16 @@ def test_concurrent_traffic_has_time_for_a_long_chain_of_bridges() -> None:
     a limit of 50, and passed with a longer one. The limit is there to catch a hang."""
     limit = next(t.timeout_us for t in TESTS if t.name.startswith("concurrent_traffic"))
     assert limit >= 500
+
+
+@pytest.mark.parametrize(
+    ("midpoint", "buffers"),
+    [(None, False), ((0, "none"), False), ((0, "multicut-2"), True), ((2, "none"), True)],
+)
+def test_a_midpoint_that_holds_requests_decides_their_order(
+    midpoint: tuple[int, str] | None, buffers: bool
+) -> None:
+    """Seed 037: behind a multicut-2 mid-point writes left in the order they arrived, shortest
+    adapter chain first, so a fixed-priority round cannot be judged by priority there."""
+    mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
+    assert midpoint_buffers(SimpleNamespace(midpoint=mid)) is buffers

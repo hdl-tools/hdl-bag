@@ -68,6 +68,7 @@ from hdl_bag.tests_gen.route_model import (
     exokay_paths,
     forced_resp_paths,
     may_repeat_reads,
+    midpoint_buffers,
     midpoint_path,
     narrow_apb_path,
     pin_sets,
@@ -966,15 +967,16 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         # so round robin must rotate in Port-index order and starve nobody.
         direct = not any(a.fabric == f.name and a.port in base for a in SPEC.adapters)
         index = [p.port for p in ports]
+        buffered = midpoint_buffers(f)  # requests then pass the arbiter as they arrive
         for rnd in range(3):
             order = await _served(
                 masters, slave, clk, owner, [(p.port, base[p.port] + 16 * rnd) for p in ports]
             )
-            if fixed:
+            if fixed and not buffered:
                 assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
             else:
                 assert sorted(order) == sorted(base), f"{f.name} round {rnd}: {order}"
-                if direct:
+                if direct and not fixed:
                     k = index.index(order[0])
                     assert order == index[k:] + index[:k], (
                         f"{f.name} round {rnd}: {order} is not a rotation of {index}"
@@ -983,8 +985,6 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         last = by_prio[-1] if fixed else order[-1]
         # Starvation needs every request waiting at the arbiter when the slave opens; a
         # shared-bus mid-point instead absorbs requests during the stall, as they arrive.
-        mid = f.midpoint
-        buffered = mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
         if not buffered:
             # Behind adapters the last-served request can arrive long after the first-served
             # master's writes: queue more than that master's path absorbs while the slave is
