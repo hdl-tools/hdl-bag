@@ -78,7 +78,7 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("every_master_reaches_what_the_model_says", 3000, lambda _: True),
     GeneratedTest("arbitration_follows_the_fabric_policy", 50, lambda s: any(
         f.protocol == "AHB-Lite" and contention(s, f, secure_too=True) for f in s.fabrics)),
-    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 50, lambda s: any(
+    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 500, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
     GeneratedTest("traffic_survives_back_pressure_on_every_channel", 500, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),

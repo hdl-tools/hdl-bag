@@ -693,3 +693,10 @@ def test_the_generated_tests_pass_when_a_tied_cache_refuses_splits(tmp_path: Pat
     assert findings == [] and spec is not None
     report = run_tests(generate(spec, tmp_path / "out", tmp_path))
     assert [f.format() for f in report.unwaived] == []
+
+
+def test_concurrent_traffic_has_time_for_a_long_chain_of_bridges() -> None:
+    """Seed 046: every master's words over four bridges and clock crossings took 56 us against
+    a limit of 50, and passed with a longer one. The limit is there to catch a hang."""
+    limit = next(t.timeout_us for t in TESTS if t.name.startswith("concurrent_traffic"))
+    assert limit >= 500
