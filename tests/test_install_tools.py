@@ -66,6 +66,28 @@ def test_the_installers_path_is_the_tools_images_path() -> None:
     assert s.path_line("/opt", s.LINUX, "${PATH}") == m[1]
 
 
+def test_every_tool_without_an_archive_can_be_built() -> None:
+    """A tool with no release archive on some platform must have both a source URL and a
+    builder, or the install reaches a platform it cannot satisfy. slang is the case that
+    matters: it publishes nothing for linux-arm64."""
+    s, inst = _specs(), _installer()
+    for t in s.TOOLS:
+        needs_source = [p for p in s.PLATFORMS if s.asset_for(t, p) is None]
+        if not needs_source:
+            continue
+        assert t.source, f"{t.name} has no archive for {needs_source} and no source"
+        assert t.name in inst._BUILDERS, f"{t.name} needs a source build and has no builder"
+
+
+def test_slang_is_built_from_source_only_where_nothing_is_published() -> None:
+    """Building when a tested binary exists would be a needless difference between
+    platforms, and the prebuilt one is what the lint waivers were written against."""
+    s = _specs()
+    slang = s.tool("slang")
+    built = sorted(p for p in s.PLATFORMS if s.asset_for(slang, p) is None)
+    assert built == [s.LINUX_ARM]
+
+
 def test_the_dockerfiles_arg_defaults_match_tools_lock() -> None:
     """The Dockerfile says its defaults must match tools.lock, and CI always overrides them
     with --build-arg, so a stale default breaks nothing until someone builds the image by
