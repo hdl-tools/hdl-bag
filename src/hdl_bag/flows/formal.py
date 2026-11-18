@@ -61,7 +61,7 @@ UNSAT = "assumptions are unsatisfiable: the environment allows no trace, so noth
 class SymbiYosys:
     name = "sby"
     executable = "sby"
-    pinned = "v0.69"  # the SBY in tools.lock's OSS_CAD_SUITE_DATE (2026-10-01)
+    pinned = "v0.69"  # the SBY in tools.lock's OSS_CAD_SUITE_DATE (2026-10-02)
 
     def parse_version(self, output: str) -> str | None:
         return _version(r"^SBY v?(\d+\.\d+(?:\.\d+)?)", output)
