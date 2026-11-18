@@ -6,6 +6,7 @@ environment, the SymbiYosys job, and that every port they bind to exists on the 
 import re
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
@@ -17,6 +18,7 @@ from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
     PROVE_DEPTH,
+    _buffer_in_front,
     ahb_ports,
     axi4_ports,
     checkers,
@@ -1399,8 +1401,8 @@ def test_a_crossing_in_front_of_a_one_at_a_time_lite_converter_hides_its_limit(
     for event in ("same_id", "full"):
         assert f"proto_no_{event}_m0: assert" not in text, event
         assert f"proto_{event}_m0: cover" not in text, event
-        assert (f"  // proto_{event}_m0: neither asserted nor covered, the CDC m0_cdc_2_l in front "
-                "of m0_pc_2_l takes reads of its own\n") in text  # fmt: skip
+        assert (f"  // proto_{event}_m0: neither asserted nor covered, the cdc adapter "
+                "m0_cdc_2_l in front of m0_pc_2_l takes reads of its own\n") in text  # fmt: skip
     assert "proto_multi_write_m0: cover" in text
 
 
@@ -1460,6 +1462,8 @@ def test_a_route_job_has_no_lite_checker_on_a_port_every_master_is_denied(tmp_pa
     text = _route_text(tmp_path, _denied_port("AXI4-Lite"), "f")
     assert "u_chk_s0 (" in text
     assert "u_chk_s1 (" not in text
+    assert re.search(r"f_\w*s1\w*_aw_routed: assert", text)  # what replaces the checker
+    assert re.search(r"f_\w*s1\w*_w_quiet: assert \(!\w*s1\w*_wvalid\);", text)
     for ch in ("bvalid", "rvalid"):
         assert re.search(rf"assume \(\w*s1\w*_{ch} == 1'b0\);", text), ch
 
@@ -1489,3 +1493,31 @@ def test_a_port_is_as_deep_as_the_longest_kind_of_access_needs(
     monkeypatch.setattr(path_depth, "reaching", lambda spec: pairs)
     monkeypatch.setattr(path_depth, "_cost", lambda s, n, a, b: costs[b if a == "s3" else a])
     assert path_depth.port_depths(None, None, ["s3"]) == {"s3": 44}  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("kinds", "place", "found"), [
+    (("cdc", "pc"), 1, "cdc"), (("fifo", "pc"), 1, "fifo"), (("cut", "pc"), 1, "cut"),
+    (("dw", "pc"), 1, None), (("iw", "pc"), 1, None), (("pc", "cdc"), 0, None),
+])  # fmt: skip
+def test_only_a_buffer_in_front_of_the_lite_converter_hides_its_limit(
+    kinds: tuple[str, str], place: int, found: str | None
+) -> None:
+    """Review: a register slice or FIFO takes reads of its own just as a CDC does."""
+    chain = [SimpleNamespace(adapter=SimpleNamespace(type=k)) for k in kinds]
+    got = _buffer_in_front(chain, place)  # type: ignore[arg-type]
+    assert (got.adapter.type if got and got.adapter else None) == found
+
+
+def test_a_route_job_covers_contention_only_where_two_masters_meet(tmp_path: Path) -> None:
+    """Review: m1 may only read s0, so m0 and m1 never contend to write though s0 takes writes."""
+    c = Cfg("onewriter", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    for k in range(2):
+        c.master(f"m{k}", "AXI4-Lite", 32, 32, "D0").link(f"m{k}", "f", k)
+        c.decode(f"m{k}", "DECERR").option(f"m{k}", **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    text = _route_text(tmp_path, c.access("m1", "s0", "RO"), "f")
+    assert "cover_f_ar_contended: cover" in text
+    assert "cover_f_aw_contended: cover" not in text

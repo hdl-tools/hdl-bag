@@ -32,7 +32,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
+from hdl_bag.formal_gen.decode import (
+    contended,
+    decoded_fabrics,
+    masters_of,
+    port_accesses,
+    reference,
+)
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.package import CUT_STAGES
 from hdl_bag.gen.render import GenerateError, lit
@@ -308,6 +314,10 @@ class _Harness:
                 self.body.append(f"  // {bus.name}: no checker, every master is denied this port")
                 self.body += [f"  always_comb assume ({self.v(bus, s)} == 1'b0);"
                               for s in ("bvalid", "rvalid")]  # fmt: skip
+                fabric = self.inst.fabric.name if self.inst.fabric else self.inst.name
+                wvalid = self.v(bus, "wvalid")
+                self.body.append(f"  always @(posedge {clk}) if (bag_live_{d}) "
+                                 f"{fabric}_{bus.name}_w_quiet: assert (!{wvalid});")  # fmt: skip
                 return
             vendor = _CHECKER[(family, not a.unit_is_slave)]
             module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
@@ -630,9 +640,8 @@ class _Harness:
                         f"  always_comb if ({b}_ask) assume (!{clash});",
                     ]
             # The assumption leaves contention: two masters ask for one slave at once.
-            kind = {"aw": "write", "ar": "read"}.get(ch)
-            if not any(kind in c if kind else c for c in can):
-                continue  # no slave port takes this kind of request
+            if not contended(self.spec, fab, {"aw": "write", "ar": "read"}.get(ch)):
+                continue  # these two masters never ask one slave port for this kind
             a, b = f"sb_{ch}0", f"sb_{ch}1"
             both = f"{a}_ask && {b}_ask && {a}_t == {b}_t"
             self.body.append(f"  always @(posedge {clk}) cover_{name}_{ch}_contended: cover "

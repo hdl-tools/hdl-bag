@@ -24,21 +24,25 @@ from hdl_bag.regress.dsl import AHB_MASTER_NA, AHB_SLAVE_NA
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
 from hdl_bag.tests_gen.bfm_axi import AxiPortMaster
 from hdl_bag.tests_gen.route_model import (
+    TRAFFIC_HPROT,
     Outcome,
+    _axi4_downsizer_in_front,
+    _splitters,
     access_bytes,
     blocking_path,
     burst_shapes,
     cache_after_tie,
     check_read,
     check_write,
-    may_repeat_reads,
     midpoint_buffers,
     midpoint_path,
     plain_word,
+    reads_per_word,
     refused_access,
     rewrites_words,
     route,
     saw_access,
+    serves_by_priority,
     split_error_word,
     split_refused,
     writes_whole_words,
@@ -531,17 +535,20 @@ def test_an_axi4_master_on_an_axi4_lite_fabric_reads_whole_beats(tmp_path: Path)
 
 
 @pytest.mark.parametrize(
-    ("seen", "write", "matches"),
-    [(0xFFF8, False, True), (0xFFFC, False, True), (0xFFF0, False, False), (0xFFF8, True, False),
-     (0xFFFC, True, True)],
+    ("protocol", "seen", "write", "matches"),
+    [("AHB-Lite", 0xFFF8, False, True), ("AHB-Lite", 0xFFFC, False, True),
+     ("AHB-Lite", 0xFFF0, False, False), ("AHB-Lite", 0xFFF8, True, False),
+     ("AHB-Lite", 0xFFFC, True, True), ("AXI4", 0xFFF8, False, False),
+     ("AXI4", 0xFFFC, False, True)],
 )  # fmt: skip
 def test_a_wide_slave_sees_a_read_at_the_start_of_its_word(
-    seen: int, write: bool, matches: bool
+    protocol: str, seen: int, write: bool, matches: bool
 ) -> None:
     """Five seeds: a full-size AHB transfer must be aligned, so a 64-bit slave logs a read of
     0xFFFC at 0xFFF8. A write keeps its exact address."""
-    exp = SimpleNamespace(address=0xFFFC, word_bytes=8)
-    assert saw_access(exp, seen, write) is matches
+    exp = SimpleNamespace(slave="s0", address=0xFFFC, word_bytes=8)
+    spec = SimpleNamespace(slaves=[SimpleNamespace(name="s0", protocol=protocol)])
+    assert saw_access(spec, exp, seen, write) is matches  # type: ignore[arg-type]
 
 
 _WORD = Outcome("s0", 0x40, word_bytes=2)
@@ -615,13 +622,15 @@ def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
 
 def test_a_read_repeats_a_word_only_where_its_path_allows() -> None:
     exp = Outcome("s0", 0, word_bytes=8, words=frozenset({0}))
-    check_read("r", exp, 4, [0, 0], repeats=True)
+    check_read("r", exp, 4, [0, 0], repeats=2)
     with pytest.raises(AssertionError, match="read an address twice"):
         check_read("r", exp, 4, [0, 0])
+    with pytest.raises(AssertionError, match="read an address twice"):
+        check_read("r", exp, 4, [0, 0, 0], repeats=2)  # review: a bound, not a switch
 
 
-@pytest.mark.parametrize(("middle", "repeats"), [(32, True), (64, False), (128, False)])
-def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: bool) -> None:
+@pytest.mark.parametrize(("middle", "repeats"), [(16, 4), (32, 2), (64, 1), (128, 1)])
+def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: int) -> None:
     """Seed 016: a 64-bit read crossing a 32-bit bus becomes two transfers, and each becomes a
     full 64-bit beat again on the AXI4-Lite fabric behind it, reading the slave's word twice."""
     port = SimpleNamespace(port="m0")
@@ -631,7 +640,7 @@ def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: b
         bridges=[SimpleNamespace(name="br0", downstream="f1")],
     )  # fmt: skip
     exp = SimpleNamespace(bridges=("br0",), word_bytes=8)
-    assert may_repeat_reads(spec, SimpleNamespace(name="m0"), exp) is repeats  # type: ignore[arg-type]
+    assert reads_per_word(spec, SimpleNamespace(name="m0"), exp) == repeats  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -738,3 +747,86 @@ def test_a_narrow_burst_needs_a_path_that_keeps_strobes(
     assert findings == [] and spec is not None
     shapes = [shape[0] for shape in burst_shapes(spec, spec.masters[0], spec.slaves[0])]
     assert any(name.startswith("narrow") for name in shapes) is narrow
+
+
+def test_a_beat_wider_than_a_downsizer_in_front_of_a_converter_is_refused(tmp_path: Path) -> None:
+    """Review: the downsizer makes two beats of a 64-bit transfer on its way to a 32-bit
+    axi_to_axi_lite, which refuses them when non-modifiable."""
+    c = Cfg("dwpc", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 64, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": "tie-0"})
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000).wrap_refused("m0", "a_dw_2_s0", "s0")
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0040, False, False, {})
+    assert refused_access(spec, spec.masters[0], exp, 0, False, 0x4000_0040, 8)
+    assert not refused_access(spec, spec.masters[0], exp, 0, False, 0x4000_0040, 4)
+
+
+def _far_side_adapter(adapter: SimpleNamespace) -> SimpleNamespace:
+    """A bridge br0 from a 64-bit AHB-Lite fabric f0 to fabric f1, with ADAPTER on its f1 end."""
+    port = SimpleNamespace(port="m0")
+    return SimpleNamespace(
+        masters=[SimpleNamespace(name="m0", protocol="AHB-Lite", data_width=64)],
+        fabrics=[SimpleNamespace(name="f0", protocol="AHB-Lite", data_width=64,
+                                 master_ports=[port]),
+                 SimpleNamespace(name="f1", protocol="AXI4-Lite", data_width=64, master_ports=[])],
+        bridges=[SimpleNamespace(name="br0", template="bag_ahb2axi", downstream="f1")],
+        adapters=[adapter],
+    )  # fmt: skip
+
+
+def test_a_converter_on_a_bridges_far_end_is_on_the_path() -> None:
+    """Review: a bridge is a port of both its fabrics, and has adapters on both."""
+    pc = SimpleNamespace(port="br0", fabric="f1", chain_index=0, type="pc",
+                         params={"from": "AXI4", "to": "AXI4-Lite"})  # fmt: skip
+    spec = _far_side_adapter(pc)
+    assert _splitters(spec, "m0", ("br0",), "s0") == [(1, 8, 8)]  # type: ignore[arg-type]
+
+
+def test_a_downsizer_on_a_bridges_far_end_starts_at_the_address() -> None:
+    dw = SimpleNamespace(port="br0", fabric="f1", chain_index=0, type="dw",
+                         params={"from": 64, "to": 32})  # fmt: skip
+    fabric = SimpleNamespace(name="f1", protocol="AXI4")
+    spec = SimpleNamespace(adapters=[dw])
+    assert _axi4_downsizer_in_front(spec, "br0", fabric, from_port=True)  # type: ignore[arg-type]
+
+
+def test_ahb_traffic_is_modifiable_so_its_paths_stay_tested(tmp_path: Path) -> None:
+    """Review: counting every HPROT made each AHB-Lite path through axi_to_axi_lite refusable,
+    which dropped it from the traffic, reset and ordering tests. Their traffic is cacheable."""
+    assert TRAFFIC_HPROT >> 3 & 1
+    c = Cfg("ahbclean", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.master("m0", "AHB-Lite", 32, 32, "D0").link("m0", "h", 0).decode("m0", "HRESP_ERROR")
+    c.option("m0", **AHB_MASTER_NA)
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_ahb2axi")
+    c.link("h", "b1", 0).link("b1", "a", 0).decode("b1", "DECERR").option("b1", **AXI4_NA)
+    c.region("b1", "win1", 0x4000_0000, 0x1_0000)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR").option("b2", **APB4_NA)
+    c.region("b2", "win2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert plain_word(spec, spec.masters[0], spec.slaves[0]) is not None
+
+
+@pytest.mark.parametrize(
+    ("midpoint", "direct", "by_priority"),
+    [(None, False, True), ((0, "cut"), True, True), ((0, "cut"), False, False)],
+)
+def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
+    midpoint: tuple[int, str] | None, direct: bool, by_priority: bool
+) -> None:
+    """Review: with no adapters every request arrives together, so even a buffering mid-point
+    takes them in priority order; only unequal adapter chains make arrival order decide."""
+    mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
+    assert serves_by_priority(SimpleNamespace(midpoint=mid), direct) is by_priority

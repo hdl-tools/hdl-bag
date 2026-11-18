@@ -667,20 +667,23 @@ def _lite_limit(
     return None
 
 
-def _crossing_in_front(chain: list[Instance], k: int) -> Instance | None:
-    """The CDC before place K of CHAIN, which takes transactions of its own, or None."""
-    return next((a for a in chain[:k] if a.adapter is not None and a.adapter.type == "cdc"), None)
+def _buffer_in_front(chain: list[Instance], k: int) -> Instance | None:
+    """The CDC, FIFO or register slice before place K of CHAIN, which takes transactions of its
+    own, or None."""
+    return next((a for a in chain[:k] if a.adapter is not None
+                 and a.adapter.type in ("cdc", "fifo", "cut")), None)  # fmt: skip
 
 
 def unsettled(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
     """The bag_faxi4 events on master port BUS that are neither impossible nor sure to happen
-    (seed 011): a CDC in front of a limiting AXI4-Lite converter (never) takes reads of its own,
-    as many as its depth allows, so the port can open more than the converter does."""
+    (seed 011): a buffer in front of a limiting AXI4-Lite converter (never) takes reads of its
+    own, as many as its depth allows, so the port can open more than the converter does."""
     found = _lite_limit(spec, netlist, bus)
-    crossing = _crossing_in_front(found[3], found[0]) if found else None
-    if found is None or crossing is None:
+    buffer = _buffer_in_front(found[3], found[0]) if found else None
+    if found is None or buffer is None or buffer.adapter is None:
         return {}
-    why = f"the CDC {crossing.name} in front of {found[1].name} takes reads of its own"
+    why = (f"the {buffer.adapter.type} adapter {buffer.name} in front of {found[1].name} "
+           "takes reads of its own")  # fmt: skip
     return {"same_id": why, "full": why}
 
 
@@ -699,7 +702,7 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
       reads of one ID nor a full table (full: four reads, or four writes owed a response).
       D91 (owner, 2026-11-14): the same where such an adapter comes later on the master's
       adapter chain, before its fabric (axil_adapters' cpu: bag_dw, then bag_pc), unless a
-      CDC comes first (unsettled).
+      CDC, FIFO or register slice comes first (unsettled).
     - w_first (D91): the port enters a downsizing bag_dw, whose bag_axi_dw holds W until it
       has taken the AW (the downsizer's W beats wait for it)."""
     first = _first(netlist, bus)
@@ -714,7 +717,7 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
         out["w_first"] = (f"{bus.name} enters {first.name}, a downsizing bag_axi_dw: W waits "
                           "for its AW (D91)")  # fmt: skip
     found = _lite_limit(spec, netlist, bus)
-    if found is not None and _crossing_in_front(found[3], found[0]) is None:
+    if found is not None and _buffer_in_front(found[3], found[0]) is None:
         k, a, trans, _ = found
         how, why = ("enters", "D80") if k == 0 else ("reaches", "D80, D91")
         out["same_id"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with "

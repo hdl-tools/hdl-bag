@@ -21,6 +21,7 @@ import contextlib
 import logging
 import os
 import random
+from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
+    TRAFFIC_HPROT,
     access_bytes,
     attributes,
     blocking_path,
@@ -67,7 +69,6 @@ from hdl_bag.tests_gen.route_model import (
     error_words,
     exokay_paths,
     forced_resp_paths,
-    may_repeat_reads,
     midpoint_buffers,
     midpoint_path,
     narrow_apb_path,
@@ -78,11 +79,13 @@ from hdl_bag.tests_gen.route_model import (
     prot_tied,
     pslverr_tied,
     pstrb_path,
+    reads_per_word,
     refused_access,
     region_edges,
     rewrites_words,
     route,
     saw_access,
+    serves_by_priority,
     split_error_word,
     stores_single_bytes,
     widest_on_path,
@@ -399,7 +402,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             # access must be among what the slave saw, not necessarily last.
                             new = slaves[exp.slave].log[before[exp.slave] :]
                             match = [e for e in new
-                                     if e.write == write and saw_access(exp, e.addr, write)]  # fmt: skip
+                                     if e.write == write and saw_access(SPEC, exp, e.addr, write)]  # fmt: skip
                             assert match, (
                                 f"{where}: {exp.slave} saw {[hex(e.addr) for e in new]} "
                                 f"write={write}, expected {exp.address:#x}"
@@ -420,7 +423,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             else:
                                 check_read(where, exp, access_bytes(m),
                                            _read_beats(new, exp.word_bytes),
-                                           repeats=may_repeat_reads(SPEC, m, exp))  # fmt: skip
+                                           repeats=reads_per_word(SPEC, m, exp))  # fmt: skip
                             seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
@@ -703,7 +706,7 @@ async def _everywhere(masters: dict[str, Any], spawned: list[Any] | None = None)
     task it starts goes in SPAWNED. Returns the words checked."""
 
     async def one(m: Any, words: list[int]) -> int:
-        prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+        prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
         data = {a: random.getrandbits(8 * access_bytes(m)) for a in words}
         for a, d in data.items():
             err, _, _ = await _access(
@@ -855,7 +858,7 @@ async def slave_decerr_returns_as_the_model_says(dut: Any) -> None:
     masters, slaves, _ = await _bring_up(dut)
     checked = 0
     for m, s, word in forced_resp_paths(SPEC):
-        prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+        prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
         sl = slaves[s.name]
         for write in (True, False):
             exp = route(SPEC, m.name, word, write, False, {})
@@ -972,7 +975,7 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             order = await _served(
                 masters, slave, clk, owner, [(p.port, base[p.port] + 16 * rnd) for p in ports]
             )
-            if fixed and not buffered:
+            if fixed and serves_by_priority(f, direct):
                 assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
             else:
                 assert sorted(order) == sorted(base), f"{f.name} round {rnd}: {order}"
@@ -1238,7 +1241,7 @@ async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) ->
             value = 0x1234_5678 & ((1 << 8 * size) - 1)
             for beat in range(exp.address, exp.address + size, step):
                 where = f"{m.name} -> {s.name} error at {beat:#x}"
-                prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+                prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
                 sl.err_addrs.add(beat)
                 n = len(sl.written)
                 for write in (True, False):
@@ -1304,9 +1307,9 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                 assert need <= seen, f"{where}: read words {sorted(seen)}, needs {sorted(need)}"
                 # A beat narrower than a bus on the way can repeat a read: split into single
                 # transfers, each narrow beat reads that bus's whole word.
-                repeats = may_repeat_reads(SPEC, m, exp)
-                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp) and not repeats:
-                    assert len(set(touched)) == len(touched), (
+                repeats = reads_per_word(SPEC, m, exp)
+                if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp):
+                    assert max(Counter(touched).values(), default=0) <= repeats, (
                         f"{where}: read an address twice: {touched}"
                     )
                 # What the beats leave: a FIXED burst's last beat wins.
@@ -1438,7 +1441,7 @@ async def axi_ports_take_every_handshake_ordering(dut: Any) -> None:
             m = next(x for x in SPEC.masters if x.name == t.master)
             for k in range(12):
                 addr, data = t.base + 4 * k, random.getrandbits(8 * access_bytes(m))
-                prot = 0b0011 if m.protocol == "AHB-Lite" else 0
+                prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
                 for write in (w for w, ok in ((True, t.writes), (False, t.reads)) if ok):
                     err, got, _ = await _access(masters[t.master], m.protocol, m.data_width, addr,
                                                 write, data, False, prot)  # fmt: skip
