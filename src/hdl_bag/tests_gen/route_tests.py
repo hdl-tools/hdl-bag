@@ -73,9 +73,11 @@ from hdl_bag.tests_gen.route_model import (
     private_words,
     probes,
     prot_tied,
+    pslverr_tied,
     pstrb_path,
     region_edges,
     route,
+    split_error_word,
     stores_single_bytes,
     takes_partial_writes,
     widest_on_path,
@@ -1185,7 +1187,8 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
                 assert [e.addr for e in seen] == [addr + 1 - (addr + 1) % nbytes], f"{label} byte"
                 r = await drv.read(word)
                 assert not r.err and r.data == 0x4433_5A11, f"{label}: {r.data:#x}"
-            for beat in beats:
+            # A slave with PSLVERR tied never reports an error.
+            for beat in [] if pslverr_tied(SPEC, s.name) else beats:
                 sl.err_addrs.add(beat)
                 assert await drv.write(word, value) == 2, f"{label}: write error at {beat:#x}"
                 r = await drv.read(word)
@@ -1245,7 +1248,7 @@ async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) ->
     checked = 0
     for m in SPEC.masters:
         for s in SPEC.slaves:
-            found = plain_word(SPEC, m, s) if s.data_width < 32 else None
+            found = split_error_word(SPEC, m, s)
             if found is None:
                 continue
             word, exp = found

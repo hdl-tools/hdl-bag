@@ -33,6 +33,7 @@ from hdl_bag.tests_gen.route_model import (
     private_words,
     pstrb_path,
     region_edges,
+    split_error_word,
     takes_partial_writes,
 )
 
@@ -46,9 +47,8 @@ def _unaligned_path(spec: Spec) -> bool:
 
 
 def _split_path(spec: Spec) -> bool:
-    """A master reaches, without error, a slave narrower than the 32-bit word it sends."""
-    return any(plain_word(spec, m, s)
-               for m in spec.masters for s in spec.slaves if s.data_width < 32)  # fmt: skip
+    """A master reaches, without error, a narrow slave that can answer an error."""
+    return any(split_error_word(spec, m, s) for m in spec.masters for s in spec.slaves)
 
 
 @dataclass(frozen=True)

@@ -336,10 +336,13 @@ def contention(spec: Spec, fabric: Any, secure_too: bool = False) -> tuple[Any, 
     return (region, ports) if len(ports) >= 2 else None
 
 
-def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False) -> list[int]:
+def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False,
+                  unadapted: bool = False) -> list[int]:  # fmt: skip
     """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
-    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge)."""
+    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge); with
+    UNADAPTED, of a slave with no adapter in front of it."""
     axi_slaves = {s.name for s in spec.slaves if s.protocol in ("AXI4", "AXI4-Lite")}
+    adapted = {a.port for a in spec.adapters}
     for r in sorted(spec.memory_map, key=lambda r: r.base):
         words = [r.base + 0x100 * index + 4 * k for k in range(count)]
         if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
@@ -354,6 +357,8 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
             ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
             if direct:
                 ok &= not wr.bridges and wr.slave in axi_slaves
+            if unadapted:
+                ok &= wr.slave not in adapted
         if ok:
             return words
     return []
@@ -361,17 +366,19 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
 
 def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
     """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
-    of an AXI slave right behind the mid-point, and how many reads the mid-point holds."""
+    of an AXI slave right behind the mid-point, and how many reads the mid-point holds. Master
+    and slave have no adapter: a register slice or FIFO there would hold reads of its own."""
     if f.protocol not in ("AXI4", "AXI4-Lite") or f.topology != "shared-bus" or f.midpoint is None:
         return None
     stages = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}[f.midpoint.slice]
     buffered = f.midpoint.fifo_depth + 2 * stages
     names = {p.port for p in f.master_ports}
-    ms = [x for x in spec.masters if x.name in names]
+    adapted = {a.port for a in spec.adapters}
+    ms = [x for x in spec.masters if x.name in names and x.name not in adapted]
     if not ms:
         return None
     m = max(ms, key=lambda x: x.id_width or 0)
-    words = private_words(spec, m, 0, buffered + 4, direct=True)
+    words = private_words(spec, m, 0, buffered + 4, direct=True, unadapted=True)
     return (m, words, buffered) if words else None
 
 
@@ -567,6 +574,14 @@ def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | Non
     outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]
     ok = all(o.slave == slave.name and not (o.slave_error or o.masked) for o in outs)
     return (word, outs[0]) if ok else None
+
+
+def split_error_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
+    """plain_word, if SLAVE is narrower than a word (so a word is split into beats) and can
+    answer an error: a slave with PSLVERR tied never does."""
+    if slave.data_width >= 32 or pslverr_tied(spec, slave.name):
+        return None
+    return plain_word(spec, master, slave)
 
 
 def access_bytes(master: Any) -> int:

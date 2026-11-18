@@ -11,15 +11,20 @@ from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
-from dsl import APB4_NA, AXIL_NA, Cfg, resolve_cfg
+from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag.tests_gen
 from hdl_bag.cli import main
 from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
-from hdl_bag.ir import load
+from hdl_bag.ir import Spec, load
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
-from hdl_bag.tests_gen.route_model import access_bytes, blocking_path
+from hdl_bag.tests_gen.route_model import (
+    access_bytes,
+    blocking_path,
+    midpoint_path,
+    split_error_word,
+)
 
 TESTS_DIR = Path(__file__).parents[1]
 DEMO = TESTS_DIR / "golden" / "demo_ss.ir.yaml"
@@ -332,3 +337,62 @@ def test_the_generated_tests_pass_on_a_master_narrower_than_a_word(
 @pytest.mark.parametrize(("width", "size"), [(8, 1), (16, 2), (32, 4), (64, 4), (128, 4)])
 def test_a_test_access_is_a_word_or_all_a_narrow_master_can_carry(width: int, size: int) -> None:
     assert access_bytes(SimpleNamespace(data_width=width)) == size
+
+
+def _shared_bus(tmp_path: Path, master_slice: dict[str, str], slave_slice: dict[str, str]) -> Spec:
+    """An AXI4 shared bus (mid-point FIFO 2) with masters m0 (ID 4 bits) and m1 (ID 1 bit) and
+    slaves s0 and s1; the named ports have that register slice, so an adapter in front."""
+    c = Cfg("midpt", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("b", "AXI4", 32, 32, "D0", "round-robin", topology="shared-bus", midpoint=(2, "none"))
+    for k, idw in enumerate((4, 1)):
+        name = f"m{k}"
+        c.master(name, "AXI4", 32, 32, "D0", id_width=idw).link(name, "b", k).decode(name, "DECERR")
+        c.option(name, slice=master_slice.get(name, "none"), **AXI4_NA)
+    for k in range(2):
+        name = f"s{k}"
+        c.slave(name, "AXI4", 32, 32, "D0").link("b", name, k)
+        c.region(name, "mem", 0x4000_0000 + k * 0x1_0000, 0x1_0000)
+        c.option(name, slice=slave_slice.get(name, "none"), **AXI4_NA)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    return spec
+
+
+def test_the_midpoint_test_reads_through_ports_with_no_adapter(tmp_path: Path) -> None:
+    """First nightly: a register slice or FIFO beside the mid-point holds reads of its own, so
+    a count of what the mid-point holds is only right with no adapter on the way."""
+    clean = midpoint_path(s := _shared_bus(tmp_path, {}, {}), s.fabrics[0])
+    assert clean is not None and clean[0].name == "m0" and clean[2] == 2
+    # m0 has the widest ID but a slice in front: m1 is the master to measure with.
+    found = midpoint_path(s := _shared_bus(tmp_path, {"m0": "cut"}, {}), s.fabrics[0])
+    assert found is not None and found[0].name == "m1"
+    # s0 has a slice: the words are s1's.
+    found = midpoint_path(s := _shared_bus(tmp_path, {}, {"s0": "cut"}), s.fabrics[0])
+    assert found is not None and all(0x4001_0000 <= a < 0x4002_0000 for a in found[1])
+
+
+def test_the_midpoint_test_does_not_apply_when_every_path_has_an_adapter(tmp_path: Path) -> None:
+    s = _shared_bus(tmp_path, {"m0": "cut", "m1": "cut"}, {})
+    assert midpoint_path(s, s.fabrics[0]) is None
+    s = _shared_bus(tmp_path, {}, {"s0": "cut", "s1": "cut"})
+    assert midpoint_path(s, s.fabrics[0]) is None
+
+
+@pytest.mark.parametrize(("pslverr", "applies"), [("drive", True), ("tie-0", False)])
+def test_the_split_error_test_needs_a_slave_that_can_answer_an_error(
+    tmp_path: Path, pslverr: str, applies: bool
+) -> None:
+    """First nightly: a slave with PSLVERR tied never reports an error, by definition."""
+    c = Cfg("split", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB4", 16, 32, "D0")
+    c.master("m0", "APB4", 16, 32, "D0").link("m0", "p", 0).decode("m0", "PSLVERR")
+    c.slave("s0", "APB4", 16, 32, "D0").link("p", "s0", 0)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    c.option("m0", **APB4_NA).option("s0", **{**APB4_NA, "pslverr": pslverr})
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert (split_error_word(spec, spec.masters[0], spec.slaves[0]) is not None) is applies
+    name = "an_error_on_any_beat_of_a_split_access_reaches_the_master"
+    assert (name in applicable_tests(spec)) is applies
