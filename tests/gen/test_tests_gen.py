@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from dsl import APB4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag.tests_gen
 from hdl_bag.cli import main
-from hdl_bag.flows import Report, simulate
+from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import load
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
@@ -285,3 +286,43 @@ def test_head_of_line_runs_on_both_topologies() -> None:
         spec = load(config)
         seen |= {f.topology for f in spec.fabrics if blocking_path(spec, f)}
     assert seen == {"crossbar", "shared-bus"}
+
+
+def _narrow_master(dw: int, bridged: bool) -> Cfg:
+    """An APB4 master of DW bits on an APB4 fabric, whose slave is on that fabric or, BRIDGED,
+    behind a bag_apb2axi bridge on a 32-bit AXI4-Lite fabric."""
+    c = Cfg(f"narrow{dw}{'b' if bridged else ''}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB4", dw, 32, "D0")
+    c.master("m0", "APB4", dw, 32, "D0").link("m0", "p", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    if not bridged:
+        c.slave("s0", "APB4", dw, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+        return c.region("s0", "regs", 0x4000_0000, 0x1000)
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.bridge("br", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "br", 0).link("br", "l", 0).decode("br", "DECERR").option("br", **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    return c.region("s0", "regs", 0x4000_0000, 0x1000)
+
+
+@pytest.mark.parametrize("bridged", [False, True])
+@pytest.mark.parametrize("dw", [8, 16])
+def test_a_narrow_master_config_is_legal(tmp_path: Path, dw: int, bridged: bool) -> None:
+    spec, findings = resolve_cfg(_narrow_master(dw, bridged), tmp_path)
+    assert findings == [] and spec is not None
+
+
+@pytest.mark.eda
+@pytest.mark.parametrize("bridged", [False, True])
+@pytest.mark.parametrize("dw", [8, 16])
+def test_the_generated_tests_pass_on_a_master_narrower_than_a_word(
+    tmp_path: Path, dw: int, bridged: bool
+) -> None:
+    """First nightly (run 44188540781): the tests wrote 4 bytes through 8-bit and 16-bit APB
+    masters, which carry 1 or 2, and failed 15 of 50 random seeds on a correct design."""
+    spec, findings = resolve_cfg(_narrow_master(dw, bridged), tmp_path)
+    assert findings == [] and spec is not None
+    report = run_tests(generate(spec, tmp_path / "out", tmp_path))
+    assert [f.format() for f in report.unwaived] == []
