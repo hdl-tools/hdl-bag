@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
+from dsl import AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag
 from hdl_bag.flows.formal import job_tasks
@@ -1361,3 +1362,29 @@ def test_no_scoreboard_assumption_constrains_the_fabric(tmp_path: Path) -> None:
     assert "assume (!((m0_ahb_htrans[1]" not in text
     # A response never pays for the request taken in its own cycle (formal review 1).
     assert "ahb_m0_a_delivered: assert (sb_a0_due != '0);\n" in text
+
+
+def test_a_crossing_in_front_of_a_one_at_a_time_lite_converter_hides_its_limit(
+    tmp_path: Path,
+) -> None:
+    """Seed 011: the CDC in front of the converter takes reads of its own, so the port can open
+    two of one ID although the converter behind takes one at a time. How many the port can open
+    depends on the CDC's depth, so the job neither asserts these events absent nor covers them."""
+    c = Cfg("cdcpc", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n").domain("D1", "clk_1", "rst_1_n")
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin", max_trans=(2, 2))
+    c.master("m0", "AXI4", 32, 32, "D1").link("m0", "l", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert [a.type for a in spec.adapters if a.port == "m0"][:2] == ["cdc", "pc"]
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "cdcpc_protocol.sv").read_text(encoding="utf-8")
+    for event in ("same_id", "full"):
+        assert f"proto_no_{event}_m0: assert" not in text, event
+        assert f"proto_{event}_m0: cover" not in text, event
+        assert (f"  // proto_{event}_m0: neither asserted nor covered, the CDC m0_cdc_2_l in front "
+                "of m0_pc_2_l takes reads of its own\n") in text  # fmt: skip
+    assert "proto_multi_write_m0: cover" in text
