@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -18,7 +19,7 @@ from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
 from hdl_bag.ir import load
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
-from hdl_bag.tests_gen.route_model import blocking_path
+from hdl_bag.tests_gen.route_model import access_bytes, blocking_path
 
 TESTS_DIR = Path(__file__).parents[1]
 DEMO = TESTS_DIR / "golden" / "demo_ss.ir.yaml"
@@ -326,3 +327,8 @@ def test_the_generated_tests_pass_on_a_master_narrower_than_a_word(
     assert findings == [] and spec is not None
     report = run_tests(generate(spec, tmp_path / "out", tmp_path))
     assert [f.format() for f in report.unwaived] == []
+
+
+@pytest.mark.parametrize(("width", "size"), [(8, 1), (16, 2), (32, 4), (64, 4), (128, 4)])
+def test_a_test_access_is_a_word_or_all_a_narrow_master_can_carry(width: int, size: int) -> None:
+    assert access_bytes(SimpleNamespace(data_width=width)) == size

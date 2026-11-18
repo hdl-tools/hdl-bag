@@ -569,6 +569,12 @@ def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | Non
     return (word, outs[0]) if ok else None
 
 
+def access_bytes(master: Any) -> int:
+    """The bytes one test access of MASTER carries: a 32-bit word, or all an 8-bit or 16-bit
+    APB master can move in one transfer."""
+    return min(4, int(master.data_width) // 8)
+
+
 def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]]) -> None:
     """The bytes the slave stored for a write of DATA at EXP.address: exactly those, each once.
     After an error a split access can have stored only part of it, but nothing else. A beat

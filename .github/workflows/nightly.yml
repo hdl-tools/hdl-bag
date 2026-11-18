@@ -30,12 +30,17 @@ on:
         description: Seconds of formal per seed (D96)
         type: string
         default: "600"
+      regress_only:
+        description: Only the random seeds, without the corpus (to diagnose a seed failure)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   corpus:
+    if: ${{ !inputs.regress_only }}
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: eda and not alone
@@ -50,6 +55,7 @@ jobs:
 
   corpus-alone:
     # D93: the formal corpus's alone tasks, one per runner with their 4 h SBY limit.
+    if: ${{ !inputs.regress_only }}
     uses: ./.github/workflows/eda-shards.yml
     with:
       marks: eda and alone
@@ -187,7 +193,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - run: test "${{ needs.corpus.result }}" = success
-      - run: test "${{ needs.corpus-alone.result }}" = success
+      - run: test "${{ needs.corpus.result }}" = success || test "${{ inputs.regress_only }}" = true
+      - run: test "${{ needs.corpus-alone.result }}" = success || test "${{ inputs.regress_only }}" = true
       - run: test "${{ needs.regress.result }}" = success
       - run: test "${{ needs.summary.result }}" = success

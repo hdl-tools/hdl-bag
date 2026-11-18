@@ -49,6 +49,7 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
+    access_bytes,
     blocking_path,
     burst_addresses,
     burst_bytes,
@@ -282,7 +283,7 @@ def _expected_cache(m: Any, prot: int, nonsec: bool, bridges: tuple[str, ...]) -
 
 async def _access(master: Any, proto: str, dw: int, addr: int, write: bool, data: int,
                   nonsec: bool, prot: int, user: int = 0) -> tuple[bool, int, int]:  # fmt: skip
-    """One 32-bit access; returns (error, read data on the access's lanes, AXI response
+    """One access of access_bytes(master) bytes; returns (error, read data on the access's lanes, AXI response
     code: 0 OKAY, 2 SLVERR, 3 DECERR; AHB / APB report 2 for any error)."""
     if proto == "AHB-Lite":
         shift = 8 * (addr % (dw // 8)) if dw > 32 else 0
@@ -383,7 +384,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                 for addr in probes(SPEC):
                     if addr >= 1 << m.addr_width:
                         continue
-                    data = random.getrandbits(32)
+                    data = random.getrandbits(8 * access_bytes(m))
                     written = None
                     for write in (True, False):
                         ns = nonsec
@@ -434,10 +435,11 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: an APB write with no strobes"
                             )
                             if write:
-                                check_write(where, exp, data.to_bytes(4, "little"),
+                                check_write(where, exp, data.to_bytes(access_bytes(m), "little"),
                                             slaves[exp.slave].written[stored[exp.slave] :])  # fmt: skip
                             else:
-                                check_read(where, exp, 4, _read_beats(new, exp.word_bytes))
+                                check_read(where, exp, access_bytes(m),
+                                           _read_beats(new, exp.word_bytes))  # fmt: skip
                             seen = match[0]
                             assert want_resp is None or resp == want_resp, (
                                 f"{where}: response {resp}, expected {want_resp}"
@@ -513,7 +515,7 @@ async def _traffic(masters: dict[str, Any], spawned: list[Any] | None = None) ->
         return task
 
     async def traffic(m: Any, words: list[int]) -> int:
-        data = {a: random.getrandbits(32) for a in words}
+        data = {a: random.getrandbits(8 * access_bytes(m)) for a in words}
         if m.protocol in AXI:
             writes = [start(masters[m.name].write(a, d)) for a, d in data.items()]
             await Combine(*writes)
@@ -718,7 +720,7 @@ async def _everywhere(masters: dict[str, Any], spawned: list[Any] | None = None)
 
     async def one(m: Any, words: list[int]) -> int:
         prot = 0b0011 if m.protocol == "AHB-Lite" else 0
-        data = {a: random.getrandbits(32) for a in words}
+        data = {a: random.getrandbits(8 * access_bytes(m)) for a in words}
         for a, d in data.items():
             err, _, _ = await _access(
                 masters[m.name], m.protocol, m.data_width, a, True, d, False, prot
@@ -1248,21 +1250,23 @@ async def an_error_on_any_beat_of_a_split_access_reaches_the_master(dut: Any) ->
                 continue
             word, exp = found
             sl, step = slaves[s.name], s.data_width // 8
-            for beat in range(exp.address, exp.address + 4, step):
+            size = access_bytes(m)
+            value = 0x1234_5678 & ((1 << 8 * size) - 1)
+            for beat in range(exp.address, exp.address + size, step):
                 where = f"{m.name} -> {s.name} error at {beat:#x}"
                 prot = 0b0011 if m.protocol == "AHB-Lite" else 0
                 sl.err_addrs.add(beat)
                 n = len(sl.written)
                 for write in (True, False):
                     err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
-                                                     write, 0x1234_5678, False, prot)  # fmt: skip
+                                                     write, value, False, prot)  # fmt: skip
                     assert err, f"{where}: {'write' if write else 'read'} got no error"
                     if write:
-                        check_split_write_error(where, exp.address, (0x1234_5678).to_bytes(4, "little"),
+                        check_split_write_error(where, exp.address, value.to_bytes(size, "little"),
                                                 step, beat, sl.written[n:])  # fmt: skip
                 sl.err_addrs.discard(beat)  # the slave's own error words stay
                 err, _got, _resp = await _access(masters[m.name], m.protocol, m.data_width, word,
-                                                 True, 0x1234_5678, False, prot)  # fmt: skip
+                                                 True, value, False, prot)  # fmt: skip
                 assert not err, f"{where}: an error after it cleared"
                 checked += 1
     assert checked > 0
@@ -1448,7 +1452,7 @@ async def axi_ports_take_every_handshake_ordering(dut: Any) -> None:
         for t in targets:
             m = next(x for x in SPEC.masters if x.name == t.master)
             for k in range(12):
-                addr, data = t.base + 4 * k, random.getrandbits(32)
+                addr, data = t.base + 4 * k, random.getrandbits(8 * access_bytes(m))
                 prot = 0b0011 if m.protocol == "AHB-Lite" else 0
                 for write in (w for w, ok in ((True, t.writes), (False, t.reads)) if ok):
                     err, got, _ = await _access(masters[t.master], m.protocol, m.data_width, addr,
