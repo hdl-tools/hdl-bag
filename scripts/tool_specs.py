@@ -23,8 +23,9 @@ LOCK = REPO / "tools.lock"
 DIGESTS = REPO / "tools" / "tools.sha256"
 
 LINUX = "linux-x64"
+LINUX_ARM = "linux-arm64"
 DARWIN = "darwin-arm64"
-PLATFORMS = (LINUX, DARWIN)
+PLATFORMS = (LINUX, LINUX_ARM, DARWIN)
 
 # Where a Mac installs by default. Absolute and fixed, so Verilator's baked-in
 # ``configure --prefix`` is right and every machine's layout matches; the tools image
@@ -93,7 +94,9 @@ TOOLS: tuple[Tool, ...] = (
         assets={
             LINUX: Asset(f"{_SLANG}/slang-linux-x86_64.tar.gz", 0, "slang/bin"),
             DARWIN: Asset(f"{_SLANG}/slang-macos-arm64.tar.gz", 0, "slang/bin"),
+            # Nothing is published for linux-arm64, so it is built from source there.
         },
+        source="https://github.com/MikePopoloski/slang.git",
     ),
     Tool(
         name="verible",
@@ -104,6 +107,9 @@ TOOLS: tuple[Tool, ...] = (
         assets={
             LINUX: Asset(
                 f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-linux-static-x86_64.tar.gz", 1, "verible"
+            ),
+            LINUX_ARM: Asset(
+                f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-linux-static-arm64.tar.gz", 1, "verible"
             ),
             DARWIN: Asset(f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-macOS.tar.gz", 1, "verible"),
         },
@@ -116,6 +122,7 @@ TOOLS: tuple[Tool, ...] = (
         # One top-level directory holding the binary beside its licences.
         assets={
             LINUX: Asset(f"{_BENDER}/bender-x86_64-unknown-linux-gnu.tar.xz", 1, "bender/bin"),
+            LINUX_ARM: Asset(f"{_BENDER}/bender-aarch64-unknown-linux-gnu.tar.xz", 1, "bender/bin"),
             DARWIN: Asset(f"{_BENDER}/bender-aarch64-apple-darwin.tar.xz", 1, "bender/bin"),
         },
     ),
@@ -127,6 +134,9 @@ TOOLS: tuple[Tool, ...] = (
         # The archive carries its own oss-cad-suite/ directory, so nothing is stripped.
         assets={
             LINUX: Asset(f"{_SUITE}/oss-cad-suite-linux-x64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."),
+            LINUX_ARM: Asset(
+                f"{_SUITE}/oss-cad-suite-linux-arm64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."
+            ),
             DARWIN: Asset(
                 f"{_SUITE}/oss-cad-suite-darwin-arm64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."
             ),
@@ -212,6 +222,8 @@ def host_platform() -> str:
     system, machine = platform.system(), platform.machine()
     if system == "Linux" and machine in ("x86_64", "AMD64"):
         return LINUX
+    if system == "Linux" and machine in ("aarch64", "arm64"):
+        return LINUX_ARM
     if system == "Darwin" and machine == "arm64":
         return DARWIN
     raise UnsupportedPlatform(

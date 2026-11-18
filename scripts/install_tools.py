@@ -347,6 +347,55 @@ def _build_verilator(t: Tool, version: str, prefix: Path, plat: str, jobs: int) 
     _record(prefix, t, version)
 
 
+def _build_slang(t: Tool, version: str, prefix: Path, plat: str, jobs: int) -> None:
+    """Clone T at VERSION and install it under PREFIX with CMake.
+
+    Only linux-arm64 needs this: slang publishes binaries for linux-x64 and macos-arm64 and
+    nothing else. The OSS CAD Suite does ship a standalone slang that would be on PATH
+    anyway, but at whatever version the suite was built from, which is the drift #130 was
+    about -- so this builds the pinned one.
+
+    Note the build fetches its own dependencies (fmt and friends) through CMake at configure
+    time. Those are not covered by tools/tools.sha256, which pins release archives.
+    """
+    del plat  # only reached on linux-arm64 today, and the recipe is not platform-specific
+    for need in ("git", "cmake", "g++"):
+        if shutil.which(need) is None:
+            raise RuntimeError(
+                f"slang is built from source on this platform and {need} is not on PATH; "
+                f"it needs git, cmake and a C++20 compiler"
+            )
+    env = dict(os.environ)
+    with tempfile.TemporaryDirectory(prefix="hdl-bag-slang-") as tmp:
+        src, build = Path(tmp) / "src", Path(tmp) / "build"
+        _say(f"    cloning {t.source} at {version}")
+        _run(
+            ["git", "clone", "--depth", "1", "--branch", version, "--", t.source, str(src)],
+            Path(tmp), env, "slang clone",
+        )  # fmt: skip
+        target = (prefix / "slang").resolve()
+        _say(f"    building with -j{jobs} (this takes a while)")
+        configure = [
+            "cmake", "-S", str(src), "-B", str(build),
+            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={target}",
+            # The unit tests are a third of the build and nothing here runs them.
+            "-DSLANG_INCLUDE_TESTS=OFF",
+        ]  # fmt: skip
+        if shutil.which("ninja"):
+            configure += ["-G", "Ninja"]
+        _run(configure, src, env, "slang cmake configure")
+        _run(["cmake", "--build", str(build), "-j", str(jobs)], src, env, "slang cmake build")
+        if target.is_dir():
+            shutil.rmtree(target)
+        _run(["cmake", "--install", str(build)], src, env, "slang cmake install")
+    _say(f"    installed slang -> {prefix / 'slang'}")
+    _record(prefix, t, version)
+
+
+# A tool with no release archive on the chosen platform is built from source by one of these.
+_BUILDERS = {"verilator": _build_verilator, "slang": _build_slang}
+
+
 def _reported_version(t: Tool, prefix: Path) -> str | None:
     """What T's installed executable reports, or None when it is missing or silent."""
     exe = prefix / t.bin_dir / t.executable
@@ -516,7 +565,10 @@ def main(argv: list[str]) -> int:
         try:
             a = asset_for(t, plat)
             if a is None:
-                _build_verilator(t, want, prefix, plat, args.jobs)
+                builder = _BUILDERS.get(t.name)
+                if builder is None:
+                    raise RuntimeError(f"{t.name} has no archive for {plat} and no way to build it")
+                builder(t, want, prefix, plat, args.jobs)
             else:
                 _install_asset(
                     t, a, asset_url(t, plat, lock), prefix, want, digests, args.allow_unpinned
