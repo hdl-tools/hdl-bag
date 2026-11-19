@@ -8,6 +8,12 @@
 # on macOS, so the image and a workstation get the pinned tools the same way from the same
 # table. The build context is the repository root (see .dockerignore), because that is where
 # the installer and tools.lock live.
+#
+# Built for linux/amd64 and linux/arm64, the latter so it runs natively on an Apple Silicon
+# Mac -- which is the only way to get the pinned Verilator there, since it cannot be built
+# on macOS itself (#132). There is deliberately no TARGETARCH plumbing: the installer reads
+# the architecture of the container it is running in, so the same commands do the right
+# thing on either.
 
 ARG UBUNTU_VERSION=24.04
 
@@ -22,8 +28,22 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # still reuses the cached Verilator build instead of spending twenty minutes on it. That is
 # why the version arrives through --set rather than by copying tools.lock in.
 COPY scripts/tool_specs.py scripts/install_tools.py /install/
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 \
+RUN python3 /install/install_tools.py --lock - --prefix /opt \
         --set VERILATOR_VERSION=${VERILATOR_VERSION} verilator
+
+# ---------------------------------------------------------------- slang
+# slang publishes a binary for linux-x64 but nothing for linux-arm64, where the installer
+# builds it with CMake. That needs a compiler and CMake, which the final image should not
+# carry, so it happens here and only the result is copied over.
+FROM ubuntu:${UBUNTU_VERSION} AS slang
+ARG SLANG_VERSION=v12.0
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates cmake g++ git make ninja-build python3 xz-utils zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/tool_specs.py scripts/install_tools.py /install/
+COPY tools/tools.sha256 /install/tools.sha256
+RUN python3 /install/install_tools.py --lock - --prefix /opt \
+        --digests /install/tools.sha256 --set SLANG_VERSION=${SLANG_VERSION} slang
 
 # ---------------------------------------------------------------- final
 FROM ubuntu:${UBUNTU_VERSION}
@@ -41,6 +61,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=verilator /opt/verilator /opt/verilator
+COPY --from=slang /opt/slang /opt/slang
 COPY scripts/tool_specs.py scripts/install_tools.py /install/
 COPY tools/tools.sha256 /install/tools.sha256
 
@@ -49,14 +70,12 @@ COPY tools/tools.sha256 /install/tools.sha256
 #
 # The OSS CAD Suite brings its own copies of Verilator and slang; both are shadowed by the
 # pinned ones through the PATH order below.
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 \
+RUN python3 /install/install_tools.py --lock - --prefix /opt \
         --digests /install/tools.sha256 \
         --set OSS_CAD_SUITE_DATE=${OSS_CAD_SUITE_DATE} oss-cad-suite
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 \
-        --digests /install/tools.sha256 --set SLANG_VERSION=${SLANG_VERSION} slang
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 \
+RUN python3 /install/install_tools.py --lock - --prefix /opt \
         --digests /install/tools.sha256 --set VERIBLE_VERSION=${VERIBLE_VERSION} verible
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 \
+RUN python3 /install/install_tools.py --lock - --prefix /opt \
         --digests /install/tools.sha256 --set BENDER_VERSION=${BENDER_VERSION} bender
 
 # uv keeps its own installer: it drops both uv and uvx, and swapping it for the release
@@ -71,7 +90,7 @@ ENV PATH="/opt/verilator/bin:/opt/slang/bin:/opt/verible/bin:/opt/bender/bin:${P
 
 # Record what the image holds, and fail the build if any tool is not at its pin. LibreOffice
 # comes from apt, so it is checked separately.
-RUN python3 /install/install_tools.py --lock - --prefix /opt --platform linux-x64 --check \
+RUN python3 /install/install_tools.py --lock - --prefix /opt --check \
         --set VERILATOR_VERSION=${VERILATOR_VERSION} --set SLANG_VERSION=${SLANG_VERSION} \
         --set VERIBLE_VERSION=${VERIBLE_VERSION} --set BENDER_VERSION=${BENDER_VERSION} \
         --set OSS_CAD_SUITE_DATE=${OSS_CAD_SUITE_DATE} \
