@@ -41,6 +41,10 @@ class ShrinkError(Exception):
     """The failure cannot be shrunk; the message says why and what to do."""
 
 
+class NoFailure(ShrinkError):
+    """The step passes on the original spec: the caller may try another step."""
+
+
 def build(data: SpecData, work: Path, spec_dir: Path) -> tuple[ir.Spec, Outputs] | str:
     """Write, check, resolve and generate DATA under WORK. A short reason string if the
     candidate is not a valid design: "check", "resolve", "generate" or "crash"."""
@@ -123,9 +127,7 @@ def formal_step(stem: str, task: str | None, timeout: float | None) -> Step:
 def _vet(sig: Signature | None, what: str) -> Signature:
     """The baseline failure SIG, or a ShrinkError if it cannot be shrunk."""
     if sig is None:
-        raise ShrinkError(
-            f"{what} does not fail on the original spec, so there is nothing to shrink"
-        )
+        raise NoFailure(f"{what} does not fail on the original spec, so there is nothing to shrink")
     if "TOOL-MISSING" in sig.rules:
         raise ShrinkError(
             f"{what} reports TOOL-MISSING: a tool is not installed, so every candidate would "
@@ -143,7 +145,7 @@ def _discover_sim(out: Outputs, seed: int | None) -> tuple[Step, Signature]:
     used = SEED if seed is None else seed
     report = _run_sim(out, None, seed)
     if report.ok:
-        raise ShrinkError("sim does not fail on the original spec, so there is nothing to shrink")
+        raise NoFailure("sim does not fail on the original spec, so there is nothing to shrink")
     failed = {f.message for f in report.unwaived if f.rule == "TEST-FAILED"}
     target = next(
         (n for n in cocotb_tests(out.root.resolve() / str(out.tests))
@@ -165,7 +167,7 @@ def _discover_formal(out: Outputs, timeout: float | None) -> tuple[Step, Signatu
             return formal_step(stem, task, timeout), _vet(
                 _signature(report, name), f"formal {name}"
             )
-    raise ShrinkError("formal does not fail on the original spec, so there is nothing to shrink")
+    raise NoFailure("formal does not fail on the original spec, so there is nothing to shrink")
 
 
 def discover(

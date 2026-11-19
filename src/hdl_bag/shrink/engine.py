@@ -25,6 +25,7 @@ class Shrunk:
     kept: tuple[str, ...]  # labels of the accepted edits, in order
     runs: int  # oracle answers that were True or False
     invalid: int  # oracle answers that were None
+    passes: int  # passes started, the last of which accepted nothing unless exhausted
     exhausted: bool  # a full pass did not finish within the budget: maybe not minimal
 
 
@@ -42,8 +43,9 @@ def shrink(
     """
     current = copy.deepcopy(data)
     kept: list[str] = []
-    runs = invalid = 0
+    runs = invalid = passes = 0
     while True:
+        passes += 1
         accepted = len(kept)
         for kind in KINDS:
             i = 0
@@ -52,7 +54,7 @@ def shrink(
                 if i >= len(edits):
                     break
                 if budget is not None and runs >= budget:
-                    return Shrunk(current, tuple(kept), runs, invalid, exhausted=True)
+                    return Shrunk(current, tuple(kept), runs, invalid, passes, exhausted=True)
                 label, apply = edits[i]
                 candidate = copy.deepcopy(current)
                 apply(candidate)
@@ -71,4 +73,4 @@ def shrink(
                     log(f"rejected {label}")
                     i += 1
         if len(kept) == accepted:
-            return Shrunk(current, tuple(kept), runs, invalid, exhausted=False)
+            return Shrunk(current, tuple(kept), runs, invalid, passes, exhausted=False)

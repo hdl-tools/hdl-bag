@@ -2,6 +2,8 @@
 # Copyright 2026 The hdl-bag Authors
 """Command-line entry point: ``bag``."""
 
+import hashlib
+import re
 import tempfile
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from hdl_bag.checks import CheckResult, run_checks
 from hdl_bag.flows import Report, SimUnavailable, compile_design, lint, run_formal, run_tests
 from hdl_bag.gen import MissingRtl, Outputs, generate, include_dirs, load_outputs, sources
 from hdl_bag.gen.render import GenerateError
-from hdl_bag.ir.to_workbook import to_workbook
+from hdl_bag.ir.to_workbook import to_spec_data, to_workbook
 from hdl_bag.reader import ReaderError, read_workbook
 from hdl_bag.template import write_template
 from hdl_bag.template.sample_demo_ss import SAMPLE_HEADER, WRAPPER
@@ -324,6 +326,109 @@ def regress(
     click.echo(line)
     if failed:
         raise SystemExit(1)
+
+
+STEP_NAMES = ("lint", "sim", "formal")
+
+
+def _step(_ctx: click.Context, _param: click.Parameter, value: str | None) -> str | None:
+    if (value is not None and value not in STEP_NAMES and not value.startswith("test=")) \
+            or value == "test=":  # fmt: skip
+        raise click.BadParameter(f"'{value}' is not lint, sim, formal or test=<name>")
+    return value
+
+
+@main.command(name="shrink")
+@click.argument("spec", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--step", callback=_step, metavar="STEP",
+              help="The failing step: lint, sim, formal or test=<name>. Default: the first of "
+                   "lint, sim and formal that fails.")  # fmt: skip
+@click.option("-o", "--output", type=click.Path(dir_okay=False, path_type=Path),
+              help="Where to write the shrunk IR. Default: SPEC with .shrunk.ir.yaml.")  # fmt: skip
+@click.option("--budget", type=click.IntRange(min=1), default=200, show_default=True,
+              help="The most step runs to spend.")  # fmt: skip
+@click.option("--timeout", type=click.FloatRange(min=1), help="Seconds allowed per formal task.")
+def shrink_command(spec: Path, step: str | None, output: Path | None, budget: int,
+           timeout: float | None) -> None:  # fmt: skip
+    """Delta-debug a failing SPEC (an .ir.yaml) down to a small IR that still fails the same
+    way, and write it. Runs the EDA tools of the step many times; exit 1 if SPEC cannot be
+    shrunk (it does not fail, a tool is missing, ...)."""
+    from hdl_bag.shrink import ShrinkError
+
+    if spec.suffix not in (".yaml", ".yml"):
+        raise click.UsageError(f"{spec} is not an IR: run bag ir on the workbook first")
+    if output is None:
+        output = spec.with_name(re.sub(r"(\.ir)?\.ya?ml$", "", spec.name) + ".shrunk.ir.yaml")
+    try:
+        _shrink(spec, step, output, budget, timeout)
+    except ShrinkError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+
+def _shrink(spec_path: Path, step: str | None, output: Path, budget: int,
+            timeout: float | None) -> None:  # fmt: skip
+    from hdl_bag.ir.model import Provenance
+    from hdl_bag.shrink import NoFailure, ShrinkError, Step, build, discover, make_oracle, shrink
+    from hdl_bag.shrink import Signature as Sig
+
+    try:
+        loaded = ir.load(spec_path)
+    except ir.IrError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
+    spec_dir = spec_path.parent
+    data = to_spec_data(loaded)  # the baseline is the round trip: to_spec_data keeps one alias
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        base = build(data, work / "base", spec_dir)
+        if isinstance(base, str):
+            raise ShrinkError(f"the spec does not get past {base}: run bag flow on it first")
+        spec, out = base
+        found: tuple[str, Step, Sig] | None = None
+        for name in (step,) if step else STEP_NAMES:
+            try:
+                run, sig = discover(name, spec, out, timeout)
+                found = (name, run, sig)
+                break
+            except NoFailure:
+                if step:
+                    raise
+        if found is None:
+            raise ShrinkError(
+                "lint, sim and formal all pass on the spec, so there is nothing to shrink"
+            )
+        name, run, sig = found
+        kind = "sim" if name.startswith("test=") else name
+        target = f" {sig.target}" if sig.target else ""
+        click.echo(f"baseline: {kind}{target} fails with {', '.join(sorted(sig.rules))}")
+        counts: dict[str, int] = {}
+
+        def kept(line: str) -> None:
+            if line.startswith("kept "):
+                click.echo(f"kept: {line[9:]}")
+
+        result = shrink(
+            data, make_oracle(work / "cand", spec_dir, run, sig, counts), budget=budget, log=kept,
+        )  # fmt: skip
+        final = build(result.data, work / "final", spec_dir)
+        if isinstance(final, str):
+            raise ShrinkError(f"the shrunk spec does not get past {final}: this is a bag bug")
+    click.echo(f"{result.passes} pass(es), {result.runs} run(s); kept {len(result.kept)} "
+               f"edit(s); {counts.get('check', 0)} candidate(s) failed bag check")  # fmt: skip
+    unbuilt = sum(n for why, n in counts.items() if why != "check")
+    if unbuilt:
+        click.echo(f"note: {unbuilt} candidate(s) passed bag check but did not resolve or generate")
+    if result.exhausted:
+        click.echo(f"stopped at the budget of {budget} runs; the result may shrink further "
+                   "(--budget)")  # fmt: skip
+    # The candidate's provenance names a temp workbook; the truth is the file this came from.
+    prov = Provenance(bag_version=__version__, source=spec_path.name,
+                      sha256=hashlib.sha256(spec_path.read_bytes()).hexdigest())  # fmt: skip
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ir.dump(final[0].model_copy(update={"provenance": prov}), output)
+    click.echo(f"wrote {output}")
+    click.echo(f"reproduce: bag flow {output}")
 
 
 if __name__ == "__main__":
