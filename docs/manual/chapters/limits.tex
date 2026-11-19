@@ -270,9 +270,20 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   were written for the pinned versions: with another version, a waiver that matches
   nothing is a note, not an error. \cmd{bag formal} notes a SymbiYosys that is not the
   pinned one.
-\item \textbf{Linux and the tools image.} The EDA flows are tested on Linux, in the tools
-  image (Ubuntu 24.04). Reading, checking and generating need no EDA tools and run on
-  Linux and Windows.
+\item \textbf{The EDA flows run in the tools image.} They are tested there, on
+  \code{linux/amd64} and \code{linux/arm64} (Ubuntu 24.04). Reading, checking,
+  generating and the collateral need no EDA tools and run on Linux, macOS and Windows.
+\item \textbf{No native EDA path on macOS.} The pinned Verilator publishes no macOS
+  binary and cannot be built from source on macOS~27 (section~\ref{sec:macos}), so the
+  flows are supported there only through the image, which is native on Apple Silicon.
+  \cmd{bag lint} and \cmd{bag formal} do in fact work with natively installed tools,
+  since slang, Verible and the OSS CAD Suite all publish macOS builds; that is not a
+  tested configuration and is not supported. Note also that without the pinned Verilator
+  on \code{PATH}, a native \cmd{bag lint} silently uses the OSS CAD Suite's own
+  Verilator, which is not the pinned one.
+\item \textbf{What is untested on arm64.} The full list (\code{eda and not deep})
+  passes on \code{linux/arm64}. The \emph{deep} formal proofs and \cmd{bag regress}
+  have not been run there.
 \item \textbf{One simulator.} \cmd{bag sim} runs Verilator with cocotb only.
   \setting{Simulator} accepts only \code{verilator} (\ruleid{VALUE-ILLEGAL}). Xcelium and
   VCS are not supported, and the bus models are not tested with them. \cmd{bag lint} runs

@@ -96,12 +96,17 @@ sim/coverage.md          written by bag sim: what the tests exercised (paths, re
 
 ## Requirements
 
-- Python 3.11 or newer (tested on Linux and Windows).
-- For `bag lint` and `bag flow`: Verilator, slang and Verible; for `bag formal`,
-  SymbiYosys and Yosys with the yosys-slang plugin (OSS CAD Suite). The pinned
+- Python 3.11 or newer. Reading, checking, generating and the collateral need nothing
+  else, on Linux, macOS and Windows.
+- For `bag lint`, `bag flow`, `bag sim` and `bag formal`: Verilator, slang and Verible,
+  plus SymbiYosys and Yosys with the yosys-slang plugin (OSS CAD Suite). The pinned
   versions are in [tools.lock](tools.lock), and the container image
-  `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile))
-  has all of them. Reading, checking and generating need no EDA tools.
+  `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile)) has all of
+  them for `linux/amd64` and `linux/arm64`.
+- **On macOS the EDA flows run in that image**, which is native on Apple Silicon. The
+  pinned Verilator cannot be built on macOS itself, so there is no supported native EDA
+  path there; `scripts/install_tools.py` installs the pinned tools on a Linux or macOS
+  host and says so if it cannot.
 
 ## Development
 
