@@ -45,6 +45,11 @@ class NoFailure(ShrinkError):
     """The step passes on the original spec: the caller may try another step."""
 
 
+class ToolUnavailable(ShrinkError):
+    """The step cannot be assessed on this machine, as distinct from `NoFailure`, where it was
+    assessed and passed. The caller may try another step."""
+
+
 def build(data: SpecData, work: Path, spec_dir: Path) -> tuple[ir.Spec, Outputs] | str:
     """Write, check, resolve and generate DATA under WORK. A short reason string if the
     candidate is not a valid design: "check", "resolve", "generate" or "crash"."""
@@ -188,7 +193,7 @@ def discover(
             report = _run_sim(out, name, seed)
             return sim_step(name, seed), _vet(_signature(report, name), f"sim test {name}")
     except SimUnavailable as exc:
-        raise ShrinkError(f"cannot run the simulation: {exc}. Install cocotb") from exc
+        raise ToolUnavailable(f"cannot run the simulation: {exc}. Install cocotb") from exc
     except ValueError as exc:
         raise ShrinkError(str(exc)) from exc
     raise ShrinkError(f"unknown step {step!r}: use lint, sim, formal or test=<name>")

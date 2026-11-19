@@ -12,6 +12,7 @@ from hdl_bag.shrink.evaluate import (
     ShrinkError,
     Signature,
     Step,
+    ToolUnavailable,
     build,
     discover,
     formal_step,
@@ -23,6 +24,6 @@ from hdl_bag.shrink.reductions import KINDS, Edit, Kind, drop_names, fabric_port
 
 __all__ = [
     "KINDS", "Edit", "Kind", "NoFailure", "Oracle", "ShrinkError", "Shrunk", "Signature", "Step",
-    "build", "discover", "drop_names", "fabric_ports", "formal_step", "lint_step", "make_oracle",
-    "shrink", "sim_step",
+    "ToolUnavailable", "build", "discover", "drop_names", "fabric_ports", "formal_step",
+    "lint_step", "make_oracle", "shrink", "sim_step",
 ]  # fmt: skip

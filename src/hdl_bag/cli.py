@@ -369,7 +369,16 @@ def shrink_command(spec: Path, step: str | None, output: Path | None, budget: in
 def _shrink(spec_path: Path, step: str | None, output: Path, budget: int,
             timeout: float | None) -> None:  # fmt: skip
     from hdl_bag.ir.model import Provenance
-    from hdl_bag.shrink import NoFailure, ShrinkError, Step, build, discover, make_oracle, shrink
+    from hdl_bag.shrink import (
+        NoFailure,
+        ShrinkError,
+        Step,
+        ToolUnavailable,
+        build,
+        discover,
+        make_oracle,
+        shrink,
+    )
     from hdl_bag.shrink import Signature as Sig
 
     try:
@@ -386,6 +395,8 @@ def _shrink(spec_path: Path, step: str | None, output: Path, budget: int,
             raise ShrinkError(f"the spec does not get past {base}: run bag flow on it first")
         spec, out = base
         found: tuple[str, Step, Sig] | None = None
+        passed: list[str] = []
+        unassessed: list[tuple[str, str]] = []
         for name in (step,) if step else STEP_NAMES:
             try:
                 run, sig = discover(name, spec, out, timeout)
@@ -394,9 +405,21 @@ def _shrink(spec_path: Path, step: str | None, output: Path, budget: int,
             except NoFailure:
                 if step:
                     raise
+                passed.append(name)
+            except ToolUnavailable as exc:
+                if step:
+                    raise
+                unassessed.append((name, str(exc)))
         if found is None:
+            if not unassessed:
+                raise ShrinkError(
+                    "lint, sim and formal all pass on the spec, so there is nothing to shrink"
+                )
+            why = "; ".join(f"{n} could not be assessed ({m})" for n, m in unassessed)
+            ok = f"{' and '.join(passed)} pass on the spec, but " if passed else ""
             raise ShrinkError(
-                "lint, sim and formal all pass on the spec, so there is nothing to shrink"
+                f"{ok}{why}: nothing to shrink in what ran, so install what is missing "
+                "and run again"
             )
         name, run, sig = found
         kind = "sim" if name.startswith("test=") else name

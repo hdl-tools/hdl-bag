@@ -12,8 +12,9 @@ from click.testing import CliRunner, Result
 
 from hdl_bag import __version__, ir
 from hdl_bag.cli import main
-from hdl_bag.flows import Finding, Report
-from hdl_bag.shrink import evaluate
+from hdl_bag.flows import Finding, Report, SimUnavailable
+from hdl_bag.gen import Outputs
+from hdl_bag.shrink import Signature, evaluate
 
 P2 = Path(__file__).parents[1] / "configs" / "p2"
 
@@ -122,3 +123,66 @@ def test_the_budget_message_appears_only_when_exhausted(
         short.output
     )
     assert "stopped at the budget" not in shrink("multi.ir.yaml").output
+
+
+def sim_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run_sim(*_a: object, **_k: object) -> Report:
+        raise SimUnavailable("cocotb is not installed")
+
+    monkeypatch.setattr(evaluate, "_run_sim", run_sim)
+
+
+def formal_outcome(monkeypatch: pytest.MonkeyPatch, *, fails_while_rtl_names: str | None) -> None:
+    """Stub formal discovery: it fails on `multi` while the RTL names the word, or passes."""
+    sig = Signature(frozenset({"FORMAL-FAIL"}), "arb:prove")
+
+    def step(_spec: object, out: Outputs) -> Signature | None:
+        root = out.root.resolve()
+        hit = any(str(fails_while_rtl_names) in f.read_text() for f in root.rglob("*.sv"))
+        return sig if hit else None
+
+    def discover_formal(*_a: object, **_k: object) -> tuple[evaluate.Step, Signature]:
+        if fails_while_rtl_names is None:
+            raise evaluate.NoFailure("formal does not fail on the original spec")
+        return step, sig
+
+    monkeypatch.setattr(evaluate, "_discover_formal", discover_formal)
+
+
+def test_an_unavailable_simulator_does_not_stop_the_search_reaching_formal(
+    spec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lint_fails_while_rtl_names(monkeypatch, "no such text")
+    sim_unavailable(monkeypatch)
+    formal_outcome(monkeypatch, fails_while_rtl_names="dma")
+    result = shrink("multi.ir.yaml")
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[0] == "baseline: formal arb:prove fails with FORMAL-FAIL"
+    assert Path("multi.shrunk.ir.yaml").exists()
+
+
+def test_asking_for_sim_explicitly_still_reports_that_it_is_unavailable(
+    spec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sim_unavailable(monkeypatch)
+    result = shrink("multi.ir.yaml", "--step", "sim")
+    assert result.exit_code == 1
+    assert "error: cannot run the simulation: cocotb is not installed. Install cocotb" in (
+        result.output
+    )
+
+
+def test_a_step_that_could_not_be_assessed_is_not_reported_as_passing(
+    spec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lint_fails_while_rtl_names(monkeypatch, "no such text")
+    sim_unavailable(monkeypatch)
+    formal_outcome(monkeypatch, fails_while_rtl_names=None)
+    result = shrink("multi.ir.yaml")
+    assert result.exit_code == 1
+    assert (
+        "error: lint and formal pass on the spec, but sim could not be assessed "
+        "(cannot run the simulation: cocotb is not installed. Install cocotb): "
+        "nothing to shrink in what ran, so install what is missing and run again"
+    ) in result.output
+    assert "all pass" not in result.output
