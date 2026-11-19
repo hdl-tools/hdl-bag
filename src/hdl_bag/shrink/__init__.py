@@ -7,6 +7,21 @@ for as long as an oracle says the original failure still reproduces.
 """
 
 from hdl_bag.shrink.engine import Oracle, Shrunk, shrink
+from hdl_bag.shrink.evaluate import (
+    ShrinkError,
+    Signature,
+    Step,
+    build,
+    discover,
+    formal_step,
+    lint_step,
+    make_oracle,
+    sim_step,
+)
 from hdl_bag.shrink.reductions import KINDS, Edit, Kind, drop_names, fabric_ports
 
-__all__ = ["KINDS", "Edit", "Kind", "Oracle", "Shrunk", "drop_names", "fabric_ports", "shrink"]
+__all__ = [
+    "KINDS", "Edit", "Kind", "Oracle", "ShrinkError", "Shrunk", "Signature", "Step", "build",
+    "discover", "drop_names", "fabric_ports", "formal_step", "lint_step", "make_oracle",
+    "shrink", "sim_step",
+]  # fmt: skip
