@@ -18,6 +18,8 @@ from hdl_bag.tests_gen import SHIM_TEST, ready_shim_module
 # Fixed so a failure reproduces; cocotb derives each test's seed from it and the name.
 SEED = int(os.environ.get("BAG_COCOTB_SEED", "20261031"))
 _TEST = re.compile(r"@cocotb\.test\([^)]*\)\s*\nasync def (\w+)")
+# The most of a failed test's message that its finding repeats.
+MESSAGE_LIMIT = 300
 
 
 class SimUnavailable(Exception):
@@ -32,6 +34,18 @@ def cocotb_tests(module: Path, test_filter: str | None = None) -> list[str]:
     return [n for n in names if not test_filter or re.search(test_filter, f"{module.stem}.{n}")]
 
 
+def _reason(case: ET.Element) -> str:
+    """Why CASE failed: the first line of its message, cut to MESSAGE_LIMIT, after a colon.
+    The nightly keeps only the findings of a seed, so they must say why."""
+    failed = case.find("failure")
+    failed = failed if failed is not None else case.find("error")
+    lines = (failed.get("message") or "").strip().splitlines() if failed is not None else []
+    if not lines:
+        return ""
+    first = lines[0].strip()
+    return f": {first[:MESSAGE_LIMIT]}..." if len(first) > MESSAGE_LIMIT else f": {first}"
+
+
 def _findings(cases: list[ET.Element], expected: list[str], seed: int) -> list[Finding]:
     def finding(rule: str, message: str) -> Finding:
         return Finding("cocotb", "", 0, rule, "error", f"{message} (seed {seed})")
@@ -42,7 +56,7 @@ def _findings(cases: list[ET.Element], expected: list[str], seed: int) -> list[F
         out.append(finding("TEST-SET", f"ran {sorted(names)}, expected {sorted(expected)}"))
     for name, case in zip(names, cases, strict=True):
         if case.find("failure") is not None or case.find("error") is not None:
-            out.append(finding("TEST-FAILED", f"{name} failed"))
+            out.append(finding("TEST-FAILED", f"{name} failed{_reason(case)}"))
         elif case.find("skipped") is not None:
             out.append(finding("TEST-SKIPPED", f"{name} was skipped"))
     return out

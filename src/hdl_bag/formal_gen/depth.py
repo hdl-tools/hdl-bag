@@ -101,14 +101,19 @@ def _cost(spec: Spec, netlist: Netlist, a: str, b: str) -> int | None:
 
 
 def port_depths(spec: Spec, netlist: Netlist, ports: list[str]) -> dict[str, int]:
-    """Each of PORTS (external port names) with its protocol depth in solver steps."""
-    pairs = reachable(spec)
+    """Each of PORTS (external port names) with its protocol depth in solver steps: the nearest
+    peer for each kind of access the port has covers for, and the farther of those two."""
+    pairs = reaching(spec)
     out = {}
     for port in ports:
-        peers = [s for m, s in pairs if m == port] + [m for m, s in pairs if s == port]
-        costs = [c for q in sorted(set(peers))
-                 if (c := _cost(spec, netlist, port, q)) is not None]  # fmt: skip
-        out[port] = max(PROTOCOL_DEPTH, min(costs, default=PROTOCOL_DEPTH))
+        nearest = []
+        for kind in ("read", "write"):
+            peers = {s if m == port else m for (m, s), kinds in pairs.items()
+                     if port in (m, s) and kind in kinds}  # fmt: skip
+            costs = [c for q in sorted(peers)
+                     if (c := _cost(spec, netlist, port, q)) is not None]  # fmt: skip
+            nearest += [min(costs)] if costs else []
+        out[port] = max([PROTOCOL_DEPTH, *nearest])
     return out
 
 

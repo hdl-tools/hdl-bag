@@ -32,7 +32,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hdl_bag.formal_gen.decode import decoded_fabrics, masters_of, port_accesses, reference
+from hdl_bag.formal_gen.decode import (
+    contended,
+    decoded_fabrics,
+    masters_of,
+    port_accesses,
+    reference,
+)
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.package import CUT_STAGES
 from hdl_bag.gen.render import GenerateError, lit
@@ -51,6 +57,12 @@ if TYPE_CHECKING:
 # br_per (a round trip through axi_cdc, no conversion) reached its last cover at step 21;
 # bridges_pulp's br_per (64 to 32 bits) passed with every cover at 24 and timed out at 28;
 # mixed_narrow_apb's br_c8 (64 to 8 bits) reached its last cover at step 33.
+# A route job's cover task searches this many times as deep as its bmc (D108). A cover search
+# ends at the last cover reached, so the margin costs nothing where every cover is reachable;
+# regress seeds reached covers just past the bmc's depth (step 8 of 8 edges, step 33 of 24
+# steps). The bmc keeps its depth, as the protocol job's does (D79): a cover reached past it
+# shows the check can fire there, but the bmc did not check that far.
+ROUTE_COVER_MARGIN = 2
 ROUTE_DEPTH = 24
 ROUTE_DEPTH_PER_HALVING = 6
 # A unit in one clock domain runs on one clock, for ROUTE_CYCLES edges plus
@@ -296,6 +308,17 @@ class _Harness:
             from hdl_bag.formal_gen import _APB, _AXIL, _CHECKER, zipcpu_params
 
             family = "axil" if p is Protocol.AXI4_LITE else "apb"
+            if family == "axil" and self.slave_can(a) == frozenset():
+                # Every master is denied this port: the routed assertion says the fabric sends
+                # nothing, and the checker's response covers could never be reached.
+                self.body.append(f"  // {bus.name}: no checker, every master is denied this port")
+                self.body += [f"  always_comb assume ({self.v(bus, s)} == 1'b0);"
+                              for s in ("bvalid", "rvalid")]  # fmt: skip
+                fabric = self.inst.fabric.name if self.inst.fabric else self.inst.name
+                wvalid = self.v(bus, "wvalid")
+                self.body.append(f"  always @(posedge {clk}) if (bag_live_{d}) "
+                                 f"{fabric}_{bus.name}_w_quiet: assert (!{wvalid});")  # fmt: skip
+                return
             vendor = _CHECKER[(family, not a.unit_is_slave)]
             module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
             self.zipcpu.append(
@@ -554,6 +577,9 @@ class _Harness:
                 if kind is not None and kind not in can[k]:
                     self.body.append(f"  // {label}: no cover, the IR sends {bus.name} no {kind}")
                     continue
+                if not can[k]:
+                    self.body.append(f"  // {label}: no cover, the IR sends {bus.name} nothing")
+                    continue
                 self.body.append(f"  always @(posedge {bclk}) cover_{label}: "
                                  f"cover (bag_live_{d} && {valid});")  # fmt: skip
         # Each scoreboard: the entries slaves took leave, then the request accepted now joins
@@ -614,6 +640,8 @@ class _Harness:
                         f"  always_comb if ({b}_ask) assume (!{clash});",
                     ]
             # The assumption leaves contention: two masters ask for one slave at once.
+            if not contended(self.spec, fab, {"aw": "write", "ar": "read"}.get(ch)):
+                continue  # these two masters never ask one slave port for this kind
             a, b = f"sb_{ch}0", f"sb_{ch}1"
             both = f"{a}_ask && {b}_ask && {a}_t == {b}_t"
             self.body.append(f"  always @(posedge {clk}) cover_{name}_{ch}_contended: cover "

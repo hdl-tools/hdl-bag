@@ -646,6 +646,47 @@ def _first(netlist: Netlist, bus: Bus) -> Instance | None:
     return None
 
 
+def _lite_limit(
+    spec: Spec, netlist: Netlist, bus: Bus
+) -> tuple[int, Instance, int, list[Instance]] | None:
+    """The AXI4 to AXI4-Lite adapter with MaxTrans of 2 or less on master port BUS's adapter
+    chain, as (its place in the chain, it, MaxTrans, the chain), or None."""
+    chain: list[Instance] = []
+    inst = _first(netlist, bus)
+    while inst is not None and inst.kind == "adapter":
+        chain.append(inst)
+        inst = _first(netlist, inst.down) if inst.down is not None else None
+    for k, a in enumerate(chain):
+        if not (a.template == "bag_pc" and a.adapter is not None and a.down is not None
+                and a.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
+            continue
+        fab = {f.name: f for f in spec.fabrics}[a.adapter.fabric]
+        trans = fab.max_mst_trans  # as the bag_pc template sets MaxTrans on a master's path
+        if trans is not None and trans <= 2:
+            return k, a, trans, chain
+    return None
+
+
+def _buffer_in_front(chain: list[Instance], k: int) -> Instance | None:
+    """The CDC, FIFO or register slice before place K of CHAIN, which takes transactions of its
+    own, or None."""
+    return next((a for a in chain[:k] if a.adapter is not None
+                 and a.adapter.type in ("cdc", "fifo", "cut")), None)  # fmt: skip
+
+
+def unsettled(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
+    """The bag_faxi4 events on master port BUS that are neither impossible nor sure to happen
+    (seed 011): a buffer in front of a limiting AXI4-Lite converter (never) takes reads of its
+    own, as many as its depth allows, so the port can open more than the converter does."""
+    found = _lite_limit(spec, netlist, bus)
+    buffer = _buffer_in_front(found[3], found[0]) if found else None
+    if found is None or buffer is None or buffer.adapter is None:
+        return {}
+    why = (f"the {buffer.adapter.type} adapter {buffer.name} in front of {found[1].name} "
+           "takes reads of its own")  # fmt: skip
+    return {"same_id": why, "full": why}
+
+
 def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
     """The bag_faxi4 events the design never lets the master on AXI4 master port BUS make,
     each with why; the protocol job asserts them absent instead of covering them.
@@ -660,7 +701,8 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
       and any full counter blocks every ID: one read and one write at a time, so neither two
       reads of one ID nor a full table (full: four reads, or four writes owed a response).
       D91 (owner, 2026-11-14): the same where such an adapter comes later on the master's
-      adapter chain, before its fabric (axil_adapters' cpu: bag_dw, then bag_pc).
+      adapter chain, before its fabric (axil_adapters' cpu: bag_dw, then bag_pc), unless a
+      CDC, FIFO or register slice comes first (unsettled).
     - w_first (D91): the port enters a downsizing bag_dw, whose bag_axi_dw holds W until it
       has taken the AW (the downsizer's W beats wait for it)."""
     first = _first(netlist, bus)
@@ -674,33 +716,25 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
             and first.up.data_width > first.down.data_width):  # fmt: skip
         out["w_first"] = (f"{bus.name} enters {first.name}, a downsizing bag_axi_dw: W waits "
                           "for its AW (D91)")  # fmt: skip
-    chain: list[Instance] = []
-    inst: Instance | None = first
-    while inst is not None and inst.kind == "adapter":
-        chain.append(inst)
-        inst = _first(netlist, inst.down) if inst.down is not None else None
-    for k, a in enumerate(chain):
-        if not (a.template == "bag_pc" and a.adapter is not None and a.down is not None
-                and a.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
-            continue
-        fab = {f.name: f for f in spec.fabrics}[a.adapter.fabric]
-        trans = fab.max_mst_trans  # as the bag_pc template sets MaxTrans on a master's path
-        if trans is not None and trans <= 2:
-            how, why = ("enters", "D80") if k == 0 else ("reaches", "D80, D91")
-            out["same_id"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with "
-                              f"MaxTrans {trans}: one read at a time ({why})")  # fmt: skip
-            out["full"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with MaxTrans "
-                           f"{trans}: one read and one write at a time ({why})")  # fmt: skip
-            break
+    found = _lite_limit(spec, netlist, bus)
+    if found is not None and _buffer_in_front(found[3], found[0]) is None:
+        k, a, trans, _ = found
+        how, why = ("enters", "D80") if k == 0 else ("reaches", "D80, D91")
+        out["same_id"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with "
+                          f"MaxTrans {trans}: one read at a time ({why})")  # fmt: skip
+        out["full"] = (f"{bus.name} {how} {a.name}, PULP axi_to_axi_lite with MaxTrans "
+                       f"{trans}: one read and one write at a time ({why})")  # fmt: skip
     return out
 
 
 def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
-          active: dict[str, set[str]], absent: dict[str, str]) -> list[str]:  # fmt: skip
+          active: dict[str, set[str]], absent: dict[str, str],
+          open_events: dict[str, str]) -> list[str]:  # fmt: skip
     """BAG's AXI4 checker on BUS, and its covers. The checker follows every ID of the port by
     itself (D64), so it needs no ID mapping. A signal the port lacks takes the value the spec
     implies (no ID: a single ID 0; no AxLOCK, AxCACHE, AxQOS, AxREGION: 0). ABSENT: the events
-    the design never lets the environment master make (``never``), asserted, not covered."""
+    the design never lets the environment master make (``never``), asserted, not covered.
+    OPEN_EVENTS: those neither asserted nor covered (``unsettled``)."""
     idw = max(bus.id_width, 1)
 
     def v(sig: str) -> str:
@@ -751,13 +785,15 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
         # tell; test_an_axi4_slave_environment_may_give_exokay_to_an_exclusive_access keeps
         # the EXOKAY rules from holding vacuously.
         covers += [(f"proto_{e}_{bus.name}", f"bag_{bus.name}_{e}") for e in events
-                   if e not in absent]  # fmt: skip
+                   if e not in absent and e not in open_events]  # fmt: skip
     lines += [f"  always_comb {label}: cover ({expr});" for label, expr in covers]
     for e, why in absent.items():
         label = f"proto_no_{e}_{bus.name}"
         lines += [f"  always @(posedge {dom.clock}) if (!{dom.checker_reset}) "
                   f"{label}: assert (!bag_{bus.name}_{e});",
                   f"  // {label}: no cover, {why}"]  # fmt: skip
+    lines += [f"  // proto_{e}_{bus.name}: neither asserted nor covered, {why}"
+              for e, why in open_events.items()]  # fmt: skip
     if bus.is_slave:
         lines += _only_what_reaches(bus, dom, can, write=f"{v('awvalid')} || {v('wvalid')}",
                                     read=v("arvalid"))  # fmt: skip
@@ -888,7 +924,8 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             body.append(f"  // {bus.name}: AXI4 {side} port; the design is its {design} "
                         "(bag_faxi4)")  # fmt: skip
             absent = {} if bus.is_slave else never(spec, netlist, bus)
-            lines = _axi4(spec, bus, domains[bus.domain], ports, active, absent)
+            open_events = {} if bus.is_slave else unsettled(spec, netlist, bus)
+            lines = _axi4(spec, bus, domains[bus.domain], ports, active, absent, open_events)
             split |= {bus.name} if _both_ways(bus, lines) else set()
             body += [*_own_covers(bus, lines), ""]
     if ahb:
@@ -1170,7 +1207,7 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     """UNIT's route job: ZipCPU's files read by Yosys's own frontend with one parameterised
     copy per checker instance, then the design, BAG's own checkers and the unit's harness
     PROPS, whose module is the top."""
-    from hdl_bag.formal_gen.units import route_depth
+    from hdl_bag.formal_gen.units import ROUTE_COVER_MARGIN, route_depth
 
     zips = unit.zipcpu
     prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
@@ -1185,7 +1222,7 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     # two solver steps an edge and the logic that models them).
     multi, depth = route_depth(unit)
     job = sby_job(top=unit.module, files=[*files, *own, props], incdirs=incdirs,
-                  depths={"bmc": depth, "cover": depth},
+                  depths={"bmc": depth, "cover": depth * ROUTE_COVER_MARGIN},
                   copy=[*copy, (props, props)], engine=PROTOCOL_ENGINE,
                   multiclock=multi, prelude=prelude)  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"

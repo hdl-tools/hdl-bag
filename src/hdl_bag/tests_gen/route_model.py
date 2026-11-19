@@ -20,14 +20,19 @@ it; D28 makes it non-secure) and a master-side tied PSLVERR (PORTOPT-ERROR-MASKE
 and the corpus is warning-free).
 """
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from hdl_bag.bursts import FIXED, INCR, WRAP, refusing_converter
 from hdl_bag.ir import Spec
+from hdl_bag.protocols import tie_value
 
 ERROR_WORD = 8  # region end - 8 answers with a slave error
+# HPROT of the AHB-Lite masters' plain traffic: cacheable, so AxCACHE[1] is high behind
+# bag_ahb2axi and no converter refuses it (D104). The route test draws every other value.
+TRAFFIC_HPROT = 0b1011
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,7 @@ class Outcome:
     hits_error_word: bool = False  # the slave answers with an error, masked or not
     word_bytes: int = 4  # the slave's data width
     words: frozenset[int] = frozenset()  # slave words (index) the access may reach
+    may_refuse: bool = False  # D104: a converter on the way can answer SLVERR
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -62,6 +68,12 @@ def pin_sets(spec: Spec) -> list[dict[str, bool]]:
 
 def prot_tied(spec: Spec, port: str) -> bool:
     return _option(spec, port, "prot") in ("tie-0", "tie-default")
+
+
+def cache_after_tie(spec: Spec, port: str, cache: int) -> int:
+    """The AxCACHE[1:0] PORT sends for CACHE: what Port_Options ties it to, if it does."""
+    tie = _option(spec, port, "cache")
+    return tie_value("awcache", tie) & 0b11 if tie in ("tie-0", "tie-default") else cache
 
 
 def pslverr_tied(spec: Spec, port: str) -> bool:
@@ -138,11 +150,39 @@ def decide(spec: Spec, fabric: Any, master: str, addr: int, write: bool,
     return fallback(fabric, master, region)
 
 
+def _axi4_downsizer_in_front(spec: Spec, port: str, fabric: Any, from_port: bool = False) -> bool:
+    """Whether a dw adapter narrows the AXI4 path between FABRIC and PORT, walked in the direction
+    of travel (adapters are in order from the port side; with FROM_PORT, a bridge's far end
+    leads to FABRIC): a pc changes the protocol the next one sees."""
+    chain = sorted((a for a in spec.adapters if a.port == port and a.fabric == fabric.name),
+                   key=lambda a: a.chain_index, reverse=not from_port)  # fmt: skip
+    pcs = [a for a in chain if a.type == "pc"]
+    protocol = pcs[0].params["from"] if from_port and pcs else fabric.protocol
+    for a in chain:
+        if a.type == "pc":
+            protocol = a.params["to"]
+        elif a.type == "dw" and protocol == "AXI4" and int(a.params["to"]) < int(a.params["from"]):
+            return True
+    return False
+
+
+def _downsizes_on_axi4(bridge: Any, up: Any, down: Any) -> bool:
+    """Whether BRIDGE narrows from fabric UP to fabric DOWN with axi_dw_converter. From AXI4-Lite
+    a bag_axi2apb instance is bag_axil2apb, on axi_lite_dw_converter, except onto 8 bits, which
+    that converter cannot reach (the bag_axi2apb instance template)."""
+    if up.data_width <= down.data_width:
+        return False
+    if bridge.template == "bag_axi2apb":
+        return bool(up.protocol == "AXI4" or down.data_width == 8)
+    return bridge.template in ("bag_axi2ahb", "bag_axi2axil")
+
+
 def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
           pins: dict[str, bool]) -> Outcome:  # fmt: skip
     fabrics = {f.name: f for f in spec.fabrics}
     bridges = {b.name: b for b in spec.bridges}
     slaves = {s.name: s for s in spec.slaves}
+    origin = master
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
     # Bytes the access covers, relative to addr: [lo, hi). A write covers its 4 bytes
     # (added zero-strobe beats write nothing); a read can cover more (_read_cover).
@@ -162,16 +202,18 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
+            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(
+                b, fabrics[b.upstream], fabrics[b.downstream]
+            ):
+                lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
+            if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
+                lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
-            elif b.template == "bag_axi2apb" and fabric.data_width == 8:
-                # From AXI4-Lite this path runs on AXI4 ports at full size: axi_dw_downsizer
-                # starts at the address, so the bytes of the beat below it are not accessed.
-                lo = max(lo, 0)
             nonsec = nonsec or prot_tied(spec, b.name)
             masked = masked or pslverr_tied(spec, b.name)
             crossed.append(b.name)
@@ -179,6 +221,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         word = slaves[target].data_width // 8  # a slave answers per data word
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
+        if _axi4_downsizer_in_front(spec, target, fabric):
+            lo = max(lo, 0)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
         # converters read all of it.
@@ -189,6 +233,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         return Outcome(
             target, visible, masked=masked, slave_error=error and not masked, nonsec=nonsec,
             bridges=tuple(crossed), hits_error_word=error, word_bytes=word, words=frozenset(words),
+            may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -198,18 +243,20 @@ def _read_cover(spec: Spec, master: str, fabric: Any, addr: int) -> tuple[int, i
 
     AXI4 masters issue narrow (size 2) transfers: the 4 addressed bytes. An AXI4-Lite beat is
     always full width: on an AXI4-Lite fabric (whose upsizers keep the full width) it covers
-    the whole aligned beat; behind a pc onto an AXI4 fabric it becomes an AXI4 transfer of
-    the Lite width, which covers from the address to the end of its aligned beat (AXI
-    unaligned-transfer rule). Width converters further on read all of what is covered.
+    the whole aligned beat, also for an AXI4 master, whose pc makes each read such a beat.
+    Behind a pc onto an AXI4 fabric an AXI4-Lite beat becomes an AXI4 transfer of the Lite
+    width, which covers from the address to the end of its aligned beat (AXI unaligned-transfer
+    rule). route() narrows this where an AXI4 downsizer starts at the address.
     """
     m = next(x for x in spec.masters if x.name == master)
+    if fabric.protocol == "AXI4-Lite" and m.protocol in ("AXI4", "AXI4-Lite"):
+        lite_master = m.data_width // 8 if m.protocol == "AXI4-Lite" else 0
+        beat = max(lite_master, fabric.data_width // 8)
+        start = addr // beat * beat
+        return start - addr, start + beat - addr
     if m.protocol != "AXI4-Lite":
         return 0, 4
     beat = m.data_width // 8
-    if fabric.protocol == "AXI4-Lite":
-        beat = max(beat, fabric.data_width // 8)
-        start = addr // beat * beat
-        return start - addr, start + beat - addr
     return 0, addr // beat * beat + beat - addr
 
 
@@ -336,10 +383,13 @@ def contention(spec: Spec, fabric: Any, secure_too: bool = False) -> tuple[Any, 
     return (region, ports) if len(ports) >= 2 else None
 
 
-def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False) -> list[int]:
+def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False,
+                  unadapted: bool = False) -> list[int]:  # fmt: skip
     """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
-    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge)."""
+    read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge); with
+    UNADAPTED, of a slave with no adapter in front of it."""
     axi_slaves = {s.name for s in spec.slaves if s.protocol in ("AXI4", "AXI4-Lite")}
+    adapted = {a.port for a in spec.adapters}
     for r in sorted(spec.memory_map, key=lambda r: r.base):
         words = [r.base + 0x100 * index + 4 * k for k in range(count)]
         if words[-1] >= min(1 << m.addr_width, r.base + r.size - 16):
@@ -352,26 +402,44 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
             # takes would not read back).
             ok &= wr.slave is not None and not wr.slave_error and not wr.masked
             ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
+            ok &= not wr.may_refuse and not rd.may_refuse
             if direct:
                 ok &= not wr.bridges and wr.slave in axi_slaves
+            if unadapted:
+                ok &= wr.slave not in adapted
         if ok:
             return words
     return []
 
 
+def midpoint_buffers(f: Any) -> bool:
+    """Whether shared bus F's mid-point absorbs requests while its slave is stalled: they then
+    leave in the order they arrived, not in the order the arbiter would have served them."""
+    mid = f.midpoint
+    return mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
+
+
+def serves_by_priority(f: Any, direct: bool) -> bool:
+    """Whether a fixed-priority round on F leaves in priority order: every request waits at the
+    arbiter, as with no adapters (DIRECT) or no mid-point to absorb the early arrivals."""
+    return direct or not midpoint_buffers(f)
+
+
 def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
     """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
-    of an AXI slave right behind the mid-point, and how many reads the mid-point holds."""
+    of an AXI slave right behind the mid-point, and how many reads the mid-point holds. Master
+    and slave have no adapter: a register slice or FIFO there would hold reads of its own."""
     if f.protocol not in ("AXI4", "AXI4-Lite") or f.topology != "shared-bus" or f.midpoint is None:
         return None
     stages = {"none": 0, "cut": 1, "multicut-2": 2, "multicut-3": 3}[f.midpoint.slice]
     buffered = f.midpoint.fifo_depth + 2 * stages
     names = {p.port for p in f.master_ports}
-    ms = [x for x in spec.masters if x.name in names]
+    adapted = {a.port for a in spec.adapters}
+    ms = [x for x in spec.masters if x.name in names and x.name not in adapted]
     if not ms:
         return None
     m = max(ms, key=lambda x: x.id_width or 0)
-    words = private_words(spec, m, 0, buffered + 4, direct=True)
+    words = private_words(spec, m, 0, buffered + 4, direct=True, unadapted=True)
     return (m, words, buffered) if words else None
 
 
@@ -465,6 +533,132 @@ def burst_refused(spec: Spec, m: Any, exp: Outcome, burst: int, beats: int) -> b
     return refusing_converter(spec, m.name, exp.bridges, exp.slave, burst, beats) is not None
 
 
+def _tie(spec: Spec, port: str, sig: str) -> int:
+    """Value a Port_Options-tied PROT signal carries (D28: security bits non-secure)."""
+    opt = next(o for o in spec.port_options if o.port == port)
+    default = {"hprot": 0b0011, "pprot": 0}.get(sig, 0) if opt.prot == "tie-default" else 0
+    return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
+
+
+def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
+               bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
+    """(privileged, non-secure, instruction, AxCACHE[1:0]) of an access as it leaves the last
+    bridge: each bridge maps them to its downstream protocol."""
+    templates = {b.name: b.template for b in spec.bridges}
+    downstream = {b.name: next(f.protocol for f in spec.fabrics if f.name == b.downstream)
+                  for b in spec.bridges}  # fmt: skip
+
+    def from_ahb(h: int, ns: int) -> tuple[int, int, int, int]:
+        return h >> 1 & 1, ns, 1 - (h & 1), h >> 2 & 3
+
+    def from_prot(p: int, cache: int) -> tuple[int, int, int, int]:
+        return p & 1, p >> 1 & 1, p >> 2 & 1, cache
+
+    tied = prot_tied(spec, m.name)
+    if m.protocol == "AHB-Lite":
+        attrs = from_ahb(_tie(spec, m.name, "hprot") if tied else prot, 1 if tied else int(nonsec))
+    elif m.protocol == "APB3":  # no PPROT: a bridge takes 3'b010 (non-secure, D28)
+        attrs = from_prot(0b010, 0b11)
+    else:  # AXI masters leave AxCACHE at 0b0011 (cocotbext-axi; the tie default)
+        sig = "awprot" if m.protocol in ("AXI4", "AXI4-Lite") else "pprot"
+        attrs = from_prot(_tie(spec, m.name, sig) if tied else prot,
+                          cache_after_tie(spec, m.name, 0b11))  # fmt: skip
+    for b in bridges:
+        priv, ns, instr, cache = attrs
+        cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
+        if downstream[b] == "AXI4-Lite":
+            cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
+        attrs = (priv, ns, instr, cache_after_tie(spec, b, cache))
+        if prot_tied(spec, b):  # the bridge's downstream end has its PROT tied
+            if downstream[b] == "AHB-Lite":
+                attrs = from_ahb(_tie(spec, b, "hprot"), 1)
+            else:  # a PROT tie leaves the cache attributes alone
+                tie = _tie(spec, b, "awprot" if downstream[b] in ("AXI4", "AXI4-Lite") else "pprot")
+                attrs = from_prot(tie, attrs[3])
+    return attrs
+
+
+def split_refused(cache: int, size: int, addr: int, beats: int, width: int) -> bool:
+    """Whether PULP axi_to_axi_lite answers SLVERR (D104): its burst splitter refuses a
+    non-modifiable transaction (AxCACHE[1] low) of AxLEN 1 to 16. SIZE bytes per beat at ADDR
+    reach it through axi_dw_downsizer, which makes more beats of a transfer wider than WIDTH."""
+    if cache & 0b10:
+        return False
+    ratio = (size + width - 1) // width
+    align = (addr & (size - 1) & ~(width - 1)) // width
+    return 2 <= beats * ratio - align <= 17
+
+
+def _pc_width(spec: Spec, port: str, fabric: Any, start: int, from_port: bool) -> int | None:
+    """The data width (bits) at the AXI4 to AXI4-Lite pc adapter between PORT and FABRIC, in the
+    direction of travel from a width of START, or None if there is none."""
+    chain = sorted((a for a in spec.adapters if a.port == port and a.fabric == fabric.name),
+                   key=lambda a: a.chain_index, reverse=not from_port)  # fmt: skip
+    width = start
+    for a in chain:
+        if a.type == "dw":
+            width = int(a.params["to"])
+        elif a.type == "pc" and a.params["from"] == "AXI4":
+            return width
+    return None
+
+
+def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
+               slave: str) -> list[tuple[int, int, int]]:  # fmt: skip
+    """Each axi_to_axi_lite on the way from MASTER to SLAVE: (the bridges crossed before it, the
+    bytes per beat at most as it enters the adapters in front of it, its data width in bytes)."""
+    by_name = {f.name: f for f in spec.fabrics}
+    m = next(x for x in spec.masters if x.name == master)
+    fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
+    out: list[tuple[int, int, int]] = []
+    narrowest = m.data_width
+    if (w := _pc_width(spec, master, fabric, m.data_width, True)) is not None:
+        out.append((0, narrowest // 8, w // 8))
+    for k, name in enumerate(bridges):
+        narrowest = min(narrowest, fabric.data_width)
+        b = next(x for x in spec.bridges if x.name == name)
+        down = by_name[b.downstream]
+        if (w := _pc_width(spec, name, fabric, fabric.data_width, False)) is not None:
+            out.append((k, narrowest // 8, w // 8))
+        elif fabric.protocol == "AXI4" and b.template in ("bag_axi2apb", "bag_axi2axil"):
+            out.append((k, narrowest // 8, min(fabric.data_width, down.data_width) // 8))
+        if (w := _pc_width(spec, name, down, down.data_width, True)) is not None:
+            out.append((k + 1, narrowest // 8, w // 8))  # on the bridge's far end
+        fabric = down
+    narrowest = min(narrowest, fabric.data_width)
+    if (w := _pc_width(spec, slave, fabric, fabric.data_width, False)) is not None:
+        out.append((len(bridges), narrowest // 8, w // 8))
+    return out
+
+
+def _may_refuse(spec: Spec, master: str, bridges: tuple[str, ...], slave: str) -> bool:
+    """Whether a converter on this path sees the master's plain traffic as non-modifiable (D104)."""
+    m = next(x for x in spec.masters if x.name == master)
+    prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
+    return any(not attributes(spec, m, prot, False, bridges[:k])[3] & 0b10
+               for k, _, _ in _splitters(spec, master, bridges, slave))  # fmt: skip
+
+
+def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, addr: int,
+                   size: int, beats: int = 1) -> bool:  # fmt: skip
+    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104)."""
+    if exp.slave is None:
+        return False
+    return any(split_refused(attributes(spec, m, prot, nonsec, exp.bridges[:k])[3],
+                             min(size, most), addr, beats, width)
+               for k, most, width in _splitters(spec, m.name, exp.bridges, exp.slave))  # fmt: skip
+
+
+def reads_per_word(spec: Spec, m: Any, exp: Outcome) -> int:
+    """How many times a read from M can reach one slave word: a bus on the way narrower than the
+    slave splits it into transfers, and a wider bus behind makes each a full beat again."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    bridges = {b.name: b for b in spec.bridges}
+    fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
+    widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
+    return max(1, exp.word_bytes // (min(widths) // 8))
+
+
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
     """Bytes in the widest bus between M and its target: M's fabric, each bridge's downstream
     fabric, and the slave."""
@@ -477,8 +671,8 @@ def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
 
 def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, int]]:
     """(name, address, burst, size, beats) of the bursts AXI4 master M can send to slave S,
-    each beat reaching S cleanly: full-width INCR, FIXED and WRAP; narrow INCR (where S can take
-    a partial write); and an INCR that ends exactly on a 4 KB boundary. WRAP and FIXED stay full
+    each beat reaching S cleanly: full-width INCR, FIXED and WRAP; narrow INCR (where the path
+    stores a partial write as one); and an INCR that ends exactly on a 4 KB boundary. WRAP and FIXED stay full
     width because cocotbext-axi places lanes as if a burst only increments."""
     found = plain_word(spec, m, s) if m.protocol == "AXI4" else None
     if found is None:
@@ -494,7 +688,7 @@ def burst_shapes(spec: Spec, m: Any, s: Any) -> list[tuple[str, int, int, int, i
         ("wrap", block + bus, WRAP, full, 4),
         ("4k-edge", (word | 0xFFF) + 1 - 4 * bus, INCR, full, 4),
     ]
-    if takes_partial_writes(spec, s):
+    if stores_single_bytes(spec, found[1]):
         shapes += [(f"narrow-{1 << z}", word, INCR, z, 4) for z in range(full) if z <= 2]
 
     def clean(addr: int, size: int, beats: int, burst: int) -> bool:
@@ -547,6 +741,20 @@ def stores_single_bytes(spec: Spec, exp: Outcome) -> bool:
     return takes_partial_writes(spec, slave) and not tied
 
 
+def writes_whole_words(spec: Spec, exp: Outcome) -> bool:
+    """Whether a partial write that EXP routes stores the whole slave word, as configured: the
+    slave has no strobes, or a bridge on the way has PSTRB tied."""
+    return not stores_single_bytes(spec, exp)
+
+
+def rewrites_words(spec: Spec, exp: Outcome) -> bool:
+    """Whether EXP's write can store one slave word several times: bag_axi2ahb makes one AHB
+    write per set strobe, and each of them stores the whole word on a slave with no strobes."""
+    templates = {b.name: b.template for b in spec.bridges}
+    through = any(templates[b] == "bag_axi2ahb" for b in exp.bridges)
+    return through and writes_whole_words(spec, exp)
+
+
 def takes_partial_writes(spec: Spec, slave: Any) -> bool:
     """False when a partial write onto SLAVE's word cannot be expressed: an APB slave wider
     than a byte with no PSTRB (APB3, or PSTRB tied)."""
@@ -560,22 +768,61 @@ def takes_partial_writes(spec: Spec, slave: Any) -> bool:
 
 def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
-    no error."""
+    no error, on a path where no converter can refuse them (D104)."""
     word = next(r for r in spec.memory_map if r.slave == slave.name).base + 0x40
     if word >= 1 << master.addr_width:
         return None
     outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]
-    ok = all(o.slave == slave.name and not (o.slave_error or o.masked) for o in outs)
+    ok = all(o.slave == slave.name and not (o.slave_error or o.masked or o.may_refuse)
+             for o in outs)  # fmt: skip
     return (word, outs[0]) if ok else None
 
 
-def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]]) -> None:
+def split_error_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
+    """plain_word, if SLAVE is narrower than a word (so a word is split into beats) and can
+    answer an error: a slave with PSLVERR tied never does."""
+    if slave.data_width >= 32 or pslverr_tied(spec, slave.name):
+        return None
+    return plain_word(spec, master, slave)
+
+
+def saw_access(spec: Spec, exp: Any, addr: int, write: bool) -> bool:
+    """Whether a slave logging ADDR saw the access EXP expects. An access keeps its address,
+    except a read that crossed AHB-Lite, which arrives at the start of the slave's word: a
+    full-size AHB transfer must be aligned."""
+    slave = next(s for s in spec.slaves if s.name == exp.slave)
+    downstream = {b.name: b.downstream for b in spec.bridges} if exp.bridges else {}
+    protocols = {f.name: f.protocol for f in spec.fabrics} if exp.bridges else {}
+    crossed = {protocols[downstream[b]] for b in exp.bridges}
+    if write or "AHB-Lite" not in {slave.protocol, *crossed}:
+        return bool(addr == exp.address)
+    return bool(addr // exp.word_bytes == exp.address // exp.word_bytes)
+
+
+def access_bytes(master: Any) -> int:
+    """The bytes one test access of MASTER carries: a 32-bit word, or all an 8-bit or 16-bit
+    APB master can move in one transfer."""
+    return min(4, int(master.data_width) // 8)
+
+
+def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, int]],
+                whole_word: bool = False, rewrites: bool = False) -> None:  # fmt: skip
     """The bytes the slave stored for a write of DATA at EXP.address: exactly those, each once.
     After an error a split access can have stored only part of it, but nothing else. A beat
-    with no strobes stores nothing, so one a width converter adds is not visible here."""
+    with no strobes stores nothing, so one a width converter adds is not visible here.
+
+    With WHOLE_WORD the rest of each word written may be stored too (writes_whole_words), and
+    with REWRITES a byte may be stored again, with the same value (rewrites_words).
+    """
     want = {exp.address + k: b for k, b in enumerate(data)}
     got = dict(written)
-    assert len(got) == len(written), f"{where}: a byte written twice: {_bytes(written)}"
+    stores = set(written) if rewrites else written
+    assert len(got) == len(stores), f"{where}: a byte written twice: {_bytes(written)}"
+    if whole_word:
+        words = {a // exp.word_bytes for a in want}
+        outside = [(a, v) for a, v in got.items() if a // exp.word_bytes not in words]
+        assert not outside, f"{where}: stored {_bytes(outside)}, outside the words written"
+        got = {a: v for a, v in got.items() if a in want}
     if exp.hits_error_word:
         assert got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
@@ -602,14 +849,15 @@ def check_split_write_error(where: str, address: int, data: bytes, step: int, fa
     )
 
 
-def check_read(where: str, exp: Outcome, length: int, touched: list[int]) -> None:
+def check_read(where: str, exp: Outcome, length: int, touched: list[int],
+               repeats: int = 1) -> None:  # fmt: skip
     """The beat addresses a read of LENGTH bytes at EXP.address made the slave take: all the
     words it asked for, no address twice (a read can have side effects), and nothing beyond
     what its beats can cover on the way (EXP.words). A wide slave behind a narrow fabric can
-    take two addresses in one word."""
+    take two addresses in one word, and one address up to REPEATS times (reads_per_word)."""
     word = exp.word_bytes
     seen = {a // word for a in touched}
-    assert len(set(touched)) == len(touched), (
+    assert max(Counter(touched).values(), default=0) <= repeats, (
         f"{where}: read an address twice: {[hex(a) for a in touched]}"
     )
     need = {a // word for a in range(exp.address, exp.address + length)}
