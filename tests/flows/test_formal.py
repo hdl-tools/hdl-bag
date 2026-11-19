@@ -5,6 +5,7 @@ versions, process handling (with a stand-in sby on POSIX), the CLI, and the erro
 can hit."""
 
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -38,6 +39,27 @@ SOURCES = {
 }
 COVER = "not reached within the search depth, so the assertion it guards may hold only vacuously"
 posix = pytest.mark.skipif(sys.platform == "win32", reason="a shell-script sby needs POSIX")
+
+
+def _reaped(pid: int) -> bool:
+    """Whether a process is gone, or a zombie waiting for a parent that will never reap it.
+
+    Through ps rather than /proc, which macOS does not have: reading it there raised
+    FileNotFoundError, which the caller read as a dead child (#114). ps prints nothing for a
+    pid that no longer exists and a state starting with Z for a zombie.
+    """
+    state = subprocess.run(
+        ["ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    return not state or state.startswith("Z")
+
+
+@posix
+def test_the_reaped_probe_does_not_call_a_live_process_dead() -> None:
+    """#114: the probe read /proc/<pid>/stat, which raises FileNotFoundError off Linux, and
+    the caller took that for a dead child -- so the timeout test below passed on macOS
+    without ever checking that sby's child had been killed."""
+    assert not _reaped(os.getpid())
 
 
 def _parse(name: str, job_dir: str = "", **kw: object) -> list[Finding]:
@@ -354,16 +376,8 @@ def test_a_timeout_stops_sby_and_everything_it_started(
     assert "x: 1 cover reached before the time limit: seen_a (step 2)" in report.notes
     child = int(pid_file.read_text())
     for _ in range(50):  # SIGKILL is delivered asynchronously
-        try:
-            os.kill(child, 0)
-        except ProcessLookupError:
+        if _reaped(child):
             break
-        try:  # the entry vanishes once the child is reaped, maybe between two reads
-            state = Path(f"/proc/{child}/stat").read_text().split()[2]
-        except FileNotFoundError:
-            break
-        if state == "Z":
-            break  # a zombie: dead, waiting for its parent (gone) to be reaped
         time.sleep(0.1)
     else:
         pytest.fail(f"sby's child {child} is still running after the timeout")
