@@ -45,6 +45,7 @@ LATENCY = ("NO_LATENCY", "CUT_SLV_AX", "CUT_MST_AX", "CUT_ALL_AX", "CUT_SLV_PORT
            "CUT_MST_PORTS", "CUT_ALL_PORTS")  # fmt: skip
 SLICES = ("none", "cut", "multicut-2", "multicut-3")
 KB = 0x400
+ALIAS_FLOOR = 0x100  # the smallest alias worth drawing
 # The File header goes into every generated file as written, so it is SystemVerilog comments.
 HEADER = "// Random configuration drawn by bag regress.\n"
 
@@ -355,7 +356,13 @@ def _decode(d: _Draw) -> None:
     """An Address_Decode row per master port, Access_Rules now and then, and at most one
     alias per master (D72), always on or on a pin, onto a slave the master may reach."""
     rng = d.rng
-    base = {r[0]: int(str(r[2]).replace("_", ""), 16) for r in d.cfg.data.memory_map}
+    # Slave -> (base, size) of its largest region, the first on a tie: the best home for an alias.
+    home: dict[str, tuple[int, int]] = {}
+    for r in d.cfg.data.memory_map:
+        at, size = (int(str(r[i]).replace("_", ""), 16) for i in (2, 3))
+        slave = str(r[0])
+        if slave not in home or size > home[slave][1]:
+            home[slave] = (at, size)
     pins: list[str] = []
     for fab in d.fabrics.values():
         local = [t for t in fab.targets if t in d.slaves]
@@ -370,9 +377,16 @@ def _decode(d: _Draw) -> None:
             if m not in d.downstream and local and rng.random() < 0.25:
                 onto = rng.choice(local)
                 pin = rng.choice(("always", f"remap_{m}_i"))
-                if pin != "always":
-                    pins.append(pin)
-                alias = (0x0000_0000, 4 * KB, base[onto], pin)  # below every block
+                at, room = home[onto]
+                # A power of two the target region holds, aligned at its base (DEC-ALIAS-SIZE,
+                # DEC-ALIAS-TARGET); under the floor an alias tests nothing, so it is dropped.
+                size = 1 << (min(4 * KB, room).bit_length() - 1)
+                while at % size:
+                    size >>= 1
+                if size >= ALIAS_FLOOR:
+                    alias = (0x0000_0000, size, at, pin)  # below every block
+                    if pin != "always":
+                        pins.append(pin)
             d.cfg.decode(m, miss, default=default, alias=alias)
             for t in fab.targets:
                 if t != onto and rng.random() < 0.08:

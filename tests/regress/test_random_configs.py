@@ -76,6 +76,12 @@ def test_any_seed_draws_a_config_bag_check_accepts(tmp_path: Path, seed: int) ->
     assert _errors(seed, tmp_path / str(seed)) == []
 
 
+def test_an_alias_is_clamped_to_the_region_it_targets(tmp_path: Path) -> None:
+    """Seed 34641455045 aliases onto a 2 KB region, which a fixed 4 KB alias overran
+    (DEC-ALIAS-TARGET); the generator sizes the alias to what the target can hold."""
+    assert _errors(34641455045, tmp_path) == []
+
+
 def _features(seed: int) -> set[str]:
     """What one drawn config exercises, at workbook level."""
     d = random_config(seed).data
