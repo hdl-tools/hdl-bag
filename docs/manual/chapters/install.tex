@@ -1,9 +1,10 @@
 \chapter{Installing}
 \label{ch:install}
 
-BAG needs Python 3.11 or newer. It runs on Linux and Windows. Reading, checking and
-generating need nothing else. Lint, simulation and formal need the EDA tools of
-section~\ref{sec:eda}.
+BAG needs Python 3.11 or newer. It runs on Linux, macOS and Windows. Reading, checking
+and generating need nothing else. Lint, simulation and formal need the EDA tools of
+section~\ref{sec:eda}, and on macOS they run in the container image of
+section~\ref{sec:eda} rather than natively.
 
 BAG is not on a package index yet. Install it from its repository or from a checkout,
 in a virtual environment.
@@ -71,4 +72,48 @@ BAG also works with other versions of the tools, but they are not tested:
 The simplest way to get every tool at its pinned version is the container image
 \code{ghcr.io/hdl-tools/hdl-bag-tools:main}, built from \file{tools/Dockerfile} in the
 repository. It holds the tools, Python and BAG's dependencies, but not BAG itself:
-mount your checkout and install BAG in it.
+mount your checkout and install BAG in it. The image is published for
+\code{linux/amd64} and \code{linux/arm64}, so the same tag runs natively on an
+x86-64 Linux machine and on an Apple Silicon Mac.
+
+\subsection{Installing the tools on a host}
+\label{sec:install-tools}
+
+\file{scripts/install_tools.py} installs the same pinned tools outside a container, for
+\code{linux-x64}, \code{linux-arm64} and \code{darwin-arm64}. It reads
+\file{tools.lock}, checks every archive against \file{tools/tools.sha256} before
+unpacking it, and prints the \code{PATH} to set.
+
+Run it with \cmd{uv run --no-project python scripts/install_tools.py}: with
+\cmd{--list} it resolves and prints what it would install without touching the network,
+with no options it installs, and with \cmd{--check} it reports each installed tool
+against the lock. \cmd{--prefix} chooses where, defaulting to
+\path{/opt/hdl-bag-tools}.
+
+It never runs \cmd{sudo} or a package manager: where it needs a writable prefix or a
+build dependency it prints the command to run and stops.
+
+\section{macOS}
+\label{sec:macos}
+
+Reading a workbook, \cmd{bag check}, \cmd{bag ir}, \cmd{bag generate} and the
+collateral are supported on macOS on Apple Silicon and need nothing but Python.
+
+The EDA flows run in the container image, which is native on Apple Silicon. Run
+\cmd{docker run} on \code{ghcr.io/hdl-tools/hdl-bag-tools:main} with your checkout
+bind-mounted at \path{/work}, and give the container its own virtual environment through a
+named volume and \code{UV\_PROJECT\_ENVIRONMENT}, so it does not share the host's
+\path{.venv}. \code{UV\_LINK\_MODE=copy} avoids hard links across the mount.
+
+The reason the flows are not run natively is Verilator. It publishes no macOS binary and
+cannot be built from source at the pinned version on macOS~27: the system
+\cmd{flex} emits a \code{yy\_create\_buffer} that does not match Verilator's
+\file{src/V3PreLex.h}, and Homebrew's \cmd{flex} emits a scanner using
+\code{yy\_hold\_ptr} that \file{verilog.l} does not declare. Upstream fixed building
+against the newer \cmd{flex} after the pinned release.
+\file{scripts/install_tools.py} refuses that build with this explanation rather than
+failing part-way through it.
+
+A Docker credential helper on macOS may not be on the default \code{PATH}; if
+\cmd{docker} reports \code{docker-credential-desktop: executable file not found}, add
+\path{/Applications/Docker.app/Contents/Resources/bin} to \code{PATH}.
