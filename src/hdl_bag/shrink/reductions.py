@@ -7,10 +7,12 @@ and placement are all derived by `resolve()`; editing the IR would mean keeping 
 those invariants by hand. A candidate that fails `bag check` is simply discarded by the caller,
 so the cascade below aims to make most candidates valid, not to be provably complete.
 
-`KINDS` is the pass order, coarse to fine: fabric subtree, bridge, master, slave, sub-wrapper,
+`KINDS` is the pass order, coarse to fine: fabric subtree, master, slave, sub-wrapper,
 one row of a per-entity sheet, alias, wrapper scalars, equalise to the fabric, unused clocks and
 resets, narrower widths, smaller memory regions.
 
+- There is no bridge kind: a bridge cannot go without its downstream fabric (FAB-EMPTY-SIDE), so
+  every such candidate is exactly the fabric subtree edit, which already removes the bridge.
 - "Drop adapters" is not a row edit. Adapters are derived by `resolve()` and disappear through
   the equalise and narrow kinds. Placement rows that name an adapter are dropped by the row kind,
   deliberately before equalising and narrowing, so a stale adapter name cannot block a width change.
@@ -19,6 +21,7 @@ resets, narrower widths, smaller memory regions.
   almost every such candidate would be invalid.
 """
 
+import re
 from collections.abc import Callable
 from typing import Final
 
@@ -33,9 +36,11 @@ DATA_WIDTHS: Final = (64, 32, 16, 8)
 ADDR_WIDTHS: Final = (32, 24, 20, 16, 12)
 MIN_REGION: Final = 0x1000
 ROW_FIELDS: Final = (
-    "placement", "user_ports", "access_rules", "memory_map", "exposed_ports", "port_options",
-    "address_decode",
+    "placement", "user_ports", "access_rules", "memory_map", "port_options",
 )  # fmt: skip
+# Not here: dropping an exposed_ports row is always WRAP-PORT-NOT-LISTED and dropping an
+# address_decode row always DEC-MISSING-ROW, so neither can yield a valid candidate. `drop_names`
+# removes both along with their entity, and `_aliases` is the only useful decode edit.
 
 # Sheets whose row is removed when column 0 (or, for the second group, column 0 or 1) is dropped.
 _BY_FIRST: Final = ("masters", "slaves", "bridges", "fabrics", "memory_map", "address_decode",
@@ -64,9 +69,17 @@ def drop_names(data: SpecData, names: frozenset[str]) -> None:
             up = parent[str(up)]
         kept.append([row[0], up, *row[2:]])
     data.sub_wrappers = kept
-    # NOTE: address_decode column 2 (the default slave) is left alone on purpose, even when that
-    # slave was just dropped. Rewriting the miss mode needs a protocol-specific error code, so
-    # `bag check` rejects the candidate instead.
+    # An adapter instance is named from its port (`{from}_{type}_2_{to}`, user-configurable), so a
+    # placement row for it names the dropped entity only as a `_`-delimited segment. A false
+    # positive (a master literally called `dw`) merely drops a placement row, which resets that
+    # instance to its default home: the candidate stays check-clean, just slightly more reduced.
+    segments = [re.compile(rf"(?:^|_){re.escape(n)}(?:_|$)") for n in names]
+    data.placement = [r for r in data.placement
+                      if not any(p.search(str(r[0])) for p in segments)]  # fmt: skip
+    # NOTE: two gaps are deliberate. address_decode column 2 (the default slave) is left alone
+    # even when that slave was just dropped: rewriting the miss mode needs a protocol-specific
+    # error code, so `bag check` rejects the candidate instead. Adapter names are matched by the
+    # segment heuristic above, not by parsing the naming pattern, which is fragile.
     _renumber_ports(data)
 
 
@@ -238,7 +251,6 @@ def _shrink_maps(data: SpecData) -> list[Edit]:
 
 KINDS: Final[tuple[Kind, ...]] = (
     _fabric_subtrees,
-    _entities("bridges", "bridge"),
     _entities("masters", "master"),
     _entities("slaves", "slave"),
     _entities("sub_wrappers", "sub-wrapper"),

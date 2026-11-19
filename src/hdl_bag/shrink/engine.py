@@ -25,7 +25,7 @@ class Shrunk:
     kept: tuple[str, ...]  # labels of the accepted edits, in order
     runs: int  # oracle answers that were True or False
     invalid: int  # oracle answers that were None
-    exhausted: bool  # stopped by the budget, so the result may not be minimal
+    exhausted: bool  # a full pass did not finish within the budget: maybe not minimal
 
 
 def shrink(

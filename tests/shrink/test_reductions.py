@@ -150,12 +150,28 @@ def test_every_kind_lists_its_edits_in_row_order_and_the_same_way_twice() -> Non
 
 def test_a_dropped_master_candidate_passes_bag_check(tmp_path: Path) -> None:
     """The proof that the cascade and the renumbering make candidates valid. If it fails, the
-    cascade is wrong."""
-    for dropped in ("cpu", "dma"):  # the first and the last port of their fabric
+    cascade is wrong. The third case places `cpu`'s width adapter (named `cpu_dw_2_ahb_m` from
+    the master) in a sub-wrapper: its placement row must go with `cpu`, or bag check reports
+    HIER-UNKNOWN-INSTANCE, and the sub-wrapper row covers re-parenting end to end."""
+    for dropped, sub in (("cpu", False), ("dma", False), ("cpu", True)):
         data = multi()
         data.wrapper["File header"] = None
+        if sub:
+            data.sub_wrappers = [["ss0", "multi_top", None]]
+            data.placement = [["cpu_dw_2_ahb_m", "ss0", None, None]]
         drop_names(data, frozenset({dropped}))
-        path = tmp_path / f"{dropped}.xlsx"
+        path = tmp_path / f"{dropped}{int(sub)}.xlsx"
         build_workbook(data=data).save(path)
         result = run_checks(read_workbook(path), tmp_path)
-        assert [f.message for f in result.errors] == []
+        assert [f.message for f in result.errors] == [], (dropped, sub)
+
+
+def test_a_surviving_priority_is_kept_while_its_index_moves_down() -> None:
+    """Only presence and per-fabric uniqueness of priorities are checked (TOPO-PRIORITY-*), so
+    renumbering touches indices alone."""
+    data = multi()
+    data.fabrics[0][6] = "fixed-priority"
+    data.topology[0][3] = 5  # cpu, index 0
+    data.topology[1][3] = 7  # dma, index 1
+    drop_names(data, frozenset({"cpu"}))
+    assert data.topology[0] == ["dma", "ahb_m", 0, 7, None]
