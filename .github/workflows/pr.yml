@@ -25,6 +25,11 @@ on:
         description: Run the formal corpus's protocol bmc tasks on this SBY engine (D84)
         type: string
         default: ""
+      arch:
+        description: Which architecture to run the EDA tests on
+        type: choice
+        options: [amd64, arm64, both]
+        default: amd64
 
 permissions:
   contents: read
@@ -103,6 +108,8 @@ jobs:
       - run: uv run --no-project python scripts/vendor_zipcpu.py --check
 
   eda-shard:
+    if: >-
+      github.event_name != 'workflow_dispatch' || inputs.arch != 'arm64'
     # A pull request runs the smoke subset (tests/smoke.py), under 15 minutes even with a cold
     # cache, unless it carries the full-eda label (full-eda.yml runs the full list when the
     # label is added). The full list runs on every push to main and on demand, without the
@@ -133,10 +140,40 @@ jobs:
       contents: read
       packages: read
 
+  # The same tests on the arm64 tools image, which is what an Apple Silicon Mac runs. Only
+  # the smoke subset by default: it doubles the per-PR EDA minutes and that is the ceiling
+  # worth paying to catch an arm64-only regression where it is introduced. The full list on
+  # arm64 is a deliberate dispatch (arch=arm64 or both).
+  eda-shard-arm64:
+    if: >-
+      github.event_name != 'workflow_dispatch'
+      || inputs.arch == 'arm64' || inputs.arch == 'both'
+    uses: ./.github/workflows/eda-shards.yml
+    with:
+      runner: ubuntu-24.04-arm
+      arch: arm64
+      marks: >-
+        ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'full')
+            && 'eda and not deep' || 'eda and smoke' }}
+      shards: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'full') && 12 || 4 }}
+      timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.suite == 'full') && 40 || 30 }}
+    permissions:
+      contents: read
+      packages: read
+
   eda:
-    # The one check to require: passes only when every shard did.
-    needs: eda-shard
+    # The one check to require: passes only when every shard did, on both architectures. A
+    # skipped architecture counts as passing, since a dispatch can ask for just one.
+    needs: [eda-shard, eda-shard-arm64]
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - run: test "${{ needs.eda-shard.result }}" = success
+      - name: Every architecture's shards passed or were not asked for
+        run: |
+          set -eu
+          for r in '${{ needs.eda-shard.result }}' '${{ needs.eda-shard-arm64.result }}'; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "eda shards: $r" >&2; exit 1 ;;
+            esac
+          done
