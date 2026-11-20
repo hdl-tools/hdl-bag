@@ -16,8 +16,10 @@ Component ports that are not simply wired to a bus signal. Direction is the comp
 
 | Instance | Bus | Signal | Direction | Value | Reason |
 |---|---|---|---|---|---|
+| ahb_bus | - | alias_en_i[0] | input | 1'b0 | no alias at this position (Address_Decode) |
 | ahb_bus | itcm0 | haddr | output | upper 16 bits unused | bus narrower |
 | ahb_bus | mcu0 | hmastlock | input | 1'b0 | tied (Port_Options) |
+| aon_apb | - | alias_en_i[0] | input | 1'b0 | no alias at this position (Address_Decode) |
 | aon_apb | rtc0 | paddr | output | upper 20 bits unused | bus narrower |
 | aon_apb | rtc0 | pstrb | output | unused | tied (Port_Options) |
 | aon_apb | wdt0 | paddr | output | upper 20 bits unused | bus narrower |
@@ -32,6 +34,7 @@ Component ports that are not simply wired to a bus signal. Direction is the comp
 | br_main2per | main_xbar_2_br_main2per | buser | output | unused | not on this bus |
 | br_main2per | main_xbar_2_br_main2per | ruser | output | unused | not on this bus |
 | br_main2per | main_xbar_2_br_main2per | wuser | input | 1'b0 | not on this bus |
+| cfg_bus | - | alias_en_i[0] | input | 1'b0 | no alias at this position (Address_Decode) |
 | cfg_bus | clkrst0 | araddr | output | upper 20 bits unused | bus narrower |
 | cfg_bus | clkrst0 | awaddr | output | upper 20 bits unused | bus narrower |
 | cfg_bus | pmu0 | araddr | output | upper 20 bits unused | bus narrower |
@@ -259,6 +262,7 @@ Component ports that are not simply wired to a bus signal. Direction is the comp
 | main_xbar_fifo_2_ddr0 | main_xbar_fifo_2_ddr0 | buser | output | unused | not on this bus |
 | main_xbar_fifo_2_ddr0 | main_xbar_fifo_2_ddr0 | ruser | output | unused | not on this bus |
 | main_xbar_fifo_2_ddr0 | main_xbar_fifo_2_ddr0 | wuser | input | 1'b0 | not on this bus |
+| periph_apb | - | alias_en_i[0] | input | 1'b0 | no alias at this position (Address_Decode) |
 | periph_apb | gpio0 | paddr | output | upper 20 bits unused | bus narrower |
 | periph_apb | spi0 | paddr | output | upper 20 bits unused | bus narrower |
 | periph_apb | timer0 | paddr | output | upper 20 bits unused | bus narrower |

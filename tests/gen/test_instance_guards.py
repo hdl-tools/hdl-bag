@@ -6,8 +6,11 @@ Lint cannot see these mistakes: an unconnected output goes to an ``unused_*`` ne
 from the unused checks) and a missing input gets a constant.
 """
 
+import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -143,3 +146,36 @@ def test_tieoff_report_is_sorted_and_stable(tmp_path: Path) -> None:
     first = _tieoffs(tmp_path / "a", GOLDEN)
     assert first == _tieoffs(tmp_path / "b", GOLDEN)
     assert first == sorted(first, key=lambda r: r[:3])
+
+
+AHB_FIXED = TESTS / "configs" / "p2" / "ahb_fixed.ir.yaml"
+
+
+def test_tieoff_report_lists_constant_alias_enables(tmp_path: Path) -> None:
+    """ahb_fixed has three aliases, sorted by (master, base): m0's is always on, m1's and m2's
+    are top-level inputs. Alias i is bit i of alias_en_i, so only bit 0 is a constant."""
+    rows = [r for r in _tieoffs(tmp_path, AHB_FIXED) if r[2].startswith("alias_en_i")]
+    assert rows == [
+        ["ahb", "-", "alias_en_i[0]", "input", "1'b1", "alias always on (Address_Decode)"]
+    ]
+
+
+def test_tieoff_report_lists_a_vector_position_with_no_alias(tmp_path: Path) -> None:
+    """A fabric without aliases still gets a one-bit alias_en_i, held at 0."""
+    rows = [r for r in _tieoffs(tmp_path, LITE) if r[2].startswith("alias_en_i")]
+    assert rows, "no placeholder alias enable is reported"
+    assert all(
+        r[3:] == ["input", "1'b0", "no alias at this position (Address_Decode)"] for r in rows
+    )
+
+
+def test_tieoff_report_with_alias_enables_is_hash_seed_independent(tmp_path: Path) -> None:
+    out = []
+    for seed in ("0", "12345"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        cmd = [sys.executable, "-m", "hdl_bag.cli", "generate", str(AHB_FIXED)]
+        subprocess.run([*cmd, "-o", str(tmp_path / seed)], check=True, env=env,
+                       capture_output=True)  # fmt: skip
+        out.append((tmp_path / seed / "doc" / "tieoffs.md").read_bytes())
+    assert out[0] == out[1]
+    assert b"alias_en_i[0]" in out[0]
