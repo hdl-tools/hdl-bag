@@ -50,7 +50,8 @@ class Context:
     registry: Registry
     base_dir: Path
     findings: list[Finding] = field(default_factory=list)
-    _cache: dict[tuple[str, int, str], object] = field(default_factory=dict)
+    _cache: dict[tuple[object, ...], object] = field(default_factory=dict)
+    _refused: set[tuple[str, int, str]] = field(default_factory=set)
 
     # ------------------------------------------------------------ reporting
     def report(self, rule: str, where: Cell | Row | str, what: str) -> None:
@@ -60,10 +61,34 @@ class Context:
             self.findings.append(Finding(rule, where.sheet, where.row, what))
 
     # ------------------------------------------------------------ parsing (cached)
-    def _parsed(self, cell: Cell, parse: Callable[[Cell], object]) -> object:
-        key = (cell.sheet, cell.row, cell.column)
+    def _parsed(
+        self, cell: Cell, kind: tuple[object, ...], parse: Callable[[Cell], object]
+    ) -> object:
+        """CELL's value as KIND reads it, parsed once per parser and reported once (D23).
+
+        Two rules, and the second is why this is not one cache entry per cell:
+
+        A cell any parser refused reads as None for every parser from then on, and only the
+        one that refused it reports. That is D23: one mistake, one message, and every later
+        check that depends on the value skips. A parser that read the cell before the refusal
+        already has its value, which is how it was on a shared cache entry too.
+
+        A cell nothing has refused is parsed by KIND itself -- the parser's name and the
+        arguments that change what it accepts. Keyed on the cell alone, whichever parser ran
+        first decided for all of them, so a name() that should have refused what text() accepted
+        returned it and reported nothing (#149). ``required`` is not in the key: it changes only
+        whether a blank cell is reported, not what is accepted, and the first required parser to
+        read a blank cell refuses it for the rest.
+        """
+        where = (cell.sheet, cell.row, cell.column)
+        if where in self._refused:
+            return None
+        key = (*where, *kind)
         if key not in self._cache:
+            before = len(self.findings)
             self._cache[key] = parse(cell)
+            if len(self.findings) > before:
+                self._refused.add(where)
         return self._cache[key]
 
     def text(self, cell: Cell, required: bool = False) -> str | None:
@@ -74,7 +99,7 @@ class Context:
                 return None
             return str(c.value)
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("text",), parse)
         return v if isinstance(v, str) else None
 
     def external_module(self, row: Row) -> str | None:
@@ -105,7 +130,7 @@ class Context:
                 return None
             return c.value
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("name", lowercase), parse)
         return v if isinstance(v, str) else None
 
     def enum(self, cell: Cell, allowed: Iterable[str], required: bool = True) -> str | None:
@@ -123,7 +148,7 @@ class Context:
                 return None
             return c.value
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("enum", allowed), parse)
         return v if isinstance(v, str) else None
 
     def integer(
@@ -149,7 +174,7 @@ class Context:
                 )
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("integer", minimum, tuple(tokens)), parse)
         return v if isinstance(v, int | str) else None
 
     def hexval(self, cell: Cell, required: bool = True) -> int | None:
@@ -166,7 +191,7 @@ class Context:
                 )
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("hexval",), parse)
         return v if isinstance(v, int) else None
 
     def yes_no(self, cell: Cell, required: bool = True) -> bool | None:
@@ -181,7 +206,7 @@ class Context:
                 self.report("VALUE-ILLEGAL", c, f"{c.column} {c.value!r} is not Y or N")
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("yes_no",), parse)
         return v if isinstance(v, bool) else None
 
     def protocol(self, cell: Cell) -> Protocol | None:

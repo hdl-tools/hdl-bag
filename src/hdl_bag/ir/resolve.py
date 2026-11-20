@@ -8,6 +8,7 @@ never reports findings.
 """
 
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Literal
 
 from hdl_bag import __version__
@@ -41,8 +42,11 @@ def _req(value: object) -> str:
     return value
 
 
-def _int(ctx: Context, cell: Cell, minimum: int = 0) -> int | None:
-    v = ctx.integer(cell, minimum, required=False)
+def _int(ctx: Context, cell: Cell, minimum: int = 0, tokens: Sequence[str] = ()) -> int | None:
+    """CELL as an integer, or None. TOKENS must be the same ones the check on CELL allows: a
+    reader with a narrower set refuses a value the check accepted (and reports, which resolve
+    must never do)."""
+    v = ctx.integer(cell, minimum, required=False, tokens=tokens)
     return v if isinstance(v, int) else None
 
 
@@ -103,7 +107,8 @@ def resolve(result: CheckResult) -> ir.Spec:
         masters.append(ir.Master(
             name=name, protocol=_req(ctx.text(r["Protocol"])), fabric=ctx.master_fabric[name],
             data_width=_req_int(ctx, r["Data width (bits)"], 1), addr_width=_req_int(ctx, r["Addr width (bits)"], 1),
-            id_width=_int(ctx, r["ID width (bits)"], 1), user_width=_int(ctx, r["User width (bits)"]) or 0,
+            id_width=_int(ctx, r["ID width (bits)"], 1),
+            user_width=_int(ctx, r["User width (bits)"], tokens=("n/a",)) or 0,
             domain=_req(ctx.text(r["Clock domain"])),
             max_outstanding_rd=_int(ctx, r["Max outstanding rd"], 1),
             max_outstanding_wr=_int(ctx, r["Max outstanding wr"], 1),
@@ -119,7 +124,8 @@ def resolve(result: CheckResult) -> ir.Spec:
             name=name, protocol=_req(ctx.text(r["Protocol"])), fabric=fabric,
             data_width=_req_int(ctx, r["Data width (bits)"], 1), addr_width=_req_int(ctx, r["Addr width (bits)"], 1),
             id_width=(ids[1] if ids else None) if id_raw == "auto" else (id_raw if isinstance(id_raw, int) else None),
-            id_width_auto=id_raw == "auto", user_width=_int(ctx, r["User width (bits)"]) or 0,
+            id_width_auto=id_raw == "auto",
+            user_width=_int(ctx, r["User width (bits)"], tokens=("n/a",)) or 0,
             domain=_req(ctx.text(r["Clock domain"])), error_response=_req(ctx.text(r["Error response"])),
             wait_states=wait,  # type: ignore[arg-type]
         ))  # fmt: skip

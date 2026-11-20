@@ -133,6 +133,21 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Memory_Map row 21: region mem of sram0 repeats row 5 (NAME-UNIQUE)"]),
     ("NAME-IDENT", [("Memory_Map", 20, "Region", "Regs")],
      ["Memory_Map row 20: Region 'Regs' is not a lowercase SystemVerilog identifier (NAME-IDENT)"]),
+    ("VALUE-ILLEGAL-master-id-width", [("Masters", 5, "ID width (bits)", "abc")],
+     ["Masters row 5: ID width (bits) 'abc' is not an integer >= 1 (VALUE-ILLEGAL)"]),
+    ("NAME-IDENT-reset-domain", [("Resets", 5, "Domain", "Foo-bar")],
+     ["Clocks row 5: domain D_CPU has no reset on Resets (CLK-DOMAIN-NO-RESET)",
+      "Resets row 5: Domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)"]),
+    # Fabrics row 9 is read by text() (the adapter derivation) before check_names validates
+    # it, so on a shared parse cache the first reader decided: a bad value was reported as
+    # REF-UNKNOWN rather than NAME-IDENT, and a blank one was never reported at all, which
+    # left bag check to fail an assertion in resolve (#149).
+    ("NAME-IDENT-fabric-domain", [("Fabrics", 9, "Clock domain", "Foo-bar")],
+     ["Fabrics row 9: Clock domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)",
+      "Slaves row 12: wdt0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)",
+      "Slaves row 13: rtc0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)"]),
+    ("VALUE-MISSING-fabric-domain", [("Fabrics", 9, "Clock domain", None)],
+     ["Fabrics row 9: Clock domain is required (VALUE-MISSING)"]),
     ("REF-UNKNOWN", [("Masters", 6, "Clock domain", "D_X")],
      ["Masters row 6: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
     ("CLK-DOMAIN-TWO-CLOCKS", [("Clocks", 9, h, v) for h, v in (
@@ -453,6 +468,23 @@ def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected:
     ids=["na-not-external", "na-external", "old-name-free"],
 )
 def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
+    assert _messages(tmp_path, edits) == []
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        [("Masters", 5, "User width (bits)", "n/a")],
+        [("Slaves", 5, "User width (bits)", "n/a")],
+        [("Slaves", 7, "User width (bits)", "n/a")],
+    ],
+    ids=["axi4-master", "axi4-slave", "apb4-slave"],
+)
+def test_a_legal_token_passes_every_reader_of_its_cell(tmp_path: Path, edits: list[Edit]) -> None:
+    """n/a User width is accepted by the width check and read again by the wrapper check and by
+    resolve. Every reader of a cell must allow the same tokens: the parse cache no longer hides
+    a narrower reader behind whichever one ran first (#149). The sample already covers the other
+    two tokens, auto ID width and variable Wait states, on ddr0."""
     assert _messages(tmp_path, edits) == []
 
 
