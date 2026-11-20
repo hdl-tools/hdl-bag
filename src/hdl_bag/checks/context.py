@@ -3,9 +3,8 @@
 """Check context: parses every input cell once and derives the connection model.
 
 A cell that fails to parse is reported once, where it is, and reads as None for
-every later check that parses it the same way (``_parsed``); checks skip whatever
-depends on a None, so one mistake gives one message (D23). Resolve builds the IR from
-the same context once the checks pass.
+every later check; checks skip whatever depends on a None, so one mistake gives one
+message (D23). Resolve builds the IR from the same context once the checks pass.
 """
 
 import math
@@ -52,6 +51,7 @@ class Context:
     base_dir: Path
     findings: list[Finding] = field(default_factory=list)
     _cache: dict[tuple[object, ...], object] = field(default_factory=dict)
+    _refused: set[tuple[str, int, str]] = field(default_factory=set)
 
     # ------------------------------------------------------------ reporting
     def report(self, rule: str, where: Cell | Row | str, what: str) -> None:
@@ -64,18 +64,30 @@ class Context:
     def _parsed(
         self, cell: Cell, kind: tuple[object, ...], parse: Callable[[Cell], object]
     ) -> object:
-        """CELL's value as KIND reads it, parsed once and reported once (D23).
+        """CELL's value as KIND reads it, parsed once per parser and reported once (D23).
 
-        KIND is what the parser accepts: its name and the arguments that change that. Keyed on
-        the cell alone, whichever accessor ran first decided for every later one, so a name()
-        that should have refused what text() accepted returned it and reported nothing (#149).
-        ``required`` is not in the key: it changes only whether a blank cell is reported, not
-        what is accepted. Two required parsers over one blank cell therefore report the same
-        VALUE-MISSING twice, which ``run_checks`` folds back to one message.
+        Two rules, and the second is why this is not one cache entry per cell:
+
+        A cell any parser refused reads as None for every parser, and only the one that refused
+        it reports. That is D23: one mistake, one message, and every check that depends on the
+        value skips.
+
+        A cell nothing has refused is parsed by KIND itself -- the parser's name and the
+        arguments that change what it accepts. Keyed on the cell alone, whichever parser ran
+        first decided for all of them, so a name() that should have refused what text() accepted
+        returned it and reported nothing (#149). ``required`` is not in the key: it changes only
+        whether a blank cell is reported, not what is accepted, and the first required parser to
+        read a blank cell refuses it for the rest.
         """
-        key = (cell.sheet, cell.row, cell.column, *kind)
+        where = (cell.sheet, cell.row, cell.column)
+        if where in self._refused:
+            return None
+        key = (*where, *kind)
         if key not in self._cache:
+            before = len(self.findings)
             self._cache[key] = parse(cell)
+            if len(self.findings) > before:
+                self._refused.add(where)
         return self._cache[key]
 
     def text(self, cell: Cell, required: bool = False) -> str | None:
