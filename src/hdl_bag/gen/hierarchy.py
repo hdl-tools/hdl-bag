@@ -19,7 +19,14 @@ from dataclasses import dataclass, field
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import emitted_name, emitted_units, label, subwrapper_signal_name, unit_name
+from hdl_bag.naming import (
+    emitted_name,
+    emitted_units,
+    formal_unit,
+    label,
+    subwrapper_signal_name,
+    unit_name,
+)
 from hdl_bag.protocols import PROTO_TOKEN, towards_slave
 
 
@@ -169,7 +176,10 @@ def collisions(netlist: Netlist, p: Plan) -> list[tuple[str, str, list[str]]]:
 
 
 def reserved_units(netlist: Netlist) -> dict[str, str]:
-    """Design units the generator writes besides the wrappers: name as written -> what it is."""
+    """Design units the generator writes besides the wrappers: name as written -> what it is.
+
+    The generated formal units are a namespace, not a list: see ``naming.formal_unit``.
+    """
     spec = netlist.spec
     prefix = spec.project.module_prefix
     units = {emitted_name(prefix, u): label(u) for u in emitted_units().values()}
@@ -202,6 +212,7 @@ class Problem:
     wrapper: str
     what: str
     error: bool = True
+    setting: str | None = None  # the Project or Wrapper setting to change, if not a sub-wrapper
 
 
 def problems(netlist: Netlist, p: Plan) -> list[Problem]:
@@ -218,11 +229,39 @@ def problems(netlist: Netlist, p: Plan) -> list[Problem]:
                 out.append(Problem("HIER-RTL-NAME", w, what))
     units = reserved_units(netlist)
     for w in sorted(p.parent):
-        if (written := unit_name(netlist.spec.project.module_prefix, w)) in units:
+        written = unit_name(netlist.spec.project.module_prefix, w)
+        if kind := units.get(written) or formal_unit(netlist.spec.project.name, written):
             how = "has" if written == w else f"is generated as {written}, which is"
-            what = f"sub-wrapper {w} {how} the name of {units[written]}; rename the sub-wrapper"
+            what = f"sub-wrapper {w} {how} the name of {kind}; rename the sub-wrapper"
             out.append(Problem("HIER-RESERVED-NAME", w, what))
         subtree = [x for x in p.wrappers() if w in p.path_up(x)]
         if not any(p.instances[x] for x in subtree):
             out.append(Problem("HIER-EMPTY", w, f"sub-wrapper {w} has no instances", error=False))
+    return [*out, *_reserved_formal_names(netlist)]
+
+
+def _reserved_formal_names(netlist: Netlist) -> list[Problem]:
+    """NAME-RESERVED: a name another generated unit takes, or the user chooses, that is also one
+    of the formal units' names. Reserved whether or not formal jobs are generated, as every
+    emitted unit name is. One message per mistake, on the setting that caused it."""
+    spec = netlist.spec
+    project, prefix, top = spec.project.name, spec.project.module_prefix, spec.hierarchy.top
+    fix = "choose another Project name" + (" or Module prefix" if prefix else "")
+    out = []
+    for unit in emitted_units().values():
+        written = emitted_name(prefix, unit)
+        if kind := formal_unit(project, written):
+            what = (
+                f"with Project name {project!r}, {kind} is named {written}, which is also "
+                f"the generated name of {label(unit)}; {fix}"
+            )
+            out.append(Problem("NAME-RESERVED", top, what, setting="Project name"))
+    for name, setting, role in (
+        (top, "Top module name", "the top module"),
+        (f"{top}_flat", "Top module name", f"the flat harness of top module {top}"),
+        (spec.wrapper.package, "Parameter package", "the parameter package"),
+    ):
+        if kind := formal_unit(project, name):
+            what = f"{role} is named {name}, which is also {kind}; choose another {setting}"
+            out.append(Problem("NAME-RESERVED", top, what, setting=setting))
     return out

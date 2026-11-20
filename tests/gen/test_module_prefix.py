@@ -576,7 +576,7 @@ def test_a_prefix_that_makes_units_collide_with_their_own_bases_renames_each_exa
 DEMO = REPO / "tests/golden/demo_ss.ir.yaml"
 
 
-def _with_project(spec: Spec, **update: str) -> Spec:
+def _with_project(spec: Spec, **update: str | None) -> Spec:
     return spec.model_copy(update={"project": spec.project.model_copy(update=update)})
 
 

@@ -1434,8 +1434,8 @@ _COPY = re.compile(r"^copy\s+\S+\s+(\w+)", re.M)
 
 @pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
 def test_every_name_the_formal_generator_invents_is_reserved(tmp_path: Path, config: Path) -> None:
-    """Fails when a name site bypasses naming.formal_name: each module declared in formal/<project>_*
-    and each `copy` target in the jobs must be one naming.formal_unit recognises."""
+    """Fails when a name site bypasses naming.formal_name: each module declared in
+    formal/<project>_* and each `copy` target in the jobs is one naming.formal_unit knows."""
     spec = load(config)
     project = spec.project.name
     generate(spec, tmp_path, config.parent)

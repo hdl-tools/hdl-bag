@@ -232,7 +232,11 @@ def check_boundary_names(ctx: Context, result: "CheckResult") -> None:
     netlist = build_netlist(resolve(result))
     rows = {ctx.text(r["Sub-wrapper"]): r for r in ctx.raw.sub_wrappers}
     for prob in problems(netlist, plan(netlist)):
-        ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
+        if prob.setting is None:
+            ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
+        else:
+            sheet = ctx.raw.project if prob.setting == "Project name" else ctx.raw.wrapper
+            ctx.report(prob.rule, sheet[prob.setting], prob.what)
 
 
 USER_DIRECTIONS = ("input", "output")
@@ -426,10 +430,9 @@ def _fixed_units(ctx: Context, prefixed: set[str]) -> dict[str, str]:
     takes the prefix, so these are the generated top wrapper, parameter package, flat harness and
     interfaces, the default stub of an opaque fabric, and a user's External modules.
 
-    Not every name that keeps it: the generated formal units (``bag_<project>_decode`` and the
-    rest, formal_gen) also do, and are not here, so a clash with one of them is not reported.
-    Issue #152 has the case and the fix; it is reachable without a prefix, so it is not this
-    check's to fix.
+    The generated formal units (``bag_<project>_decode`` and the rest, formal_gen) keep their
+    names too, and are deliberately not here: NAME-RESERVED owns them, which keeps it to one
+    message per mistake.
     """
     s = ctx.raw.wrapper
     top = ctx.text(s["Top module name"]) if "Top module name" in s else None

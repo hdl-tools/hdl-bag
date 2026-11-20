@@ -29,6 +29,7 @@ from hdl_bag.gen.netlist import Instance, Netlist
 from hdl_bag.gen.prefix import unit
 from hdl_bag.gen.render import camel, lit
 from hdl_bag.ir.model import Fabric, Spec
+from hdl_bag.naming import formal_name
 from hdl_bag.protocols import Protocol
 from hdl_bag.templates import builtin_registry
 from hdl_bag.tests_gen.route_model import denied, fallback, window
@@ -226,7 +227,7 @@ def render_decode(spec: Spec, netlist: Netlist, hdr: str) -> str | None:
         p, b = _fabric(spec, inst, pkg)
         ports += p
         body += b
-    name = f"bag_{spec.project.name}_decode"
+    name = formal_name(spec.project.name, "decode")
     lines = [
         hdr.rstrip("\n"),
         "",
