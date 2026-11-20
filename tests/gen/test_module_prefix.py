@@ -569,3 +569,32 @@ def test_a_prefix_that_makes_units_collide_with_their_own_bases_renames_each_exa
     # In-house bag_axi_cut is bag_bag_axi_cut; PULP's axi_cut is bag_axi_cut, which it instantiates.
     text = (pre / "rtl/inhouse/bag_bag_axi_cut.sv").read_text(encoding="utf-8")
     assert re.search(r"^\s*bag_axi_cut\b", text, re.M)
+
+
+# ---- The generated formal units are reserved (issue #152) ----------------------------------
+
+DEMO = REPO / "tests/golden/demo_ss.ir.yaml"
+
+
+def _with_project(spec: Spec, **update: str) -> Spec:
+    return spec.model_copy(update={"project": spec.project.model_copy(update=update)})
+
+
+@pytest.mark.parametrize("prefix", [None, "bag"])
+def test_a_project_named_addr_is_refused_because_its_formal_decode_harness_is_taken(
+    tmp_path: Path, prefix: str | None
+) -> None:
+    """Blank prefix: bag_addr_decode is the in-house unit. Prefix bag: it is PULP's addr_decode."""
+    spec = _with_project(load(DEMO), name="addr", module_prefix=prefix)
+    with pytest.raises(GenerateError, match="bag_addr_decode") as exc:
+        generate(spec, tmp_path, DEMO.parent)
+    assert "NAME-RESERVED" in str(exc.value)
+
+
+@pytest.mark.parametrize("prefix", [None, "bag"])
+def test_no_two_written_files_of_demo_ss_declare_the_same_unit(
+    tmp_path: Path, prefix: str | None
+) -> None:
+    generate(_with_project(load(DEMO), module_prefix=prefix), tmp_path, DEMO.parent)
+    names = _declarations(tmp_path)
+    assert names and len(names) == len(set(names))
