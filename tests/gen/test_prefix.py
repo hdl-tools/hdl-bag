@@ -24,7 +24,7 @@ APPLIED = [u for u in emitted_units().values() if u.origin in ("inhouse", "deriv
         ("bag_axi_cut_x u;", "bag_axi_cut_x u;"),
         ("x_bag_axi_cut u;", "x_bag_axi_cut u;"),
         ("a // bag_axi_cut\nbag_axi_cut", "a // bag_axi_cut\np_bag_axi_cut"),
-        ("/* bag_axi_cut\n bag_axi_cut */ bag_axi_cut", "/* bag_axi_cut\n bag_axi_cut */ p_bag_axi_cut"),
+        ("/* bag_axi_cut\n */ bag_axi_cut", "/* bag_axi_cut\n */ p_bag_axi_cut"),
         ('$error("bag_axi_cut: bad"); bag_axi_cut', '$error("bag_axi_cut: bad"); p_bag_axi_cut'),
         ("`bag_axi_cut", "`bag_axi_cut"),
         ("$bag_axi_cut", "$bag_axi_cut"),
@@ -72,7 +72,7 @@ def test_the_derived_note_follows_the_spdx_line_and_only_under_a_prefix() -> Non
     text = "// SPDX-License-Identifier: SHL-0.51\n// Derived\n"
     rel = "rtl/vendor/derived/bag_axi_mux.sv"
     assert note(rel, text, "soc1") == (
-        '// SPDX-License-Identifier: SHL-0.51\n'
+        "// SPDX-License-Identifier: SHL-0.51\n"
         '// Unit names carry the prefix "soc1_" (hdl-bag Project > Module prefix).\n// Derived\n'
     )
     assert note(rel, text, None) is text

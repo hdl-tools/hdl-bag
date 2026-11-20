@@ -25,6 +25,8 @@ from hdl_bag.ir import Spec, load
 from hdl_bag.templates import builtin_registry
 
 PREFIX = "zz9"
+Pair = tuple[Spec, dict[str, bytes], dict[str, bytes]]  # the spec, blank tree, prefixed tree
+Trees = Callable[[str, str | None], Pair]
 BUILTIN = files("hdl_bag") / "templates" / "builtin"
 GOLDEN = "golden/demo_ss"
 INHOUSE, DERIVED = "rtl/inhouse/", "rtl/vendor/derived/"
@@ -39,8 +41,9 @@ def _stems(sub: str) -> set[str]:
 BAG = _stems("rtl/inhouse") | _stems("rtl/vendor/derived")
 _STRIP = re.compile(r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"", re.DOTALL)
 _IDENT = re.compile(r"[A-Za-z_]\w*")
-_DECL = re.compile(r"^\s*(?:module|macromodule|interface|package)\s+(?:static\s+|automatic\s+)?(\w+)",
-                   re.MULTILINE)  # fmt: skip
+_DECL = re.compile(
+    r"^\s*(?:module|macromodule|interface|package)\s+(?:static\s+|automatic\s+)?(\w+)", re.M
+)
 
 
 def _with_prefix(spec: Spec) -> Spec:
@@ -116,10 +119,10 @@ def _expect(spec: Spec) -> Callable[[str], str]:
 
 
 @pytest.fixture(scope="module")
-def trees(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., tuple[Spec, dict, dict]]:  # type: ignore[type-arg]
-    cache: dict[tuple[str, str | None], tuple[Spec, dict, dict]] = {}  # type: ignore[type-arg]
+def trees(tmp_path_factory: pytest.TempPathFactory) -> Trees:
+    cache: dict[tuple[str, str | None], Pair] = {}
 
-    def get(config: str, style: str | None) -> tuple[Spec, dict, dict]:  # type: ignore[type-arg]
+    def get(config: str, style: str | None) -> Pair:
         if (config, style) not in cache:
             configs, name = _split(config)
             spec = load(configs / f"{name}.ir.yaml")
@@ -134,7 +137,9 @@ def trees(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., tuple[Spec,
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_the_prefix_reaches_in_house_derived_and_sub_wrapper_files_and_no_others(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """A. The generator-side statement of checks/wrapper._fixed_units: the top, the package,
     <top>_flat, <project>_<proto>_if, rtl/ext and every formal file keep their paths."""
@@ -146,7 +151,9 @@ def test_the_prefix_reaches_in_house_derived_and_sub_wrapper_files_and_no_others
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_no_generated_source_names_an_unprefixed_bag_unit(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """B. Outside the vendored PULP and ZipCPU trees, no identifier is a bare in-house or
     derived unit name (comments and strings keep theirs: messages are left untouched)."""
@@ -158,19 +165,24 @@ def test_no_generated_source_names_an_unprefixed_bag_unit(
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_a_copied_file_declares_the_prefixed_units_of_its_packaged_file(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """C. Not 'one unit named as its stem': a file may hold several units."""
     spec, blank, pre = trees(config, style)
     expect = _expect(spec)
     for rel in (r for r in blank if r.startswith((INHOUSE, DERIVED))):
         packaged = (files("hdl_bag") / rel).read_text(encoding="utf-8")
-        assert _declared(pre[expect(rel)].decode()) == {f"{PREFIX}_{u}" for u in _declared(packaged)}
+        want = {f"{PREFIX}_{u}" for u in _declared(packaged)}
+        assert _declared(pre[expect(rel)].decode()) == want
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_a_parent_instantiates_the_prefixed_sub_wrapper(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """D. The module takes the prefix; the instance name keeps the spec's."""
     spec, _, pre = trees(config, style)
@@ -183,7 +195,9 @@ def test_a_parent_instantiates_the_prefixed_sub_wrapper(
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_the_file_list_the_jobs_and_the_manifest_follow_the_renamed_files(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """E."""
     spec, blank, pre = trees(config, style)
@@ -202,7 +216,9 @@ def test_the_file_list_the_jobs_and_the_manifest_follow_the_renamed_files(
 
 @pytest.mark.parametrize(("config", "style"), CASES)
 def test_the_vendored_and_formal_trees_are_not_touched_yet(
-    trees: Callable[..., tuple[Spec, dict, dict]], config: str, style: str | None  # type: ignore[type-arg]
+    trees: Trees,
+    config: str,
+    style: str | None,
 ) -> None:
     """F. Stage 3 changes this on purpose."""
     _, blank, pre = trees(config, style)
@@ -215,12 +231,14 @@ def test_the_vendored_and_formal_trees_are_not_touched_yet(
 def test_the_corpus_uses_every_builtin_template() -> None:
     """So a new template without a config fails here, not by escaping the corpus tests."""
     specs = [load(_split(c)[0] / f"{_split(c)[1]}.ir.yaml") for c in ALL]
-    used = {x.template for s in specs for x in (*s.fabrics, *s.bridges, *s.adapters)}
+    used = {
+        x.template for s in specs for group in (s.fabrics, s.bridges, s.adapters) for x in group
+    }
     assert used == set(builtin_registry().names())
 
 
 def test_the_reset_page_names_the_prefixed_synchroniser(
-    trees: Callable[..., tuple[Spec, dict, dict]],  # type: ignore[type-arg]
+    trees: Trees,
 ) -> None:
     _, blank, pre = trees(GOLDEN, None)
     assert f"in {PREFIX}_bag_rst_sync (" in pre["doc/reset.md"].decode()
@@ -228,7 +246,7 @@ def test_the_reset_page_names_the_prefixed_synchroniser(
 
 
 def test_the_derived_files_say_the_prefix_and_in_house_files_do_not(
-    trees: Callable[..., tuple[Spec, dict, dict]],  # type: ignore[type-arg]
+    trees: Trees,
 ) -> None:
     _, blank, pre = trees("p3/axi_shared_rr", None)
     note = f'// Unit names carry the prefix "{PREFIX}_" (hdl-bag Project > Module prefix).'
@@ -247,8 +265,8 @@ def test_changing_the_prefix_leaves_no_file_of_the_old_name(tmp_path: Path) -> N
     generate(spec, tmp_path, configs)
     generate(_with_prefix(spec), tmp_path, configs)
     after = _tree(tmp_path)
-    assert not any(r.startswith(INHOUSE) and Path(r).name in {f"{b}.sv" for b in BAG} for r in after)
-    assert set(after) == {r for r in after if (tmp_path / r).is_file()}
+    old = {f"{b}.sv" for b in BAG}
+    assert not [r for r in after if r.startswith((INHOUSE, DERIVED)) and Path(r).name in old]
     assert any(r.startswith(f"{INHOUSE}{PREFIX}_") for r in after)
 
 

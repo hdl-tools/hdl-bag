@@ -13,7 +13,7 @@
 
 {% if up.protocol == "AXI4" %}
   // {{ adapter.name }}: dw {{ up.protocol }} -> {{ dn.protocol }}
-  bag_axi_dw #(
+  {{ unit("bag_axi_dw") }} #(
       .AddrWidth   ({{ aw }}),
       .SlvDataWidth({{ up.data_width }}),
       .MstDataWidth({{ dn.data_width }}),
@@ -115,7 +115,7 @@
   );
 {% else %}
   // {{ adapter.name }}: dw {{ up.protocol }} -> {{ dn.protocol }}
-  bag_axil_dw #(
+  {{ unit("bag_axil_dw") }} #(
       .AddrWidth   ({{ aw }}),
       .SlvDataWidth({{ up.data_width }}),
       .MstDataWidth({{ dn.data_width }})
