@@ -138,6 +138,16 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("NAME-IDENT-reset-domain", [("Resets", 5, "Domain", "Foo-bar")],
      ["Clocks row 5: domain D_CPU has no reset on Resets (CLK-DOMAIN-NO-RESET)",
       "Resets row 5: Domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)"]),
+    # Fabrics row 9 is read by text() (the adapter derivation) before check_names validates
+    # it, so on a shared parse cache the first reader decided: a bad value was reported as
+    # REF-UNKNOWN rather than NAME-IDENT, and a blank one was never reported at all, which
+    # left bag check to fail an assertion in resolve (#149).
+    ("NAME-IDENT-fabric-domain", [("Fabrics", 9, "Clock domain", "Foo-bar")],
+     ["Fabrics row 9: Clock domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)",
+      "Slaves row 12: wdt0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)",
+      "Slaves row 13: rtc0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)"]),
+    ("VALUE-MISSING-fabric-domain", [("Fabrics", 9, "Clock domain", None)],
+     ["Fabrics row 9: Clock domain is required (VALUE-MISSING)"]),
     ("REF-UNKNOWN", [("Masters", 6, "Clock domain", "D_X")],
      ["Masters row 6: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
     ("CLK-DOMAIN-TWO-CLOCKS", [("Clocks", 9, h, v) for h, v in (
