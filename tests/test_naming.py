@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from hdl_bag.naming import _DECL, Unit, describe, emitted_units, label, unit_name
+from hdl_bag.naming import _DECL, Unit, describe, emitted_name, emitted_units, label, unit_name
 from hdl_bag.templates.sources import VENDOR, vendored_units
 
 _PKG = files("hdl_bag")
@@ -130,3 +130,14 @@ def test_the_declaration_regex_reads_the_forms_that_matter(
     text: str, found: list[tuple[str, str]]
 ) -> None:
     assert _DECL.findall(text) == found
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["axi_pkg", "AXI_BUS", "axi_cut", "bag_sync", "bag_axi_mux", "bag_faxi4", "faxil_slave"],
+)
+def test_emitted_name_prefixes_a_unit_of_every_origin_and_kind(name: str) -> None:
+    """A package, an interface, and a pulp, inhouse, derived, formal and zipcpu module."""
+    unit = emitted_units()[name]
+    assert emitted_name("p", unit) == f"p_{name}"
+    assert emitted_name(None, unit) == name
