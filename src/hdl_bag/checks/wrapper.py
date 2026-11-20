@@ -455,7 +455,6 @@ def check_module_prefix(ctx: Context) -> None:
     units = _prefixed_units(ctx)
     prefixed = {base for base, _ in units}
     fixed = _fixed_units(ctx, prefixed)
-    reached = {n for n, u in emitted_units().items() if u.origin in PREFIXED_ORIGINS}
     seen: dict[str, str] = {}
     for base, what in units:
         name = unit_name(prefix, base)
@@ -463,8 +462,7 @@ def check_module_prefix(ctx: Context) -> None:
             ctx.report("PROJ-PREFIX-COLLISION", cell,
                        f"with Module prefix {prefix!r}, {what} {base} and {seen[name]} {base} "
                        f"are both generated as {name}; rename the sub-wrapper")  # fmt: skip
-        if what == "sub-wrapper" or base in reached:
-            seen.setdefault(name, what)
+        seen.setdefault(name, what)
         if name in fixed:
             ctx.report("PROJ-PREFIX-COLLISION", cell,
                        f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "

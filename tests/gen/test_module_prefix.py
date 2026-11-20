@@ -363,10 +363,16 @@ def test_a_prefixed_sub_wrapper_cannot_take_the_name_of_an_unprefixed_unit(
     raise AssertionError("generate() succeeded; expected a refusal naming axi_cut")
 
 
-def test_a_sub_wrapper_named_like_an_unprefixed_unit_is_legal_under_a_prefix(
+def test_a_prefixed_sub_wrapper_and_an_unprefixed_unit_get_distinct_module_names(
     tmp_path: Path,
 ) -> None:
-    """Sub-wrapper axi_cut under prefix p is p_axi_cut next to PULP's axi_cut: distinct."""
+    """Sub-wrapper axi_cut under prefix p is p_axi_cut next to PULP's axi_cut: distinct.
+
+    This is the generator's side only. `bag check` refuses this workbook anyway, for the clash
+    stage 3 of #106 will create once the PULP units take the prefix too -- see
+    test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_stage_3_clash. What is pinned
+    here is that generation itself never writes two modules under one name.
+    """
     generate(_renamed_sub_wrapper("axi_cut", "p"), tmp_path, NESTED.parent)
     names = _declarations(tmp_path)
     assert {"p_axi_cut", "axi_cut"} <= set(names)
