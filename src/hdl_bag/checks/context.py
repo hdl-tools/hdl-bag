@@ -3,8 +3,9 @@
 """Check context: parses every input cell once and derives the connection model.
 
 A cell that fails to parse is reported once, where it is, and reads as None for
-every later check; checks skip whatever depends on a None, so one mistake gives one
-message (D23). Resolve builds the IR from the same context once the checks pass.
+every later check that parses it the same way (``_parsed``); checks skip whatever
+depends on a None, so one mistake gives one message (D23). Resolve builds the IR from
+the same context once the checks pass.
 """
 
 import math
@@ -50,7 +51,7 @@ class Context:
     registry: Registry
     base_dir: Path
     findings: list[Finding] = field(default_factory=list)
-    _cache: dict[tuple[str, int, str], object] = field(default_factory=dict)
+    _cache: dict[tuple[object, ...], object] = field(default_factory=dict)
 
     # ------------------------------------------------------------ reporting
     def report(self, rule: str, where: Cell | Row | str, what: str) -> None:
@@ -60,8 +61,19 @@ class Context:
             self.findings.append(Finding(rule, where.sheet, where.row, what))
 
     # ------------------------------------------------------------ parsing (cached)
-    def _parsed(self, cell: Cell, parse: Callable[[Cell], object]) -> object:
-        key = (cell.sheet, cell.row, cell.column)
+    def _parsed(
+        self, cell: Cell, kind: tuple[object, ...], parse: Callable[[Cell], object]
+    ) -> object:
+        """CELL's value as KIND reads it, parsed once and reported once (D23).
+
+        KIND is what the parser accepts: its name and the arguments that change that. Keyed on
+        the cell alone, whichever accessor ran first decided for every later one, so a name()
+        that should have refused what text() accepted returned it and reported nothing (#149).
+        ``required`` is not in the key: it changes only whether a blank cell is reported, not
+        what is accepted. Two required parsers over one blank cell therefore report the same
+        VALUE-MISSING twice, which ``run_checks`` folds back to one message.
+        """
+        key = (cell.sheet, cell.row, cell.column, *kind)
         if key not in self._cache:
             self._cache[key] = parse(cell)
         return self._cache[key]
@@ -74,7 +86,7 @@ class Context:
                 return None
             return str(c.value)
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("text",), parse)
         return v if isinstance(v, str) else None
 
     def external_module(self, row: Row) -> str | None:
@@ -105,7 +117,7 @@ class Context:
                 return None
             return c.value
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("name", lowercase), parse)
         return v if isinstance(v, str) else None
 
     def enum(self, cell: Cell, allowed: Iterable[str], required: bool = True) -> str | None:
@@ -123,7 +135,7 @@ class Context:
                 return None
             return c.value
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("enum", allowed), parse)
         return v if isinstance(v, str) else None
 
     def integer(
@@ -149,7 +161,7 @@ class Context:
                 )
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("integer", minimum, tuple(tokens)), parse)
         return v if isinstance(v, int | str) else None
 
     def hexval(self, cell: Cell, required: bool = True) -> int | None:
@@ -166,7 +178,7 @@ class Context:
                 )
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("hexval",), parse)
         return v if isinstance(v, int) else None
 
     def yes_no(self, cell: Cell, required: bool = True) -> bool | None:
@@ -181,7 +193,7 @@ class Context:
                 self.report("VALUE-ILLEGAL", c, f"{c.column} {c.value!r} is not Y or N")
                 return None
 
-        v = self._parsed(cell, parse)
+        v = self._parsed(cell, ("yes_no",), parse)
         return v if isinstance(v, bool) else None
 
     def protocol(self, cell: Cell) -> Protocol | None:
