@@ -8,7 +8,17 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from hdl_bag.naming import _DECL, Unit, describe, emitted_name, emitted_units, label, unit_name
+from hdl_bag.naming import (
+    _DECL,
+    Unit,
+    describe,
+    emitted_name,
+    emitted_units,
+    formal_name,
+    formal_unit,
+    label,
+    unit_name,
+)
 from hdl_bag.templates.sources import VENDOR, vendored_units
 
 _PKG = files("hdl_bag")
@@ -141,3 +151,63 @@ def test_emitted_name_prefixes_a_unit_of_every_origin_and_kind(name: str) -> Non
     unit = emitted_units()[name]
     assert emitted_name("p", unit) == f"p_{name}"
     assert emitted_name(None, unit) == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "bag_p_decode",
+        "bag_p_reset_props",
+        "bag_p_protocol_props",
+        "bag_p_unit_route0",
+        "bag_p_faxil_slave_cpu0_axil",
+        "bag_p_fapb_master_i_b_apb",
+    ],
+)
+def test_formal_unit_recognises_each_generated_formal_name(name: str) -> None:
+    assert formal_unit("p", name) is not None
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["bag_p_unit", "bag_p_decoder", "bag_q_decode", "bag_addr_decode", "p_decode", "bag_p_"],
+)
+def test_formal_unit_recognises_nothing_near_a_formal_name(name: str) -> None:
+    """A family stem needs its trailing underscore and an exact stem matches only whole."""
+    assert formal_unit("p", name) is None
+
+
+def test_a_project_named_like_a_unit_family_keeps_that_familys_names() -> None:
+    """Only the formal stems are reserved, not all of bag_<project>_*."""
+    assert formal_unit("axi", "bag_axi_xbar") is None
+    assert formal_unit("addr", "bag_addr_decode") == "the formal decode harness"
+
+
+def test_formal_name_builds_exactly_what_formal_unit_recognises() -> None:
+    for name in (
+        formal_name("p", "decode"),
+        formal_name("p", "unit", "x"),
+        formal_name("p", "faxil_slave", "x", "b"),
+    ):
+        assert formal_unit("p", name) is not None
+    assert formal_name("p", "reset_props") == "bag_p_reset_props"
+    assert formal_name("p", "unit", "x") == "bag_p_unit_x"
+
+
+@pytest.mark.parametrize(
+    ("stem", "rest"),
+    [("nope", ()), ("decode", ("x",)), ("unit", ()), ("faxil_slave", ())],
+)
+def test_formal_name_refuses_an_unknown_stem_and_a_misplaced_rest(
+    stem: str, rest: tuple[str, ...]
+) -> None:
+    with pytest.raises(ValueError, match="formal"):
+        formal_name("p", stem, *rest)
+
+
+def test_every_zipcpu_checker_the_generator_copies_is_a_reserved_family() -> None:
+    from hdl_bag.formal_gen import _CHECKER
+
+    for vendor in _CHECKER.values():
+        assert emitted_units()[vendor].origin == "zipcpu"
+        assert formal_unit("p", formal_name("p", vendor, "i", "b")) is not None

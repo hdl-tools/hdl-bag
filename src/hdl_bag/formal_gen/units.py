@@ -39,7 +39,7 @@ from hdl_bag.gen.prefix import unit
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
 from hdl_bag.ir.model import Fabric, Spec
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
 
@@ -298,7 +298,7 @@ class _Harness:
 
             family = "axil" if p is Protocol.AXI4_LITE else "apb"
             vendor = _CHECKER[(family, not a.unit_is_slave)]
-            module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
+            module = formal_name(self.spec.project.name, vendor, self.inst.name, bus.name)
             self.zipcpu.append(
                 ZipChecker(vendor, module, zipcpu_params(bus, family, self.slave_can(a)))
             )
@@ -957,7 +957,7 @@ def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) ->
                 label, expr = line.removeprefix("  always_comb ").split(": cover ", 1)
                 h.body.append(f"  always @(posedge {h.domains()[d]}) {label}: cover "
                               f"(bag_live_{d} && {expr.removesuffix(';')});")  # fmt: skip
-    module = f"bag_{spec.project.name}_unit_{inst.name}"
+    module = formal_name(spec.project.name, "unit", inst.name)
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,
              "endmodule", ""]  # fmt: skip

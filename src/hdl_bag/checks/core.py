@@ -30,6 +30,7 @@ RULES: Final[dict[str, Severity]] = {
     # names and references
     "NAME-UNIQUE": E,
     "NAME-IDENT": E,
+    "NAME-RESERVED": E,
     "REF-UNKNOWN": E,
     "CLK-DOMAIN-TWO-CLOCKS": E,
     "CLK-DOMAIN-NO-RESET": E,

@@ -36,6 +36,7 @@ from hdl_bag.formal_gen.units import (
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.ir import Spec, load
+from hdl_bag.naming import formal_name, formal_unit
 from hdl_bag.protocols import Protocol
 from hdl_bag.templates import builtin_registry
 
@@ -213,7 +214,7 @@ def test_every_port_the_properties_bind_to_is_a_port_of_the_top(tmp_path: Path,
     name = spec.project.name
     modules = {
         f"{name}_reset": props_module(spec),
-        f"{name}_protocol": f"bag_{name}_protocol_props",
+        f"{name}_protocol": formal_name(name, "protocol_props"),
     }
     for style in ("flat", "sv-interface"):
         out = generate(spec, tmp_path / style, config.parent, style)
@@ -1424,3 +1425,26 @@ def test_a_prefix_renames_bags_own_ahb_checker_and_the_route_job_copies(tmp_path
     job = (tmp_path / "formal/mixed_apb_masters_route_dbg_apb.sby").read_text(encoding="utf-8")
     assert "\nread_verilog -formal zipcpu/zz9_fapb_master.v\n" in job
     assert "\ncopy zz9_fapb_slave bag_mixed_apb_masters_fapb_slave_dbg_apb_dbg\n" in job
+
+
+_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+_MODULE = re.compile(r"^\s*module\s+(\w+)", re.M)
+_COPY = re.compile(r"^copy\s+\S+\s+(\w+)", re.M)
+
+
+@pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
+def test_every_name_the_formal_generator_invents_is_reserved(tmp_path: Path, config: Path) -> None:
+    """Fails when a name site bypasses naming.formal_name: each module declared in
+    formal/<project>_* and each `copy` target in the jobs is one naming.formal_unit knows."""
+    spec = load(config)
+    project = spec.project.name
+    generate(spec, tmp_path, config.parent)
+    formal = tmp_path / "formal"
+    names = [
+        m
+        for f in sorted(formal.glob(f"{project}_*.sv"))
+        for m in _MODULE.findall(_COMMENT.sub("", f.read_text(encoding="utf-8")))
+    ]
+    names += [m for f in sorted(formal.glob("*.sby")) for m in _COPY.findall(f.read_text("utf-8"))]
+    assert names
+    assert [n for n in names if formal_unit(project, n) is None] == []

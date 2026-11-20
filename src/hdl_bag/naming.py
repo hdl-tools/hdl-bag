@@ -92,6 +92,52 @@ def emitted_units() -> Mapping[str, Unit]:
     return MappingProxyType(dict(sorted(out.items())))
 
 
+_FORMAL_EXACT: Final = {
+    "decode": "the formal decode harness",
+    "reset_props": "the formal reset property module",
+    "protocol_props": "the formal protocol property module",
+}
+
+
+@cache
+def _formal_families() -> Mapping[str, str]:
+    """Stems of the formal names that carry instance and bus names after them."""
+    fams = {"unit": "a formal unit harness"}
+    fams |= {
+        n: "a formal protocol checker copy"
+        for n, u in emitted_units().items()
+        if u.origin == "zipcpu"
+    }
+    return MappingProxyType(fams)
+
+
+def formal_name(project: str, stem: str, *rest: str) -> str:
+    """The name of a generated formal unit: ``bag_<project>_<stem>[_<rest>...]``.
+
+    The one place these names are built, so ``formal_unit`` can recognise every one of them.
+    """
+    if stem in _FORMAL_EXACT and not rest:
+        return "_".join(("bag", project, stem))
+    if stem in _formal_families() and rest:
+        return "_".join(("bag", project, stem, *rest))
+    raise ValueError(f"{stem!r} with {len(rest)} trailing parts is not a formal unit name")
+
+
+def formal_unit(project: str, name: str) -> str | None:
+    """What NAME is, if it is a formal unit name generated for PROJECT, else None.
+
+    Only the formal stems are reserved, not all of ``bag_<project>_*``: a project named ``axi``
+    keeps ``bag_axi_xbar``.
+    """
+    head = f"bag_{project}_"
+    if not name.startswith(head):
+        return None
+    stem = name.removeprefix(head)
+    if stem in _FORMAL_EXACT:
+        return _FORMAL_EXACT[stem]
+    return next((w for f, w in _formal_families().items() if stem.startswith(f"{f}_")), None)
+
+
 def unit_name(prefix: str | None, name: str) -> str:
     """NAME with Project > Module prefix in front, joined by an underscore; blank means NAME."""
     return f"{prefix}_{name}" if prefix else name

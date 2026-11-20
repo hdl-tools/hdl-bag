@@ -92,7 +92,7 @@ from hdl_bag.gen.prefix import out_path
 from hdl_bag.gen.prefix import unit as gen_unit
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import AXI_FAMILY, PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, signal_width
 
 if TYPE_CHECKING:
@@ -201,7 +201,7 @@ def _watches(spec: Spec, bus: Bus, active: dict[str, set[str]]) -> list[Watch]:
 
 
 def props_module(spec: Spec) -> str:
-    return f"bag_{spec.project.name}_reset_props"
+    return formal_name(spec.project.name, "reset_props")
 
 
 def _step(spec: Spec, q: str, init: int, d: str) -> str:
@@ -501,7 +501,7 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             if not can:
                 continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
         params = zipcpu_params(bus, family, can if bus.is_slave else None)
-        out.append(Checker(bus.name, vendor, f"bag_{spec.project.name}_{vendor}_{bus.name}",
+        out.append(Checker(bus.name, vendor, formal_name(spec.project.name, vendor, bus.name),
                            params, can))  # fmt: skip
     return out
 
@@ -913,7 +913,7 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             split |= {bus.name} if _both_ways(bus, lines) else set()
             body += [*_own_covers(bus, lines), ""]
     body += _idle(spec, netlist, ports, split)
-    name = f"bag_{spec.project.name}_protocol_props"
+    name = formal_name(spec.project.name, "protocol_props")
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
 
@@ -1210,7 +1210,7 @@ def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: s
                       user_header: str | None) -> str:  # fmt: skip
     """The decode job: the harness PROPS over the design files, proved outright (it is
     combinational, so one step covers every input)."""
-    top = f"bag_{spec.project.name}_decode"
+    top = formal_name(spec.project.name, "decode")
     job = sby_job(top=top, files=[*files, props], incdirs=incdirs, depths={"prove": DECODE_DEPTH},
                   copy=[("rtl", "../rtl"), (props, props)], engine=ENGINE,
                   multiclock=False)  # fmt: skip
