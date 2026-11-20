@@ -274,8 +274,9 @@ The \sheet{Clocks} sheet has one row per clock.
 \begin{wbtable}{Column}
 \col{Clock} & Yes & identifier, e.g.\ \code{clk_sys} & The name of the top-level clock
   port.\\
-\col{Freq (MHz)} & Yes & a number above 0 & The nominal frequency. BAG keeps it in the
-  IR; it does not use it.\\
+\col{Freq (MHz)} & Yes & a number above 0 & The nominal frequency. BAG
+  writes the period of each clock, and the bound of each crossing, into
+  \file{constraints/} from it (section~\ref{sec:constraints}).\\
 \col{Source} & No & any text & Where the clock comes from, for example a PLL.\\
 \col{Domain} & Yes & identifier, e.g.\ \code{D_SYS} & The name of the clock domain.
   Other sheets refer to it.\\

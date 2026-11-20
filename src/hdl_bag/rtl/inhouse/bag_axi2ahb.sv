@@ -13,7 +13,8 @@
 // Integration notes:
 // * CDC (AsyncCdc): both domains must be reset together and leave reset in their own
 //   clocks (CLK-CDC-RESET checks the reset style). axi_cdc's gray-coded FIFOs need
-//   max-delay constraints on their pointer and data paths (no SDC is generated in v1).
+//   max-delay constraints on their pointer and data paths (bag generate writes them to
+//   constraints/<project>_cdc.sdc and .xdc).
 // * The core registers its AHB outputs and its AXI responses, but AWREADY/ARREADY/WREADY
 //   are combinational from the valids when there is no FIFO or CDC in front.
 // * PULP axi_dw_converter limits apply when the widths differ: WRAP bursts and

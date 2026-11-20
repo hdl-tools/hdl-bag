@@ -42,7 +42,7 @@ fill often does), give it the width of the fabric, or have it send INCR bursts.
 
 \subsection{What was written}
 
-\cmd{bag generate} wrote 132 files. The top level of \file{out} holds:
+\cmd{bag generate} wrote 134 files. The top level of \file{out} holds:
 
 \begin{description}
 \item[\file{rtl/}] the SystemVerilog: the wrapper \code{demo_ss_bus_top} and its
@@ -50,6 +50,7 @@ fill often does), give it the width of the fabric, or have it send INCR bursts.
   \file{rtl/inhouse/}, and the PULP blocks in \file{rtl/vendor/}.
 \item[\file{demo_ss.f}] the file list, in compile order, for your own tools.
 \item[\file{sw/}] the C header with the address map.
+\item[\file{constraints/}] the clock and clock-domain-crossing constraints, in SDC and XDC.
 \item[\file{doc/}] the memory map (Markdown and HTML), the port map, the tie-off report
   and the reset sequence.
 \item[\file{tests/}] the generated cocotb tests and a copy of the IR they read.

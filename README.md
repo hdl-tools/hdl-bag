@@ -16,7 +16,7 @@ nightly runs are not yet green), and Phase 6 is under way.
 | Works today | Not yet |
 |---|---|
 | Spec workbook template, reader and 96 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
-| Canonical YAML IR, byte-identical across runs | CDC constraints (SDC) and v1.0 release (Phase 6) |
+| Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 6) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
 | Example workbooks in [examples](examples), each `bag check` clean and run end to end in CI | |
@@ -26,6 +26,7 @@ nightly runs are not yet green), and Phase 6 is under way.
 | User-supplied fabrics (`bag_external`), with declared extra ports | |
 | Wrapper in flat or SV-interface port style, nested sub-wrappers | |
 | C header, memory-map doc (Markdown and HTML), port map, tie-off report | |
+| CDC timing constraints (`constraints/<project>_cdc.sdc` and `.xdc`) and `ASYNC_REG` on the synchronizers; no tool checks them | |
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |

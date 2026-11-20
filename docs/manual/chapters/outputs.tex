@@ -25,6 +25,8 @@ formal steps use as their top module. In the flat port style it is the top wrapp
 \item[\file{lite_ss.f}] the file list, \file{<project>.f} (section~\ref{sec:filelist}).
 \item[\file{sw/}] the C header (section~\ref{sec:cheader}).
 \item[\file{doc/}] the documents (section~\ref{sec:docs}).
+\item[\file{constraints/}] the clock and clock-domain-crossing constraints
+  (section~\ref{sec:constraints}).
 \item[\file{tests/}] the generated cocotb tests (section~\ref{sec:tests}).
 \item[\file{formal/}] the SymbiYosys jobs and their properties (section~\ref{sec:jobs}).
 \item[\file{bag_outputs.json}] the manifest: what this run wrote
@@ -248,6 +250,50 @@ and a bridge window.
   and what the generated tests check of it. The file \file{docs/reset-sequence.md} in
   the BAG repository explains why.
 \end{description}
+
+\section{The CDC constraints}
+\label{sec:constraints}
+
+\file{constraints/} holds the timing constraints of the clock-domain crossings, in two
+files because two kinds of tool read them. BAG writes both whenever it writes RTL, since
+they name instances of the RTL. A design with no crossing still gets both files, with its
+clock definitions and one line that says there is nothing to constrain.
+
+\begin{description}
+\item[\file{constraints/<project>_cdc.sdc}] Portable SDC, for any tool that reads it:
+  \cmd{create_clock}, \cmd{set_max_delay} and \cmd{set_false_path -hold}.
+\item[\file{constraints/<project>_cdc.xdc}] The Vivado spelling: \cmd{create_clock} and
+  \cmd{set_max_delay -datapath_only}. \opt{-datapath_only} is a Vivado extension, which is
+  why the SDC does not use it. It already drops the hold check that the SDC removes with
+  \cmd{set_false_path -hold}.
+\end{description}
+
+Each file starts with one \cmd{create_clock} for every row of the \sheet{Clocks} sheet,
+named and placed on the port of that name, with the period $1000 / \textrm{Freq (MHz)}$ in
+nanoseconds. Then every clock-domain crossing has a block, named after the adapter or bridge,
+that gives the maximum delay of its asynchronous paths: the smaller of the periods of the
+two clocks, so that a value settles before either side samples it. The paths are:
+
+\begin{itemize}
+\item for a crossing through a PULP \code{axi_cdc} (the \code{cdc} adapter, and the bridges
+  from AXI), every \code{async_data_master_*} pin of its source half, which are the
+  gray-coded pointers and the data;
+\item for a four-phase handshake (the bridges from AHB-Lite and APB), the request and
+  acknowledge into each \code{bag_sync}, and the payload and response registers that the
+  handshake holds stable, from the clock that writes them to the clock that reads them.
+\end{itemize}
+
+The instance paths are relative to the top wrapper, the module that your SoC instantiates.
+Prefix them with the hierarchical name of that instance. They are the same in both port
+styles and with a \setting{Module prefix}, which renames modules and never instances.
+
+The synchronizer flops themselves carry \code{(* ASYNC_REG = "TRUE", DONT_TOUCH = "TRUE" *)}
+in \file{bag_sync.sv} and \file{bag_rst_sync.sv}. The PULP \code{axi_cdc} uses PULP's own
+synchronizer, which has such attributes already.
+
+BAG runs no tool on these files. Their names are checked only against the generated RTL,
+not against a synthesized netlist; chapter~\ref{ch:limits} lists what remains yours to
+check.
 
 \section{The generated tests}
 \label{sec:tests}

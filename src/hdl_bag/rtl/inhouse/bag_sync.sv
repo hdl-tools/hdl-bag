@@ -17,6 +17,7 @@ module bag_sync #(
     $error("bag_sync: Stages must be at least 2");
   end
 
+  (* ASYNC_REG = "TRUE", DONT_TOUCH = "TRUE" *)
   logic [Stages-1:0] q;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin

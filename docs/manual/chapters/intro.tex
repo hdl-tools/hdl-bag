@@ -72,8 +72,8 @@ chapter~\ref{ch:install}.
 \begin{itemize}
 \item It does not write your masters and slaves (processors, memories, peripherals).
   It writes the interconnect between them.
-\item It does not run synthesis, place and route, or timing analysis, and it does not
-  yet write timing constraints for clock-domain crossings.
+\item It does not run synthesis, place and route, or timing analysis. It writes timing
+  constraints for clock-domain crossings, but no tool checks them.
 \item It does not edit generated files for you. Change the workbook and generate again.
 \item It does not test a fabric you supply yourself (a \code{bag_external} fabric): BAG
   does not know how it behaves.

@@ -1,6 +1,6 @@
 $ bag generate files/nested_prefix.ir.yaml -o out
 nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
-wrote 37 file(s) to out (top demo_ss_bus_top)
+wrote 39 file(s) to out (top demo_ss_bus_top)
 $ ls out/rtl
 demo_ss_bus_top.sv
 inhouse/
