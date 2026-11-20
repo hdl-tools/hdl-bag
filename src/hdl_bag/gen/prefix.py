@@ -21,7 +21,7 @@ from types import MappingProxyType
 
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import PREFIXED_ORIGINS, Unit, emitted_units, unit_name
+from hdl_bag.naming import Unit, emitted_units, unit_name
 from hdl_bag.templates.sources import VENDOR
 
 _RTL = (".sv", ".v", ".svh", ".vh")
@@ -39,7 +39,7 @@ _TOKEN = re.compile(
 @cache
 def _applied() -> tuple[Unit, ...]:
     """The units the prefix is applied to: every unit BAG emits."""
-    return tuple(u for u in emitted_units().values() if u.origin in PREFIXED_ORIGINS)
+    return tuple(emitted_units().values())
 
 
 @cache
