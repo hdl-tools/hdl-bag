@@ -560,8 +560,10 @@ def test_changing_the_prefix_leaves_no_file_of_the_old_name(tmp_path: Path) -> N
 
 
 def test_a_prefixed_design_is_byte_identical_across_hash_seeds(tmp_path: Path) -> None:
+    """A config with vendored files: the macro, guard and header rewrite iterates over sets the
+    hash seed could reorder, and an in-house-only config would not exercise any of it."""
     ir = tmp_path / "prefixed.ir.yaml"
-    src = REPO / "tests/configs/p2/ahb2apb_nested.ir.yaml"
+    src = REPO / "tests/configs/p3/axi_shared_rr.ir.yaml"
     ir.write_text(src.read_text().replace("module_prefix: null", f"module_prefix: {PREFIX}"))
     shutil_header = src.parent / "header.txt"
     (tmp_path / "header.txt").write_bytes(shutil_header.read_bytes())

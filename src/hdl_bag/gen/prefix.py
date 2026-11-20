@@ -44,8 +44,8 @@ _UPSTREAM = (f"{VENDOR}/", "formal/vendor/zipcpu/")
 #   \\\S+ skips an escaped identifier, but IEEE 1800-2017 5.6.1 says \axi_cut<space> *is* axi_cut,
 #   so a reference written that way is missed. Skipping is the safer of the two wrong answers.
 #   Token pasting (x``FOO) is skipped whole, so a macro or unit name built by pasting is never
-#   renamed. The vendored headers paste 210 times, but only formal-argument names and fragments
-#   (__lhs``__lhs_sep``id), none of them a macro or unit name; a test asserts that.
+#   renamed. The packaged tree pastes 483 tokens on 210 lines, but only formal-argument names
+#   and fragments (__lhs``__lhs_sep``id), none of them a macro or unit name; a test asserts it.
 _TOKEN = re.compile(
     r"//[^\n]*|/\*.*?\*/"
     r"|(?P<inc>`include[ \t]+\")(?P<path>[^\"\n]+)\""
