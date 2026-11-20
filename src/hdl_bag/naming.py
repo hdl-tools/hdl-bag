@@ -92,9 +92,11 @@ def emitted_units() -> Mapping[str, Unit]:
     return MappingProxyType(dict(sorted(out.items())))
 
 
-# The origins whose units Project > Module prefix renames. Stage 3 of #106 adds pulp, formal and
-# zipcpu. `bag check` and the generator both read this, so they cannot disagree about it.
-PREFIXED_ORIGINS: Final[frozenset[UnitOrigin]] = frozenset({"inhouse", "derived"})
+# The origins whose units Project > Module prefix renames. `bag check` and the generator both
+# read this, so they cannot disagree about it.
+PREFIXED_ORIGINS: Final[frozenset[UnitOrigin]] = frozenset(
+    {"inhouse", "derived", "pulp", "formal", "zipcpu"}
+)
 
 
 def unit_name(prefix: str | None, name: str) -> str:
