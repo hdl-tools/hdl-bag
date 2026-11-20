@@ -1,0 +1,35 @@
+$ bag generate files/nested_prefix.ir.yaml -o soc/soc1
+nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 37 file(s) to soc/soc1 (top demo_ss_bus_top)
+$ bag generate files/lite_soc2.ir.yaml -o soc/soc2
+lite_soc2.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 52 file(s) to soc/soc2 (top lite_ss_top)
+$ ls soc/soc2/rtl/vendor/pulp/axi/include/axi
+soc2_assign.svh
+soc2_typedef.svh
+$ cat soc/soc2/lite_ss.f
++incdir+rtl/vendor/pulp/axi/include
++incdir+rtl/vendor/pulp/common_cells/include
+rtl/pkg/lite_ss_pkg.sv
+rtl/vendor/pulp/common_cells/src/soc2_cf_math_pkg.sv
+rtl/vendor/pulp/common_cells/src/soc2_fifo_v3.sv
+rtl/vendor/pulp/common_cells/src/soc2_rr_arb_tree.sv
+rtl/vendor/pulp/common_cells/src/soc2_spill_register_flushable.sv
+rtl/vendor/pulp/common_cells/src/soc2_lzc.sv
+rtl/vendor/pulp/common_cells/src/soc2_spill_register.sv
+rtl/vendor/pulp/axi/src/soc2_axi_pkg.sv
+rtl/vendor/pulp/axi/src/soc2_axi_intf.sv
+rtl/vendor/pulp/axi/src/soc2_axi_cut.sv
+rtl/vendor/pulp/axi/src/soc2_axi_fifo.sv
+rtl/vendor/pulp/axi/src/soc2_axi_lite_demux.sv
+rtl/vendor/pulp/axi/src/soc2_axi_multicut.sv
+rtl/inhouse/soc2_bag_addr_decode.sv
+rtl/inhouse/soc2_bag_axil_err_slv.sv
+rtl/inhouse/soc2_bag_axil_from_flat.sv
+rtl/inhouse/soc2_bag_axil_guard.sv
+rtl/inhouse/soc2_bag_axil_shared_bus.sv
+rtl/inhouse/soc2_bag_axil_to_flat.sv
+rtl/inhouse/soc2_bag_prio_arb.sv
+rtl/inhouse/soc2_bag_rst_sync.sv
+rtl/vendor/derived/soc2_bag_axil_mux.sv
+rtl/lite_ss_top.sv

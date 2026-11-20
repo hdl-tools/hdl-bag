@@ -1056,5 +1056,11 @@
  "tests/rtl/test_negative_elaboration.py::test_illegal_parameters_stop_elaboration[bag_rst_sync-1-slang]": 0.02,
  "tests/rtl/test_negative_elaboration.py::test_illegal_parameters_stop_elaboration[bag_rst_sync-1-verilator]": 0.11,
  "tests/rtl/test_negative_elaboration.py::test_illegal_parameters_stop_elaboration[bag_sync-0-slang]": 0.02,
- "tests/rtl/test_negative_elaboration.py::test_illegal_parameters_stop_elaboration[bag_sync-0-verilator]": 0.1
+ "tests/rtl/test_negative_elaboration.py::test_illegal_parameters_stop_elaboration[bag_sync-0-verilator]": 0.1,
+ "tests/gen/test_two_projects.py::test_two_prefixed_projects_elaborate_beside_an_unmodified_pulp_copy[slang]": 10.0,
+ "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[blank-slang]": 10.0,
+ "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[headers-slang]": 10.0,
+ "tests/gen/test_two_projects.py::test_two_prefixed_projects_elaborate_beside_an_unmodified_pulp_copy[verilator]": 40.0,
+ "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[blank-verilator]": 40.0,
+ "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[headers-verilator]": 40.0
 }

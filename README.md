@@ -14,7 +14,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 92 validation checks | The nightly regression workflow, its shrinker and reports (Phase 5) |
+| Spec workbook template, reader and 96 validation checks | The nightly regression workflow, its shrinker and reports (Phase 5) |
 | Canonical YAML IR, byte-identical across runs | CDC constraints (SDC) and v1.0 release (Phase 6) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
@@ -27,6 +27,7 @@ Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
 | `bag formal`: SymbiYosys jobs per design: decode (a proof), quiet-in-reset (a proof), port protocol on every AXI4, AXI4-Lite, AHB-Lite and APB port, and routing per fabric and bridge (bounded) | |
+| Module prefix: every unit, macro and header name BAG emits, so two subsystems and an unmodified PULP copy compile together (slang and Verilator) | |
 | User manual (LaTeX, [docs/manual](docs/manual)) | |
 
 The user manual is LaTeX in [docs/manual](docs/manual) (`latexmk -pdf hdl-bag.tex` there);
@@ -78,7 +79,7 @@ rtl/pkg/<package>.sv     parameter package (widths, decode tables)
 rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
 rtl/inhouse/*.sv         the in-house IP the design uses (names carry Module prefix, if set)
 rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files
-                         (unit and file names carry Module prefix, if set)
+                         (unit, macro and file names, headers included, carry Module prefix, if set)
 rtl/ext/<module>.sv      stub of a user-supplied fabric: replace it with your RTL
 <project>.f              file list in compile order
 sw/<project>_memmap.h    C header
@@ -92,6 +93,7 @@ tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --r
 formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job (prove and cover)
 formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (ZipCPU) and their job
 formal/bag_step.v, vendor/  the formal environment's step registers; the ZipCPU checkers, with LICENSE
+                         (these file names carry Module prefix, if set)
 sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 

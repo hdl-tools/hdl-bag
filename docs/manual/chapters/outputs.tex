@@ -84,7 +84,8 @@ vendored PULP modules, interfaces and packages, BAG's own formal checkers, the v
 checkers, and the sub-wrappers. The new name is in the declaration, in every instantiation, in
 every \code{pkg::} scope and in the \code{endmodule} label. The files of those units get the
 same prefix, and the file list and the formal jobs follow. The top wrapper, the parameter
-package, the generated interfaces and the flat harness keep their names, and so do instance
+package, the generated interfaces, the flat harness, a user-supplied fabric module and the
+generated formal modules, which carry the project name, keep their names, and so do instance
 names, so hierarchical paths do not change. Comments and messages inside the files keep the
 old names.
 
@@ -110,6 +111,37 @@ do. Put a wildcard in front of the base name, as in \code{rtl/inhouse/*bag_*.sv}
 that ship with BAG match \file{rtl/pkg/}, which never takes the prefix, so they are unaffected.
 
 \lstinputlisting[style=console]{examples/console/out-prefix.txt}
+
+\subsection{Two subsystems in one SoC}
+\label{sec:two-subsystems}
+
+Give each subsystem its own \setting{Module prefix}. That is not enough on its own. The
+prefix never renames the top wrapper, the parameter package, the generated interfaces or the
+flat harness, so two subsystems also need different \setting{Project name},
+\setting{Top module name} and \setting{Parameter package}. Two outputs of one spec declare
+the same units whatever the prefix. BAG checks one spec at a time and cannot see this across
+runs, so it is yours to keep different.
+
+The transcript below generates two subsystems, \code{demo_ss} with prefix \code{soc1} and
+\code{lite_ss} with prefix \code{soc2}, each into its own directory, and shows that the second
+has its own copy of the vendored headers, under names no other subsystem has and no
+upstream copy has.
+
+\lstinputlisting[style=console]{examples/console/out-two-subsystems.txt}
+
+\begin{itemize}
+\item Keep each output in its own directory. Two outputs in one directory would write the
+  same file names for the units that no prefix renames.
+\item Give your tool both file lists, with the paths of each resolved from its own output
+  directory, and both sets of \code{+incdir+} lines.
+\item Set a knob macro per subsystem, with its prefix (\code{soc2_NO_SYNOPSYS_FF}); the
+  unprefixed name reaches no subsystem.
+\end{itemize}
+
+A copy of PULP that you have yourself, unmodified, can sit in the same compile: no unit or
+macro of a prefixed subsystem has an upstream name. A test compiles two prefixed subsystems
+and an unmodified copy of the PULP version that BAG packages with slang and Verilator. The
+transcript cannot show that compile, because the replay runs no EDA tool.
 
 \subsection{The two port styles}
 
@@ -141,7 +173,9 @@ still instantiates \code{lite_ss_top}.
 names every file to compile, one per line, in compile order: the package first, then the
 interfaces (\code{sv-interface} style only), the vendored and in-house files, the
 sub-wrappers, the top wrapper and, last, the flat harness (\code{sv-interface} style
-only). The paths are relative to the output directory, so run your tool from there.
+only). The paths are relative to the output directory, so run your tool from there; to
+compile two outputs together, resolve each list's paths from its own output directory
+(section~\ref{sec:two-subsystems}).
 
 \lstinputlisting[style=console]{examples/console/out-filelist.txt}
 
@@ -257,7 +291,8 @@ one mode, to one depth (section~\ref{sec:formal}). Each job reads the design fro
   and each bridge that BAG generates, named after its instance. It checks that unit on its own: routing,
   arbitration and bridge windows.
 \item[\file{formal/bag_step.v}] Registers that the property files use to count solver
-  steps.
+  steps. Under a \setting{Module prefix} the file takes it, like the next two
+  (section~\ref{sec:prefix}).
 \item[\file{formal/bag_faxi4.sv}, \file{formal/bag_fahb.sv}] BAG's own protocol checkers
   for AXI4 and AHB-Lite ports. BAG writes each one only when a job needs it.
 \item[\file{formal/vendor/zipcpu/}] The protocol checkers from ZipCPU that the jobs use,
@@ -283,7 +318,8 @@ Markdown and HTML the whole header goes inside an HTML comment, and in Python an
 Three files have no header: the file list, the manifest and the copy of the IR in
 \file{tests/}. The files that BAG copies (the in-house and vendored RTL, the ZipCPU
 checkers, \file{bag_step.v}, \file{bag_faxi4.sv} and \file{bag_fahb.sv}) keep their own
-headers.
+headers. Under a \setting{Module prefix} these files take it on their names
+(section~\ref{sec:prefix}).
 
 \section{Same input, same output}
 \label{sec:deterministic}
