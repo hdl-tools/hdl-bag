@@ -91,6 +91,10 @@ def test_no_two_sources_claim_the_same_unit_name() -> None:
                 text = (_PKG / sub / f.name).read_text(encoding="utf-8")
                 for _, name in _DECL.findall(text):
                     claims.setdefault(name, []).append(f"{sub}/{f.name}")
+    for h in index["headers"]:
+        text = (_PKG / VENDOR / h["path"]).read_text(encoding="utf-8")
+        for _, name in _DECL.findall(text):
+            claims.setdefault(name, []).append(f"{VENDOR}/{h['path']}")
     twice = {u: paths for u, paths in claims.items() if len(paths) > 1}
     assert not twice, twice
     assert set(claims) == set(emitted_units())
@@ -112,17 +116,22 @@ def test_the_inventory_is_sorted_and_read_only() -> None:
         units["x"] = Unit("x", "p", "module", "pulp")  # type: ignore[index]
 
 
-def test_the_only_unit_in_the_vendored_headers_is_the_uvm_only_assert_rpt_pkg() -> None:
-    """assert_rpt_pkg sits inside `ifdef UVM, which BAG never defines, so it is never elaborated
-    and is deliberately not reserved. A re-vendor that adds a real unit to a header must fail
-    here, so someone decides whether to add it to emitted_units()."""
+def test_every_unit_a_vendored_header_declares_is_in_the_inventory_with_its_headers_path() -> None:
+    """assert_rpt_pkg sits inside `ifdef UVM, which BAG's own flows never define, but an SoC with
+    a UVM bench does, and two subsystems would then declare one package: it takes the prefix like
+    every other unit, so the header's declarations are part of the inventory."""
     index = json.loads((_PKG / VENDOR / "index.json").read_text(encoding="utf-8"))
     found = {
-        name
+        name: f"{VENDOR}/{h['path']}"
         for h in index["headers"]
         for _, name in _DECL.findall((_PKG / VENDOR / h["path"]).read_text(encoding="utf-8"))
     }
-    assert found == {"assert_rpt_pkg"}
+    assert "assert_rpt_pkg" in found
+    units = emitted_units()
+    for name, path in found.items():
+        assert units[name].path == path, name
+    assert units["assert_rpt_pkg"].kind == "package"
+    assert units["assert_rpt_pkg"].origin == "pulp"
 
 
 @pytest.mark.parametrize(

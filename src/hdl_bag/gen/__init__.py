@@ -13,7 +13,7 @@ Output layout (relative to the output directory)::
                                renamed
     rtl/vendor/derived/<prefix>_*.sv  the modules BAG derives from PULP, likewise
     rtl/vendor/pulp/...        copies of the vendored PULP files the design uses, with their units
-                               renamed
+                               and macros renamed; the headers are ``<prefix>_*.svh``
     rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
@@ -32,8 +32,10 @@ Output layout (relative to the output directory)::
 
 With a blank Project > Module prefix the ``<prefix>_`` parts are absent and the copies are
 byte for byte the packaged files. The top wrapper, the parameter package, the flat harness, the
-generated interfaces, the headers and the generated formal files keep their names; every unit
-BAG packages, vendored PULP and ZipCPU included, takes the prefix (``gen.prefix``).
+generated interfaces and the generated formal files keep their names; every unit BAG packages,
+vendored PULP and ZipCPU included, takes the prefix, and so do the macros the packaged files
+define and the file names of the four vendored headers, with the include lines that name them
+(``gen.prefix``). Include directories keep their names.
 """
 
 import hashlib

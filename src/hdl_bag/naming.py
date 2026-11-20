@@ -70,11 +70,12 @@ def emitted_units() -> Mapping[str, Unit]:
 
     Static: the per-design units (wrappers, interfaces, the package) are not here. Interfaces and
     packages share the design-unit namespace with modules, so each carries its kind. The vendored
-    headers are left out on purpose: the one unit they declare, ``assert_rpt_pkg``, sits inside
-    ``ifdef UVM``, which BAG never defines, so it is never elaborated and cannot collide
-    (``tests/test_naming.py`` fails if a re-vendor adds another).
+    headers are scanned too: the one unit they declare, ``assert_rpt_pkg``, sits inside
+    ``ifdef UVM``, which BAG's own flows never define, but an SoC with a UVM bench does, and two
+    subsystems would then declare one package. It is in the inventory with its header's path, so
+    it is reserved and renamed like every other unit.
     """
-    from hdl_bag.templates.sources import VENDOR, vendored_units
+    from hdl_bag.templates.sources import VENDOR, vendored_includes, vendored_units
 
     out: dict[str, Unit] = {}
     vendored = vendored_units()
@@ -83,6 +84,9 @@ def emitted_units() -> Mapping[str, Unit]:
         kinds = {name: kind for kind, name in _declared(text)}
         for unit in sorted(u for u, p in vendored.items() if p == path):
             out[unit] = Unit(unit, f"{VENDOR}/{path}", kinds.get(unit, "module"), "pulp")
+    for path in sorted(vendored_includes().values()):
+        for kind, name in _declared((files("hdl_bag") / path).read_text(encoding="utf-8")):
+            out[name] = Unit(name, path, kind, "pulp")
     for origin, sub in _ORIGINS:
         directory = files("hdl_bag") / sub
         for f in sorted(directory.iterdir(), key=lambda t: t.name):

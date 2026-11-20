@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""Project > Module prefix in the generated RTL (stages 2 and 3 of issue #106): every unit BAG
+"""Project > Module prefix in the generated RTL (stages 2 to 4 of issue #106): every unit BAG
 emits takes it (in-house, derived, vendored PULP, BAG's formal units, vendored ZipCPU, and the
-sub-wrappers), the formal jobs follow the renamed files, and a blank prefix changes nothing."""
+sub-wrappers), so do the macros the packaged files define, their include guards and the vendored
+headers' file names; the formal jobs follow the renamed files, and a blank prefix changes
+nothing."""
 
 import json
 import os
@@ -45,9 +47,10 @@ def _stems(sub: str) -> set[str]:
 BAG = _stems("rtl/inhouse") | _stems("rtl/vendor/derived")
 PULP, ZIPCPU = "rtl/vendor/pulp/", "formal/vendor/zipcpu/"
 NOTE = (
-    '// Modified by hdl-bag: design unit names carry the prefix "{}_" (Project > Module prefix). '
-    "No other change."
+    '// Modified by hdl-bag: design unit, macro and include-file names carry the prefix "{}_" '
+    "(Project > Module prefix). No other change."
 )
+_STRIP_COMMENTS = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 _STRIP = re.compile(r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"", re.DOTALL)
 _IDENT = re.compile(r"[A-Za-z_]\w*")
 _DECL = re.compile(
@@ -63,20 +66,120 @@ def _package_units() -> set[str]:
             if f.name.endswith((".sv", ".v")):
                 names |= _declared(f.read_text(encoding="utf-8"))
     index = json.loads((files("hdl_bag") / "rtl/vendor/pulp/index.json").read_text("utf-8"))
+    for h in index["headers"]:  # assert_rpt_pkg is declared in a header
+        names |= _declared((files("hdl_bag") / f"rtl/vendor/pulp/{h['path']}").read_text("utf-8"))
     return names | {u for f in index["files"] for u in f["defines"]}
 
 
 FORMAL_OWN = {f.name for f in (files("hdl_bag") / "formal").iterdir()
               if f.name.endswith((".sv", ".v"))}  # fmt: skip
-_REF = re.compile(
-    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|`\w+|\$\w+|\\\S+|[A-Za-z_][A-Za-z0-9_$]*",
-    re.DOTALL,
-)
+_DIRECTIVES = ("define", "ifdef", "ifndef", "elsif", "undef")
+_BASED = re.compile(r"'[sS]?[bBoOdDhH][0-9a-fA-F_xXzZ?]+")
+_RTL_SUFFIX = (".sv", ".v", ".svh", ".vh")
+
+
+def _packaged_texts() -> list[str]:
+    out: list[str] = []
+    stack = [files("hdl_bag") / "rtl", files("hdl_bag") / "formal"]
+    while stack:
+        for f in stack.pop().iterdir():
+            if f.is_dir():
+                stack.append(f)
+            elif f.name.endswith(_RTL_SUFFIX):
+                out.append(f.read_text(encoding="utf-8"))
+    return out
+
+
+def _defined_macros() -> set[str]:
+    """Every name a packaged file defines, read line by line from comment-stripped text."""
+    names: set[str] = set()
+    for text in _packaged_texts():
+        for line in re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL).split("\n"):
+            words = line.split()
+            if len(words) > 1 and words[0] == "`define":
+                names.add(re.match(r"\w+", words[1])[0])  # type: ignore[index]
+    return names
+
+
+def _header_includes() -> dict[str, str]:
+    """Include string -> the string once the header's basename carries the prefix."""
+    index = json.loads((files("hdl_bag") / "rtl/vendor/pulp/index.json").read_text("utf-8"))
+    out = {}
+    for h in index["headers"]:
+        inc = next(d for d in index["incdirs"] if h["path"].startswith(d + "/"))
+        rel = h["path"][len(inc) + 1 :]
+        head, _, base = rel.rpartition("/")
+        out[rel] = f"{head}/{PREFIX}_{base}"
+    return out
+
+
+MACROS, HEADERS = _defined_macros(), _header_includes()
+
+
+def _ident_end(text: str, i: int) -> int:
+    while i < len(text) and (text[i].isalnum() or text[i] in "_$"):
+        i += 1
+    return i
 
 
 def _reference_rewrite(text: str) -> str:
-    """The test's own token rewrite: whole identifiers outside comments, strings and macros."""
-    return _REF.sub(lambda m: f"{PREFIX}_{m[0]}" if m[0] in UNITS else m[0], text)
+    """The test's own scanner, written as a loop and not as a regex, so it shares no code and no
+    pattern with gen.prefix: units are renamed as bare identifiers, macros after a backtick or
+    after define/ifdef/ifndef/elsif/undef, and the path of an include of a vendored header."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        j = i + 1
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2) + 2 if "*/" in text[i + 2 :] else n
+        elif c == '"':
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            j += 1
+        elif c == "`":
+            end = _ident_end(text, j)
+            name = text[j:end]
+            j = end
+            if name in _DIRECTIVES or name == "include":
+                k = j
+                while k < n and text[k] in " \t":
+                    k += 1
+                if name == "include" and k > j and text.startswith('"', k):
+                    close = text.index('"', k + 1)
+                    inc = text[k + 1 : close]
+                    out.append(text[i:k] + '"' + HEADERS.get(inc, inc) + '"')
+                    i = close + 1
+                    continue
+                if name != "include" and k > j:
+                    end = _ident_end(text, k)
+                    arg = text[k:end]
+                    out.append(text[i:k] + (f"{PREFIX}_{arg}" if arg in MACROS else arg))
+                    i = end
+                    continue
+            elif name in MACROS:
+                out.append(f"`{PREFIX}_{name}")
+                i = j
+                continue
+        elif c == "\\":
+            while j < n and not text[j].isspace():
+                j += 1
+        elif c == "$":
+            j = _ident_end(text, j)
+        elif c == "'" and (m := _BASED.match(text, i)):
+            j = m.end()
+        elif c.isalpha() or c == "_":
+            j = _ident_end(text, i)
+            word = text[i:j]
+            out.append(f"{PREFIX}_{word}" if word in UNITS else word)
+            i = j
+            continue
+        out.append(text[i:j])
+        i = j
+    return "".join(out)
 
 
 def _with_prefix(spec: Spec) -> Spec:
@@ -148,7 +251,7 @@ def _expect(spec: Spec) -> Callable[[str], str]:
 
     def expect(rel: str) -> str:
         head, _, base = rel.rpartition("/")
-        rtl = rel.endswith((".sv", ".v"))
+        rtl = rel.endswith((".sv", ".v")) or (rel.startswith(PULP) and rel.endswith(".svh"))
         own = head == "formal" and base in FORMAL_OWN  # not the generated formal files
         under = rel.startswith((INHOUSE, DERIVED, PULP, ZIPCPU))
         if rel in subs or (rtl and (under or own)):
@@ -182,8 +285,9 @@ def test_the_prefix_reaches_every_unit_file_and_no_other(
     style: str | None,
 ) -> None:
     """A. The generator-side statement of checks/wrapper._fixed_units: the top, the package,
-    <top>_flat, <project>_<proto>_if, rtl/ext, headers, LICENSE, SOURCE.md and the generated
-    formal files keep their paths; every other unit file takes the prefix on its basename."""
+    <top>_flat, <project>_<proto>_if, rtl/ext, LICENSE, SOURCE.md and the generated formal
+    files keep their paths; every other unit file, and every vendored header, takes the prefix on
+    its basename."""
     spec, blank, pre = trees(config, style)
     expect = _expect(spec)
     assert set(pre) == {expect(rel) for rel in blank}
@@ -345,8 +449,8 @@ def test_renamed_upstream_files_differ_from_the_packaged_ones_by_the_note_and_th
     style: str | None,
 ) -> None:
     """F. (a) Each upstream file the rewrite changed is the note line plus the packaged bytes
-    with unit names replaced, nothing else; (b) the files that are byte for byte as packaged
-    are the licences and the headers that name no unit."""
+    with unit, macro and include-file names replaced, nothing else, by a tokenizer written
+    independently of gen.prefix; (b) only the LICENSE files stay byte for byte as packaged."""
     spec, blank, pre = trees(config, style)
     expect = _expect(spec)
     upstream = [r for r in blank if r.startswith((PULP, ZIPCPU)) and r.endswith(
@@ -356,18 +460,17 @@ def test_renamed_upstream_files_differ_from_the_packaged_ones_by_the_note_and_th
         renamed = _reference_rewrite(packaged)
         want = f"{NOTE.format(PREFIX)}\n{renamed}" if renamed != packaged else packaged
         assert pre[expect(rel)].decode() == want, rel
-        assert rel.endswith(".svh") or renamed != packaged, rel
+        assert renamed != packaged, rel
     same = {r for r in blank if r.startswith((PULP, "formal/vendor/"))
             and pre[expect(r)] == (files("hdl_bag") / r).read_bytes()}  # fmt: skip
-    headers = {r for r in same if not r.endswith("/LICENSE")}
-    assert {Path(r).name for r in headers} <= {"assign.svh", "assertions.svh", "registers.svh"}
-    assert all(r.endswith(".svh") for r in headers)
-    assert same - headers == {r for r in blank if r.endswith("/LICENSE")
-                              and r.startswith((PULP, "formal/vendor/"))}  # fmt: skip
+    # Only the licences stay byte for byte: every header now has a renamed macro or guard.
+    assert same == {r for r in blank if r.endswith("/LICENSE")
+                    and r.startswith((PULP, "formal/vendor/"))}  # fmt: skip
     if any(r.startswith(PULP) for r in blank):
         assert same
     if config == GOLDEN:
-        assert {Path(r).name for r in headers} == {"assign.svh", "assertions.svh", "registers.svh"}
+        assert {Path(r).name for r in upstream if r.endswith(".svh")} == {
+            "assign.svh", "typedef.svh", "assertions.svh", "registers.svh"}  # fmt: skip
 
 
 def test_the_corpus_uses_every_builtin_template() -> None:
@@ -391,7 +494,8 @@ def test_the_derived_files_say_the_prefix_and_in_house_files_do_not(
     trees: Trees,
 ) -> None:
     _, blank, pre = trees("p3/axi_shared_rr", None)
-    note = f'// Unit names carry the prefix "{PREFIX}_" (hdl-bag Project > Module prefix).'
+    note = (f'// Unit, macro and include-file names carry the prefix "{PREFIX}_"'
+            " (Project > Module prefix).")  # fmt: skip
     derived = [r for r in pre if r.startswith(f"{DERIVED}{PREFIX}_")]
     assert derived
     for rel in derived:
@@ -410,10 +514,10 @@ def test_upstream_files_say_what_the_rewrite_changed_on_their_first_line(
     assert noted
     assert all(r.endswith((".sv", ".v", ".svh")) for r in noted)
     assert any(r.startswith(PULP) for r in noted) and any(r.startswith(ZIPCPU) for r in noted)
-    assert any(r.endswith("/typedef.svh") for r in noted)
+    headers = {r for r in pre if r.endswith(".svh")}
+    assert len(headers) == 4 and headers <= noted
     for rel in pre:
-        if rel.startswith((INHOUSE, "formal/bag_")) or Path(rel).name in (
-            "assign.svh", "assertions.svh", "registers.svh"):  # fmt: skip
+        if rel.startswith((INHOUSE, "formal/bag_")):
             assert rel not in noted, rel
     assert not any(note.encode() in d or b"Modified by hdl-bag" in d for d in blank.values())
     # Derived files keep the stage-2 note and position.
@@ -456,8 +560,10 @@ def test_changing_the_prefix_leaves_no_file_of_the_old_name(tmp_path: Path) -> N
 
 
 def test_a_prefixed_design_is_byte_identical_across_hash_seeds(tmp_path: Path) -> None:
+    """A config with vendored files: the macro, guard and header rewrite iterates over sets the
+    hash seed could reorder, and an in-house-only config would not exercise any of it."""
     ir = tmp_path / "prefixed.ir.yaml"
-    src = REPO / "tests/configs/p2/ahb2apb_nested.ir.yaml"
+    src = REPO / "tests/configs/p3/axi_shared_rr.ir.yaml"
     ir.write_text(src.read_text().replace("module_prefix: null", f"module_prefix: {PREFIX}"))
     shutil_header = src.parent / "header.txt"
     (tmp_path / "header.txt").write_bytes(shutil_header.read_bytes())
@@ -636,3 +742,82 @@ def test_no_two_written_files_of_demo_ss_declare_the_same_unit(
     generate(_with_project(load(DEMO), module_prefix=prefix), tmp_path, DEMO.parent)
     names = _declarations(tmp_path)
     assert names and len(names) == len(set(names))
+
+
+# ---- Macros and include files (stage 4) -----------------------------------------------------
+
+ENV = {"ASSERTS_OFF", "ASSERTS_OVERRIDE_ON", "COMMON_CELLS_ASSERTS_OFF", "FPV_ON", "QUESTA",
+       "SYNTHESIS", "TARGET_GENUS", "UVM", "VCS", "VERILATOR", "XSIM"}  # fmt: skip
+BUILTIN_MACROS = {"__FILE__", "__LINE__", "uvm_error", "include", "define", "ifdef", "ifndef",
+                  "else", "elsif", "endif", "undef", "timescale", "default_nettype", "resetall",
+                  "begin_keywords", "end_keywords", "celldefine", "endcelldefine", "line",
+                  "pragma", "unconnected_drive", "nounconnected_drive"}  # fmt: skip
+_MACRO_USE = re.compile(r"(?<!`)`(?:(?:define|ifdef|ifndef|elsif|undef)[ \t]+)?(\w+)")
+
+
+def _rtl_texts(tree: dict[str, bytes]) -> dict[str, str]:
+    return {r: d.decode() for r, d in tree.items() if r.endswith(_RTL_SUFFIX)}
+
+
+@pytest.mark.parametrize(("config", "style"), CASES)
+def test_no_generated_source_defines_tests_or_uses_an_unprefixed_macro(
+    trees: Trees,
+    config: str,
+    style: str | None,
+) -> None:
+    """G. Every macro name in a prefixed tree is prefixed, except the environment's (tested,
+    never defined in the tree), which occur exactly as often as in the blank tree."""
+    assert len(MACROS) == 193 and not MACROS & ENV
+    _, blank, pre = trees(config, style)
+    names: set[str] = set()
+    for text in _rtl_texts(pre).values():
+        names |= set(_MACRO_USE.findall(_STRIP.sub("", text)))
+    # BAG_COVER_<port>, BAG_IDLE_<port>, BAG_READS_<port> and the like are made per design by
+    # formal_gen and defined by that design's own .sby; no packaged file defines them, so they are
+    # not among the 193 (asserted above) and they carry the project's own port names.
+    per_design = {n for n in names if n.startswith("BAG_")}
+    unprefixed = {n for n in names if not n.startswith(f"{PREFIX}_")}
+    unprefixed -= ENV | BUILTIN_MACROS | per_design
+    assert not unprefixed, sorted(unprefixed)
+    assert not names & MACROS
+    count = {n: 0 for n in ENV}
+    for tree in (blank, pre):
+        found = {n: sum(len(re.findall(rf"\b{n}\b", t)) for t in _rtl_texts(tree).values())
+                 for n in ENV}  # fmt: skip
+        if tree is blank:
+            count = found
+        else:
+            assert found == count
+    assert any(count.values()) or not any(r.startswith(PULP) for r in blank)
+
+
+@pytest.mark.parametrize(("config", "style"), CASES)
+def test_every_include_of_a_prefixed_tree_names_a_header_only_that_tree_has(
+    trees: Trees,
+    config: str,
+    style: str | None,
+) -> None:
+    """H. The coupling this stage removes: two projects on one include path no longer pick up
+    each other's headers, because no header path of a prefixed tree exists in a blank one."""
+    _, blank, pre = trees(config, style)
+    name = _spec_name(pre)
+    incdirs = [t.removeprefix("+incdir+") for t in pre[f"{name}.f"].decode().split()
+               if t.startswith("+incdir+")]  # fmt: skip
+    seen = 0
+    for rel, text in _rtl_texts(pre).items():
+        for inc in re.findall(r'`include[ \t]+"([^"\n]+)"', _STRIP_COMMENTS.sub("", text)):
+            if inc == "uvm_macros.svh":
+                continue
+            seen += 1
+            hits = [d for d in incdirs if posixpath.join(d, inc) in pre]
+            assert len(hits) == 1, (rel, inc, hits)
+            assert posixpath.join(hits[0], inc) not in blank
+    pre_headers = {r for r in pre if r.endswith(".svh")}
+    assert not pre_headers & set(blank)
+    if any(r.endswith(".svh") for r in blank):
+        assert pre_headers and seen
+
+
+def _spec_name(tree: dict[str, bytes]) -> str:
+    (name,) = {r.removesuffix(".f") for r in tree if r.endswith(".f") and "/" not in r}
+    return name

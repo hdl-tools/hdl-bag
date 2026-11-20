@@ -86,11 +86,22 @@ every \code{pkg::} scope and in the \code{endmodule} label. The files of those u
 same prefix, and the file list and the formal jobs follow. The top wrapper, the parameter
 package, the generated interfaces and the flat harness keep their names, and so do instance
 names, so hierarchical paths do not change. Comments and messages inside the files keep the
-old names. The headers keep their names too, so every include line still resolves. A file
-that BAG derives from PULP also gets a line after its SPDX line that says that its unit names
-carry the prefix. A vendored PULP or ZipCPU file whose text the rename changed gets a line
-above its upstream header: \code{Modified by hdl-bag: design unit names carry the prefix},
-and no other change is made to it; the licence files are copied as they are. The copy of the
+old names.
+
+The prefix also reaches every macro that a packaged file defines, in its definition, its
+\code{ifdef}, \code{ifndef}, \code{elsif} and \code{undef} tests and each use
+(\code{soc1_AXI_TYPEDEF_ALL}, \code{soc1_AXI_TYPEDEF_SVH_}, \code{soc1_SLAVE_ASSUME}). It
+reaches the file names of the four vendored headers
+(\file{rtl/vendor/pulp/axi/include/axi/soc1_typedef.svh}) and the \code{`include} lines that
+name them, so two subsystems on one include path cannot pick up each other's headers. The
+include directories, the \code{+incdir+} lines and the macros that only the environment
+defines (\code{VERILATOR}, \code{SYNTHESIS}, \code{UVM}) keep their names.
+
+A file that BAG derives from PULP also gets a line after its SPDX line that says that its
+unit, macro and include-file names carry the prefix. A vendored PULP or ZipCPU file whose text
+the rename changed gets a line above its upstream header: \code{Modified by hdl-bag: design
+unit, macro and include-file names carry the prefix}, and no other change is made to it; the
+licence files are copied as they are. The copy of the
 ZipCPU \file{SOURCE.md} gets one added line that says the same. \file{doc/port_map.md} keeps
 the sub-wrapper names of the Hierarchy sheet. A lint waiver of your
 own that matches a copied file by its base name stops matching once the files are renamed:

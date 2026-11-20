@@ -298,13 +298,15 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 \label{sec:limits-output}
 
 \begin{itemize}
-\item \textbf{The module prefix does not reach everything.} It does not yet apply to the
-  macros, the include guards or the header file names, so two subsystems that use the same
-  PULP macros can still clash. One design unit is also out of reach: \code{assert_rpt_pkg} in
-  the vendored \file{common_cells} assertion header, which is declared inside
-  \code{`ifdef UVM}. BAG never defines \code{UVM}, so BAG's own flows never elaborate it, but an
-  SoC whose verification environment does define it would see the package from each subsystem
-  under the one name.
+\item \textbf{The environment's macros are shared by design.} The module prefix reaches
+  every macro that a packaged file defines, but not the macros that only the environment
+  defines and the files merely test: \code{VERILATOR}, \code{SYNTHESIS}, \code{UVM},
+  \code{QUESTA}, \code{VCS}, \code{XSIM}, \code{TARGET_GENUS}, \code{FPV_ON},
+  \code{ASSERTS_OFF}, \code{ASSERTS_OVERRIDE_ON} and \code{COMMON_CELLS_ASSERTS_OFF}.
+  The vendored assertion header declares the package \code{assert_rpt_pkg} inside
+  \code{`ifdef UVM}, and it is renamed like every other unit, so an SoC with a UVM
+  environment sees one package per subsystem. No BAG flow defines \code{UVM}, so BAG's own
+  flows never elaborate the renamed package.
 \item \textbf{Sub-wrappers have flat ports.} A sub-wrapper from the \sheet{Hierarchy}
   sheet has flat ports, also when \setting{Port style} is \code{sv-interface}. It receives
   the conditioned reset of each domain, not the raw reset.

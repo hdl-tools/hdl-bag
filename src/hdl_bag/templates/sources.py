@@ -42,6 +42,20 @@ def vendored_units() -> dict[str, str]:
     return {u: f["path"] for f in _index()["files"] for u in f["defines"]}
 
 
+def vendored_includes() -> dict[str, str]:
+    """Each vendored header's include string (``axi/typedef.svh``) -> its package path.
+
+    The include string is the header's path below the include directory that holds it, which is
+    what an include line names and what that directory's ``+incdir+`` resolves.
+    """
+    index = _index()
+    out: dict[str, str] = {}
+    for h in index["headers"]:
+        directory = next(d for d in index["incdirs"] if h["path"].startswith(f"{d}/"))
+        out[h["path"].removeprefix(f"{directory}/")] = f"{VENDOR}/{h['path']}"
+    return out
+
+
 def resolve_sources(refs: list[str]) -> SourceSet:
     """Expand REFS (in-house paths and Bender references) into a SourceSet."""
     index = _index()

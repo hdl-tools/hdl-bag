@@ -230,10 +230,17 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
   packages---the in-house modules, the modules BAG derives from PULP, the vendored PULP
   modules, packages and interfaces, BAG's own formal property modules and the vendored
   ZipCPU protocol checkers---and to the sub-wrapper modules, and to the names of the files
-  that hold them (\file{rtl/inhouse/soc1_bag_sync.sv}). It does not apply to the macros, the
-  include guards or the header file names (section~\ref{sec:limits-output}). Blank is
-  legal. \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or
-  ends with an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
+  that hold them (\file{rtl/inhouse/soc1_bag_sync.sv}). It also applies to every macro that a
+  packaged file defines, the include guards among them (\code{soc1_AXI_TYPEDEF_ALL},
+  \code{soc1_AXI_TYPEDEF_SVH_}), and to the file names of the vendored headers
+  (\file{axi/soc1_typedef.svh}), whose include lines are rewritten to match. The integrator
+  knobs are macros too, so under a prefix a knob is set per subsystem
+  (\code{soc1_NO_SYNOPSYS_FF}, \code{soc1_ASSERT_RPT}, \code{soc1_TARGET_VSIM},
+  \code{soc1_INC_ASSERT}, \code{soc1_SLAVE_ASSUME}, \code{soc1_SLAVE_ASSERT}); the macros that
+  only the environment defines (\code{VERILATOR}, \code{SYNTHESIS}, \code{UVM} and the like)
+  are shared (section~\ref{sec:limits-output}). Blank is legal.
+  \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or ends with
+  an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
   sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the flat harness, the parameter
   package, an interface, a user module or a SystemVerilog keyword; the top wrapper, the
   parameter package and user modules are never renamed. \ruleid{PROJ-NAME-LENGTH} warns
