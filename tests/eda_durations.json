@@ -1063,5 +1063,5 @@
  "tests/gen/test_two_projects.py::test_two_prefixed_projects_elaborate_beside_an_unmodified_pulp_copy[verilator]": 40.0,
  "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[blank-verilator]": 40.0,
  "tests/gen/test_two_projects.py::test_the_joint_compile_fails_for_the_right_reason[headers-verilator]": 40.0,
- "tests/shrink/test_shrink_eda.py::test_a_decode_mutant_shrinks_to_the_one_route_that_shows_it": 60.0
+ "tests/shrink/test_shrink_eda.py::test_a_decode_mutant_shrinks_to_the_one_route_that_shows_it": 24.12
 }

@@ -68,8 +68,8 @@ def test_a_decode_mutant_shrinks_to_the_one_route_that_shows_it(
     assert "kept: drop fabric ahb and its ports" not in kept, result.output
 
     shrunk = ir.load(tmp_path / "ahb_fixed.shrunk.ir.yaml")
-    # The offline model's prediction. CI shows what the tools really keep: pin it from the
-    # run (cite its id here) and read why before changing any of these.
+    # Measured, not predicted: run 44774094594 kept exactly these, which is what an offline
+    # model of the tool had predicted. Read why before changing any of them.
     assert [m.name for m in shrunk.masters] == ["m2"]
     assert [s.name for s in shrunk.slaves] == ["s2"]
     assert [f.name for f in shrunk.fabrics] == ["ahb"]
