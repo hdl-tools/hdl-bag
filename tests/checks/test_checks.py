@@ -374,8 +374,6 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Project row 18: with Module prefix 'p', sub-wrapper bag_axi_mux and module BAG derives from PULP bag_axi_mux are both generated as p_bag_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
     ("PROJ-PREFIX-COLLISION-sub-wrapper-and-pulp", [("Project", 18, "Value", "p"), ("Hierarchy", 7, "Sub-wrapper", "axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "axi_mux")],
      ["Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
-    ("PROJ-PREFIX-COLLISION-prefixed-sub-wrapper-and-pulp", [("Project", 18, "Value", "axi"), ("Hierarchy", 7, "Sub-wrapper", "cut"), ("Hierarchy", 20, "Sub-wrapper", "cut")],
-     ["Project row 18: with Module prefix 'axi', sub-wrapper cut is generated as axi_cut, the name of a vendored PULP module; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
     ("HIER-RESERVED-NAME-formal", [("Hierarchy", 7, "Sub-wrapper", "faxil_slave"), ("Hierarchy", 20, "Sub-wrapper", "faxil_slave")],
      ["Hierarchy row 7: sub-wrapper faxil_slave has the name of a vendored ZipCPU module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
     ("HIER-EMPTY", [("Hierarchy", 9, "Sub-wrapper", "spare_wrapper"), ("Hierarchy", 9, "Parent", "demo_ss_bus_top")],
@@ -474,17 +472,12 @@ def test_a_repeated_sub_wrapper_name_is_not_a_prefix_collision_with_itself(
     assert any("NAME-UNIQUE" in m or "NAME-IDENT" in m for m in messages)
 
 
-def test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_stage_3_clash(
+def test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_prefixed_clash(
     tmp_path: Path,
 ) -> None:
-    """Deliberately stricter than stage 2's generator, and the one message says so.
-
-    Sub-wrapper axi_mux under prefix p is emitted as p_axi_mux while PULP's axi_mux still keeps
-    its name, so nothing clashes *yet*. Stage 3 of #106 prefixes the PULP units too and both
-    become p_axi_mux. No release is tagged inside that window (see the issue), so the check
-    describes the released behaviour rather than the transient one, and renaming the sub-wrapper
-    is right in both regimes. One message, not two: the `fixed` arm does not also fire, because
-    p_axi_mux is not a name anything keeps.
+    """Sub-wrapper axi_mux under prefix p is emitted as p_axi_mux, and so is PULP's axi_mux, now
+    that the prefix reaches the vendored units. One message, not two: the `fixed` arm does not
+    also fire, because p_axi_mux is not a name anything keeps.
     """
     edits: list[Edit] = [
         ("Project", 18, "Value", "p"),
@@ -495,6 +488,19 @@ def test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_stage_3_clash(
         "Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module "
         "axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"
     ]
+
+
+def test_a_sub_wrapper_that_equals_the_prefix_joined_to_a_pulp_unit_is_legal(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper cut under prefix axi is axi_cut, and PULP's axi_cut is axi_axi_cut: the
+    prefix reaches PULP's unit too, so nothing clashes and `bag check` stays silent."""
+    edits: list[Edit] = [
+        ("Project", 18, "Value", "axi"),
+        ("Hierarchy", 7, "Sub-wrapper", "cut"),
+        ("Hierarchy", 20, "Sub-wrapper", "cut"),
+    ]
+    assert _messages(tmp_path, edits) == []
 
 
 def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:
