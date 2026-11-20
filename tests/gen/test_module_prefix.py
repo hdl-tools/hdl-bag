@@ -428,6 +428,8 @@ def test_the_generated_source_note_says_the_names_carry_the_prefix_only_under_on
     assert pre[rel].startswith(packaged) and pre[rel] != packaged
     extra = pre[rel][len(packaged) :].decode()
     assert PREFIX in extra and "first line" in extra and extra.endswith("\n")
+    # Its own paragraph, or Markdown folds it into the preceding one.
+    assert extra.startswith("\n")
 
 
 def _regenerate_blank(tmp_path: Path, configs: Path, name: str) -> Path:

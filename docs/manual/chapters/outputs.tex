@@ -93,8 +93,10 @@ above its upstream header: \code{Modified by hdl-bag: design unit names carry th
 and no other change is made to it; the licence files are copied as they are. The copy of the
 ZipCPU \file{SOURCE.md} gets one added line that says the same. \file{doc/port_map.md} keeps
 the sub-wrapper names of the Hierarchy sheet. A lint waiver of your
-own that matches an in-house file by its base name, such as \code{rtl/inhouse/bag_*.sv},
-stops matching once the files are renamed; write it as \code{rtl/inhouse/*bag_*.sv}.
+own that matches a copied file by its base name stops matching once the files are renamed:
+\code{rtl/inhouse/bag_*.sv}, \code{rtl/vendor/pulp/**/axi_*.sv} and \code{formal/bag_*.sv} all
+do. Put a wildcard in front of the base name, as in \code{rtl/inhouse/*bag_*.sv}. The waivers
+that ship with BAG match \file{rtl/pkg/}, which never takes the prefix, so they are unaffected.
 
 \lstinputlisting[style=console]{examples/console/out-prefix.txt}
 

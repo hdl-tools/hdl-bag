@@ -29,6 +29,13 @@ _UPSTREAM = (f"{VENDOR}/", "formal/vendor/zipcpu/")
 
 # One alternative per kind of token that must not be renamed, then the identifier itself, so a
 # unit name is replaced only where it is a whole identifier outside a comment or string.
+#
+# Two known limits, neither reachable in the trees BAG vendors today (a test asserts the vendored
+# headers declare nothing but the UVM-only assert_rpt_pkg):
+#   `\w+ skips a macro *reference*, not the name in a `define, `ifdef or `undef, so a macro named
+#   like a unit would be defined renamed and used unrenamed. Macros are stage 4 of #106.
+#   \\\S+ skips an escaped identifier, but IEEE 1800-2017 5.6.1 says \axi_cut<space> *is* axi_cut,
+#   so a reference written that way is missed. Skipping is the safer of the two wrong answers.
 _TOKEN = re.compile(
     r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|`\w+|\\\S+|\$\w+"
     r"|'[sS]?[bBoOdDhH][0-9a-fA-F_xXzZ?]+|[A-Za-z_][A-Za-z0-9_$]*",
@@ -101,12 +108,16 @@ def note(rel: str, text: str, prefix: str | None, changed: bool = True) -> str:
 
 def source_note(text: str, prefix: str | None) -> str:
     """The ZipCPU SOURCE.md as written: it says "unmodified", so under a prefix one line says
-    what changed. Blank prefix: verbatim."""
+    what changed. Blank prefix: verbatim.
+
+    The blank line keeps it a paragraph of its own: Markdown joins consecutive lines, so without
+    it the sentence would render inside the "never edit these files by hand" paragraph.
+    """
     if not prefix:
         return text
     line = (f'In this output the module names and file names carry the prefix "{prefix}_" '
             "(hdl-bag Project > Module prefix), as each file's first line states.")  # fmt: skip
-    return f"{text}{line}\n"
+    return f"{text}\n{line}\n"
 
 
 def transform(rel: str, text: str, prefix: str | None) -> str:

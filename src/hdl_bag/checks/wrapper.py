@@ -424,7 +424,13 @@ def _prefixed_units(ctx: Context) -> list[tuple[str, str]]:
 def _fixed_units(ctx: Context, prefixed: set[str]) -> dict[str, str]:
     """Units that keep their name under a prefix: name -> what it is. Every unit BAG packages
     takes the prefix, so these are the generated top wrapper, parameter package, flat harness and
-    interfaces, the default stub of an opaque fabric, and a user's External modules."""
+    interfaces, the default stub of an opaque fabric, and a user's External modules.
+
+    Not every name that keeps it: the generated formal units (``bag_<project>_decode`` and the
+    rest, formal_gen) also do, and are not here, so a clash with one of them is not reported.
+    Issue #152 has the case and the fix; it is reachable without a prefix, so it is not this
+    check's to fix.
+    """
     s = ctx.raw.wrapper
     top = ctx.text(s["Top module name"]) if "Top module name" in s else None
     package = ctx.text(s["Parameter package"]) if "Parameter package" in s else None

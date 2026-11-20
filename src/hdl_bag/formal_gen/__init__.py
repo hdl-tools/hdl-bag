@@ -8,9 +8,10 @@ Output layout (relative to the output directory)::
     formal/<project>_reset.sby    its SymbiYosys job: a prove task and a cover task
     formal/<project>_protocol.sv  port-protocol checkers, bound into the lint top (D60)
     formal/<project>_protocol.sby its job: a bmc task (bitwuzla, D67) and a cover task
-    formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
-    formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
-    formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
+    formal/<prefix>_bag_faxi4.sv  BAG's AXI4 checker, where there is an AXI4 port (D64)
+    formal/<prefix>_bag_fahb.sv   BAG's AHB-Lite checker, where there is an AHB-Lite port
+    formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE and
+                                  SOURCE.md; their units take the prefix too
     formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
                                   a reference from the IR (D69; formal_gen.decode)
     formal/<project>_decode.sby   its job: a prove task (the check is combinational)
@@ -25,7 +26,7 @@ wrapper. Its inputs are free; the property module assumes what the environment m
 Clocks are free too (multiclock), so any clock ratio and phase is covered; a protocol job
 of a design in one clock domain runs on one clock, each solver step an edge. Registers that
 must see every solver step, whatever the clocks do, are instances of ``bag_step_ff0/1``
-(``formal/bag_step.v``, registered on ``$global_clock`` and read by Yosys's own frontend):
+(``formal/<prefix>_bag_step.v``, registered on ``$global_clock``, read by Yosys's own frontend):
 yosys-slang has no global clock, and a register on a net marked ``(* gclk *)`` is clocked by
 an ordinary free net there.
 
@@ -126,7 +127,8 @@ DECODE_DEPTH = 1
 PROTOCOL_ENGINE = "bmc: smtbmc bitwuzla\ncover: smtbmc yices"
 
 # The solver-step registers (formal/bag_step.v), copied next to the jobs; BAG's own AXI4 and
-# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv).
+# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv). Package names: what a job writes
+# is the prefixed unit (gen.prefix.unit) and the prefixed basename (gen.prefix.out_path).
 STEP = "bag_step.v"
 FAXI4 = "bag_faxi4.sv"
 FAHB = "bag_fahb.sv"

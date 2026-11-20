@@ -121,4 +121,5 @@ def test_the_source_note_is_one_appended_line_and_only_under_a_prefix() -> None:
     text = "Files ... unmodified.\n"
     assert source_note(text, None) is text
     out = source_note(text, "p")
-    assert out.startswith(text) and out.count("\n") == 2 and '"p_"' in out
+    # A blank line between: Markdown would otherwise fold the sentence into the last paragraph.
+    assert out.startswith(f"{text}\n") and out.count("\n") == 3 and '"p_"' in out
