@@ -499,8 +499,11 @@ def test_a_prefixed_ahb_design_simulates_its_routes() -> None:
 
 
 @pytest.mark.eda
-def test_a_prefixed_ahb_design_passes_formal() -> None:
-    configs, name = _split("p2/ahb_fixed")
+@pytest.mark.parametrize("config", ["p2/ahb_fixed", "p3/mixed_apb_masters"])
+def test_a_prefixed_design_passes_formal(config: str) -> None:
+    """mixed_apb_masters adds Yosys's own Verilog frontend, `copy` of the renamed ZipCPU modules
+    and a route job, none of which ahb_fixed reaches."""
+    configs, name = _split(config)
     root = REPO / "out" / "prefix" / f"{name}_formal"
     out = generate(_with_prefix(load(configs / f"{name}.ir.yaml")), root, configs)
     report = run_formal(out)
