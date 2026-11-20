@@ -4,7 +4,8 @@
 
 Keyed on the cell alone, whichever accessor touched a cell first decided what every later
 accessor saw: ``text`` caches the raw string, and ``name`` then handed it back without
-reporting ``NAME-IDENT``. A cell still carries at most one finding per parser.
+reporting ``NAME-IDENT``. A cell still carries at most one finding: the parser that refuses it
+reports, and from then on every parser reads it as None.
 """
 
 from collections.abc import Callable
@@ -61,11 +62,24 @@ def test_a_strict_parser_refuses_what_text_accepted(ctx: Context) -> None:
     )
     for cell, read in reads:
         assert ctx.text(cell) is not None
-        assert read(cell) is None, f"{cell.value!r} was accepted after text() cached it"
+        assert read(cell) is None, f"{cell.value!r} read as a value after text() cached it"
     assert [f.rule for f in ctx.findings] == [
         "NAME-IDENT",
         *["VALUE-ILLEGAL"] * 4,
     ]
+
+
+def test_a_refused_cell_reads_as_none_for_every_parser_from_then_on(ctx: Context) -> None:
+    """D23: one mistake, one message. Once a parser has refused a cell, a parser that would
+    have accepted it reads None too, so no second rule fires on the same mistake. A parser
+    that read the cell before the refusal keeps the value it got, as on a shared cache."""
+    cell = _cell("Foo-bar")
+    assert ctx.text(cell) == "Foo-bar"
+    assert ctx.name(cell) is None
+    assert ctx.text(cell) is None
+    assert ctx.name(cell, lowercase=False) is None
+    assert ctx.enum(cell, ("Foo-bar",)) is None
+    assert [f.rule for f in ctx.findings] == ["NAME-IDENT"]
 
 
 def test_the_two_name_dialects_do_not_decide_for_each_other(ctx: Context) -> None:

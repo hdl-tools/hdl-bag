@@ -68,9 +68,10 @@ class Context:
 
         Two rules, and the second is why this is not one cache entry per cell:
 
-        A cell any parser refused reads as None for every parser, and only the one that refused
-        it reports. That is D23: one mistake, one message, and every check that depends on the
-        value skips.
+        A cell any parser refused reads as None for every parser from then on, and only the
+        one that refused it reports. That is D23: one mistake, one message, and every later
+        check that depends on the value skips. A parser that read the cell before the refusal
+        already has its value, which is how it was on a shared cache entry too.
 
         A cell nothing has refused is parsed by KIND itself -- the parser's name and the
         arguments that change what it accepts. Keyed on the cell alone, whichever parser ran
