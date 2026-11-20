@@ -7,7 +7,7 @@ which values are legal, and what the value means. Where a check compares rows wi
 other, the text names the rule ID of that check. Chapter~\ref{ch:checks} explains how a
 finding reads and lists every rule.
 
-The workbook described here is schema 0.6.
+The workbook described here is schema 0.7.
 
 % Column tables of this chapter: column (or setting), required, values, meaning.
 \newenvironment{wbtable}[1]{%
@@ -191,7 +191,7 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
 \setting{Project name} & Yes & lowercase name, e.g.\ \code{demo_ss} &
   The name of the subsystem. It starts the names of several generated files, such as
   \file{<project>.f} and \file{sw/<project>_memmap.h}.\\
-\setting{Spec schema version} & Yes & \code{0.6} &
+\setting{Spec schema version} & Yes & \code{0.7} &
   The schema of the workbook. The template fills it in.\\
 \setting{Spec revision} & No & any text, e.g.\ \code{r4} &
   Printed in the header of every generated file and in the memory-map document.\\
@@ -218,9 +218,21 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
   The tools \cmd{bag lint} runs. Name each tool once.\\
 \setting{Simulator} & Yes & \code{verilator} &
   The simulator of \cmd{bag sim}. It is the only legal value.\\
+\setting{Module prefix} & No & lowercase name, e.g.\ \code{demo_ss}, without a trailing
+  underscore &
+  Meant to go, with an underscore, in front of the BAG and PULP module, package and macro
+  names and their file names, so that two BAG subsystems or another copy of PULP can be
+  compiled together. \emph{This version does not apply it to anything yet}: it only reads
+  and checks the value, and the generated files are the same with or without it. Blank is
+  legal. \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or
+  ends with an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
+  sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the parameter
+  package, an interface, a user module or a SystemVerilog keyword; the top wrapper, the
+  parameter package and user modules are never renamed. \ruleid{PROJ-NAME-LENGTH} warns
+  when a prefixed name would be longer than 64 characters.\\
 \end{wbtable}
 
-If \setting{Spec schema version} is not \code{0.6}, \cmd{bag check} reports
+If \setting{Spec schema version} is not \code{0.7}, \cmd{bag check} reports
 \ruleid{PROJ-SCHEMA-VERSION} and checks nothing else: a workbook of another schema has
 other columns. Make a new template with \cmd{bag template} and copy your rows into it.
 

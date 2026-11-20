@@ -63,6 +63,7 @@ def resolve(result: CheckResult) -> ir.Spec:
 
     project = ir.Project(
         name=_req(_s(ctx, p["Project name"])),
+        module_prefix=_s(ctx, p["Module prefix"]),
         revision=_s(ctx, p["Spec revision"]),
         author=_s(ctx, p["Author"]),
         sv_std=_req(_s(ctx, p["SystemVerilog standard"])),

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: ahb_single
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -289,4 +290,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb_single.xlsx
-  sha256: 3061a93f6ec827bdbe6bc1f365a0a19d988be34411642ab279d92f2fa6c36f70
+  sha256: 2bcbb8521c23a42e1d60a246b2984b3ea040d2c85b3378d151d44272fb00ec05

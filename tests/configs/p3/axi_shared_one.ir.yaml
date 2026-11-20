@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: axi_shared_one
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -156,4 +157,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_shared_one.xlsx
-  sha256: 482e9655a242a533e86925d954ba923953dc9dae2869a10cc4a2a184533515ff
+  sha256: 7cbc517b19d9f3e2ebb26c116da19b57b08f3ec5c61c928d32f7847daef9b6e1

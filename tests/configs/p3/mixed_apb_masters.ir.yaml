@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_apb_masters
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -404,4 +405,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_apb_masters.xlsx
-  sha256: b571322313e0ff26e11cc7629d9d5b57145b9da93d258447acdb26a36858dc49
+  sha256: 241916e4d74b4fe1903f9ee90feb69b9a1da34d1fd12e40a068a304be7da0ef8

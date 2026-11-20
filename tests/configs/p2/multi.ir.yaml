@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: multi
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -588,4 +589,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: multi.xlsx
-  sha256: 23a0e98bf2039aaa5ec2b35ac2942fa60df2a0c86a830af27720ee0b6f537824
+  sha256: b43d87f6ffefc25d688b69e3cd57e7e3285109754db12141d7171821b8afd132

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: axil_shared_fixed
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -255,4 +256,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_shared_fixed.xlsx
-  sha256: 027521ea4a4859013d432208a66e627428e04b4d5da1e27e7261dc5587462418
+  sha256: 649a4cb14e7991e1795934f5157ab6b9c9bf3b21aa4fd6f6c50147f19b1585b7

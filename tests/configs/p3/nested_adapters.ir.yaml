@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: nested_adapters
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -425,4 +426,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: nested_adapters.xlsx
-  sha256: 57f6cbe116d8ad7c1927e5289784ff2c23b65440f637f6f58d99bcad342d1bfa
+  sha256: 2a81acb9637b258cfb5c4ac5c01b86f40613749c84bbd59722982eb989a9bb0a

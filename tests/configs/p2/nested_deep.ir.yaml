@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: nested_deep
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -455,4 +456,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: nested_deep.xlsx
-  sha256: 28e200a5afde43d96f50c21c84c760c7fca14dcd6ce6d74b4be62dc602c77082
+  sha256: 74ee2143e4c3cde5ae3f5ba53c5813432786fcbb6484347023aea44e78da198a

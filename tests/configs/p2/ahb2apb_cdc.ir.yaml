@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: ahb2apb_cdc
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -328,4 +329,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: ahb2apb_cdc.xlsx
-  sha256: c4511eec4efbff5341e15b6ea348a41af1b98e97822ff243416e55a37a37c54e
+  sha256: 43ffee209ca6b44d0109ff9557978dcb2d113ef74e33a4128cba96c3557aa2e5

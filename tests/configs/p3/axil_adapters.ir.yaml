@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: axil_adapters
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -397,4 +398,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_adapters.xlsx
-  sha256: 3a490abdeb5e0685170405c49c975553db3adaf87adaf08deb7e1805fd086804
+  sha256: 1f07dc174e620953c0fd7e3bcadd8b6e501cb5020d6067c29fac46d5a25c183f

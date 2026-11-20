@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_adapters_bridges
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -566,4 +567,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_adapters_bridges.xlsx
-  sha256: 656b44bb4b944923a9ba18a3f8122a567944489405df1ac1e0d7e10aba6d20b4
+  sha256: dd58839c27c71fe5413410d3f640f1a6fcd20ab88aceca8b6e0b07eacd6d04ce

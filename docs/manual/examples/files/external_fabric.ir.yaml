@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: external_fabric
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017

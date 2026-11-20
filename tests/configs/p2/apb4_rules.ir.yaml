@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: apb4_rules
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -289,4 +290,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb4_rules.xlsx
-  sha256: 131555e92aab537ab8eb192284bed319a2fb9441871a361b31292b1896e7099f
+  sha256: a75ecb42c2db6edb611ed04872adb0df33bf1ea72dcaecf0dd652ca9d2126d54

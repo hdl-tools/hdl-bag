@@ -75,7 +75,7 @@ OUTLINE (chapter files in this order; content may not be less)
  3  first: the demo_ss sample start to finish: template, check (its two warnings and why),
     ir, generate, the output tree; lint, sim and formal on a small design (EDA transcripts).
  4  workbook: every sheet, column and setting, with legal values and what each means
-    (the public version of the spec guide at schema 0.6).
+    (the public version of the spec guide at schema 0.7).
  5  checks: how a finding reads (sheet, row, rule ID), errors and warnings, and the
     generated table of every rule.
  6  ir: the YAML IR as the contract; schema version; a workbook and an IR as inputs; an
