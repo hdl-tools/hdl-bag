@@ -22,8 +22,8 @@ _DECL = re.compile(
 UnitKind = Literal["module", "interface", "package"]
 UnitOrigin = Literal["pulp", "inhouse", "derived", "formal", "zipcpu"]
 
-# origin -> (package directory, noun phrase around the kind). Each noun reads after "a"/"an".
-_ORIGINS: Final = (
+# (origin, package directory) of each source scanned on disk; the PULP tree comes from the index.
+_ORIGINS: Final[tuple[tuple[UnitOrigin, str], ...]] = (
     ("inhouse", "rtl/inhouse"),
     ("derived", "rtl/vendor/derived"),
     ("formal", "formal"),
@@ -88,7 +88,7 @@ def emitted_units() -> Mapping[str, Unit]:
         for f in sorted(directory.iterdir(), key=lambda t: t.name):
             if f.name.endswith((".sv", ".v")):
                 for kind, name in _declared(f.read_text(encoding="utf-8")):
-                    out[name] = Unit(name, f"{sub}/{f.name}", kind, origin)  # type: ignore[arg-type]
+                    out[name] = Unit(name, f"{sub}/{f.name}", kind, origin)
     return MappingProxyType(dict(sorted(out.items())))
 
 

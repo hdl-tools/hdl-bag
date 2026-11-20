@@ -66,6 +66,26 @@ def test_emitted_units_cover_every_source_on_disk() -> None:
     assert by_path["formal/bag_step.v"] == {"bag_step_ff0", "bag_step_ff1"}
 
 
+def test_no_two_sources_claim_the_same_unit_name() -> None:
+    """emitted_units() is one dict over five sources, so a shared name would overwrite silently:
+    the name stays reserved and the checks keep working, but #106's renamer would rewrite one
+    declaration of the two and emit RTL that does not elaborate."""
+    index = json.loads((_PKG / VENDOR / "index.json").read_text(encoding="utf-8"))
+    claims: dict[str, list[str]] = {}
+    for f in index["files"]:
+        for u in f["defines"]:
+            claims.setdefault(u, []).append(f"{VENDOR}/{f['path']}")
+    for sub in _SOURCE_DIRS:
+        for f in (_PKG / sub).iterdir():
+            if f.name.endswith((".sv", ".v")):
+                text = (_PKG / sub / f.name).read_text(encoding="utf-8")
+                for _, name in _DECL.findall(text):
+                    claims.setdefault(name, []).append(f"{sub}/{f.name}")
+    twice = {u: paths for u, paths in claims.items() if len(paths) > 1}
+    assert not twice, twice
+    assert set(claims) == set(emitted_units())
+
+
 def test_every_emitted_unit_is_declared_in_its_own_file_with_its_kind() -> None:
     """kinds come from the declaration regex, whose miss would silently fall back to module."""
     for name, u in emitted_units().items():
