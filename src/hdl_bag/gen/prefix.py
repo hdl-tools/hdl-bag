@@ -17,9 +17,7 @@ from types import MappingProxyType
 
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import emitted_units, unit_name
-
-_APPLIED = frozenset({"inhouse", "derived"})
+from hdl_bag.naming import PREFIXED_ORIGINS, Unit, emitted_units, unit_name
 
 # One alternative per kind of token that must not be renamed, then the identifier itself, so a
 # unit name is replaced only where it is a whole identifier outside a comment or string.
@@ -31,33 +29,35 @@ _TOKEN = re.compile(
 
 
 @cache
+def _applied() -> tuple[Unit, ...]:
+    """The units the prefix is applied to."""
+    return tuple(u for u in emitted_units().values() if u.origin in PREFIXED_ORIGINS)
+
+
+@cache
+def _applied_files() -> frozenset[str]:
+    return frozenset(u.path for u in _applied())
+
+
+@cache
 def renames(prefix: str | None) -> Mapping[str, str]:
     """Old unit name -> new, for the in-house and derived units; empty for a blank prefix."""
     if not prefix:
         return MappingProxyType({})
-    return MappingProxyType(
-        {n: unit_name(prefix, n) for n, u in emitted_units().items() if u.origin in _APPLIED}
-    )
+    return MappingProxyType({u.name: unit_name(prefix, u.name) for u in _applied()})
 
 
-def rewrite(text: str, renames: Mapping[str, str]) -> str:
-    """TEXT with every whole identifier in RENAMES replaced; comments and strings are kept."""
-    if not renames:
+def rewrite(text: str, mapping: Mapping[str, str]) -> str:
+    """TEXT with every whole identifier in MAPPING replaced; comments and strings are kept."""
+    if not mapping:
         return text
-    return _TOKEN.sub(lambda m: renames.get(m[0], m[0]), text)
-
-
-@cache
-def _files(prefix: str | None) -> frozenset[str]:
-    if not prefix:
-        return frozenset()
-    return frozenset(u.path for u in emitted_units().values() if u.origin in _APPLIED)
+    return _TOKEN.sub(lambda m: mapping.get(m[0], m[0]), text)
 
 
 def out_path(rel: str, prefix: str | None) -> str:
     """Where package file REL is written: its basename carries the prefix if it holds a unit
     that does. File names are never derived from module names (one file may hold several)."""
-    if rel not in _files(prefix):
+    if not prefix or rel not in _applied_files():
         return rel
     head, _, base = rel.rpartition("/")
     return f"{head}/{unit_name(prefix, base)}"
@@ -66,8 +66,8 @@ def out_path(rel: str, prefix: str | None) -> str:
 def unit(spec: Spec, name: str) -> str:
     """The generated name of the in-house or derived unit NAME; a typo fails here."""
     prefix = spec.project.module_prefix
-    if name not in (applied := {n for n, u in emitted_units().items() if u.origin in _APPLIED}):
-        raise GenerateError(f"{name} is not an in-house or derived unit ({len(applied)} known)")
+    if name not in {u.name for u in _applied()}:
+        raise GenerateError(f"{name} is not an in-house or derived unit")
     return unit_name(prefix, name)
 
 

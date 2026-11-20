@@ -86,7 +86,9 @@ package, the interfaces and the flat harness keep their names, and so do instanc
 hierarchical paths do not change. Comments and messages inside the files keep the old
 names. A file that BAG derives from PULP also gets a line after its SPDX line that says
 that its unit names carry the prefix. \file{doc/port_map.md} keeps the sub-wrapper names
-of the Hierarchy sheet. The vendored PULP files are not renamed yet.
+of the Hierarchy sheet. The vendored PULP files are not renamed yet. A lint waiver of your
+own that matches an in-house file by its base name, such as \code{rtl/inhouse/bag_*.sv},
+stops matching once the files are renamed; write it as \code{rtl/inhouse/*bag_*.sv}.
 
 \lstinputlisting[style=console]{examples/console/out-prefix.txt}
 

@@ -21,7 +21,8 @@ from hdl_bag.flows import compile_design, lint
 from hdl_bag.flows.formal import run_formal
 from hdl_bag.flows.sim import run_tests
 from hdl_bag.gen import MANIFEST, generate, include_dirs, sources
-from hdl_bag.ir import Spec, load
+from hdl_bag.gen.render import GenerateError
+from hdl_bag.ir import Spec, load, loads
 from hdl_bag.templates import builtin_registry
 
 PREFIX = "zz9"
@@ -324,3 +325,49 @@ def test_a_prefixed_ahb_design_passes_formal() -> None:
     out = generate(_with_prefix(load(configs / f"{name}.ir.yaml")), root, configs)
     report = run_formal(out)
     assert report.ok, report.format()
+
+
+# ---- A prefixed sub-wrapper name never equals a unit the prefix does not reach ------------
+
+NESTED = REPO / "tests/configs/p3/nested_adapters.ir.yaml"
+
+
+def _renamed_sub_wrapper(new: str, prefix: str) -> Spec:
+    text = re.sub(r"\bss_a\b", new, NESTED.read_text(encoding="utf-8"))
+    spec = loads(text)
+    project = spec.project.model_copy(update={"module_prefix": prefix})
+    return spec.model_copy(update={"project": project})
+
+
+def _declarations(root: Path) -> list[str]:
+    return [
+        name
+        for p in sorted(root.rglob("*.sv"))
+        for name in _declared(_STRIP.sub("", p.read_text(encoding="utf-8")))
+    ]
+
+
+def test_a_prefixed_sub_wrapper_cannot_take_the_name_of_an_unprefixed_unit(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper cut under prefix axi is axi_cut, PULP's axi_cut, which the prefix does not
+    reach: the generator must refuse, not write two modules of one name."""
+    spec = _renamed_sub_wrapper("cut", "axi")
+    try:
+        generate(spec, tmp_path, NESTED.parent)
+    except GenerateError as exc:
+        assert "axi_cut" in str(exc)
+        return
+    names = _declarations(tmp_path)
+    assert sorted(n for n in set(names) if names.count(n) > 1) == []
+    raise AssertionError("generate() succeeded; expected a refusal naming axi_cut")
+
+
+def test_a_sub_wrapper_named_like_an_unprefixed_unit_is_legal_under_a_prefix(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper axi_cut under prefix p is p_axi_cut next to PULP's axi_cut: distinct."""
+    generate(_renamed_sub_wrapper("axi_cut", "p"), tmp_path, NESTED.parent)
+    names = _declarations(tmp_path)
+    assert {"p_axi_cut", "axi_cut"} <= set(names)
+    assert len(names) == len(set(names))
