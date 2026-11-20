@@ -6,10 +6,12 @@ Output layout (relative to the output directory)::
 
     rtl/pkg/<package>.sv       parameter package
     rtl/<top>.sv               wrapper (flat or sv-interface ports)
-    rtl/<sub-wrapper>.sv       one per Hierarchy sub-wrapper (flat boundary ports)
+    rtl/<prefix>_<sub-wrapper>.sv  one per Hierarchy sub-wrapper (flat boundary ports)
     rtl/<top>_flat.sv          sv-interface style only: flat harness, the lint/compile top
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
-    rtl/inhouse/*.sv           copies of the in-house IP the design uses
+    rtl/inhouse/<prefix>_*.sv  copies of the in-house IP the design uses, with their modules
+                               renamed
+    rtl/vendor/derived/<prefix>_*.sv  the modules BAG derives from PULP, likewise
     rtl/vendor/pulp/...        copies of the vendored PULP files the design uses
     rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
@@ -25,6 +27,10 @@ Output layout (relative to the output directory)::
     formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (D60)
     formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE
     bag_outputs.json           every file written (with sha256), the top and the file list
+
+With a blank Project > Module prefix the ``<prefix>_`` parts are absent and the copies are
+byte for byte the packaged files. The top wrapper, the package, the flat harness, the
+interfaces and the vendored PULP files keep their names (``gen.prefix``).
 """
 
 import hashlib
@@ -44,6 +50,7 @@ from hdl_bag.gen.collateral import (
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
+from hdl_bag.gen.prefix import out_path, transform
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import TieOff, render_harness, render_interface, render_modules
 from hdl_bag.ir import dumps
@@ -131,10 +138,12 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         assert manifest is not None
         refs += [s for s in manifest.sources if s not in refs]
     src = resolve_sources(refs)
-    srcs = list(src.files)
+    prefix = spec.project.module_prefix
+    srcs = [out_path(rel, prefix) for rel in src.files]  # compile order is kept
     pkg_root = files("hdl_bag")
-    for rel in sorted([*srcs, *src.headers]):
-        _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+    for rel in sorted([*src.files, *src.headers]):
+        text = transform(rel, (pkg_root / rel).read_text(encoding="utf-8"), prefix)
+        _write(outdir, out_path(rel, prefix), text, written)
     # The licence of each vendored package travels with its files (not in the file list).
     vendored = {rel.split("/")[3] for rel in [*srcs, *src.headers] if rel.startswith(f"{VENDOR}/")}
     for name in sorted(vendored):

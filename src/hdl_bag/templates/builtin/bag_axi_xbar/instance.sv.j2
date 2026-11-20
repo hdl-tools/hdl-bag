@@ -7,7 +7,7 @@
 {% set uw = [1] + (ms + ss) | map(attribute='user_width') | list %}
 {% set uw = uw | max %}
   // {{ fabric.name }}: AXI4 crossbar, {{ fabric.arbitration }}
-  bag_axi_xbar #(
+  {{ unit("bag_axi_xbar") }} #(
       .AddrWidth    ({{ fabric.addr_width }}),
       .DataWidth    ({{ t }}DataWidth),
       .IdWidthMst   ({{ t }}IdWidthMst),

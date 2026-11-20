@@ -51,10 +51,11 @@ Everything under \file{rtl/} is SystemVerilog (IEEE 1800-2017).
   \setting{Top module name}. It is the module that your SoC instantiates. It has its
   clock and reset ports (Wrapper > \setting{Clock/reset ports}), and one set of bus
   signals per master and slave port, named by Wrapper > \setting{Signal naming pattern}.
-  Inside, it conditions the resets that need it (\code{bag_rst_sync}, see
+  Inside, it conditions the resets that need it (an in-house \code{bag_rst_sync} module, see
   \file{doc/reset.md}) and instantiates the fabrics, bridges and adapters.
 \item[\file{rtl/<sub-wrapper>.sv}] One module for each sub-wrapper of the Hierarchy
-  sheet. A sub-wrapper groups some instances inside the top. Its ports are always flat,
+  sheet. With a \setting{Module prefix} the module and the file are \code{<prefix>_<name>}
+  (section~\ref{sec:prefix}). A sub-wrapper groups some instances inside the top. Its ports are always flat,
   one port per signal, whatever the port style.
 \item[\file{rtl/inhouse/}] Copies of the in-house RTL that the design uses: the modules
   written for BAG, such as the AHB-Lite and APB fabrics, the bridges between protocol
@@ -70,9 +71,26 @@ Everything under \file{rtl/} is SystemVerilog (IEEE 1800-2017).
   (section~\ref{sec:external}).
 \end{description}
 
-BAG copies the in-house and vendored files as they are. It does not add its file header
-to them (section~\ref{sec:header}). The lint step treats every file under
+With a blank \setting{Module prefix}, BAG copies the in-house and vendored files as they
+are. It does not add its file header to them (section~\ref{sec:header}). The lint step treats every file under
 \file{rtl/vendor/} as third-party code (section~\ref{sec:lint}).
+
+\subsection{The module prefix}
+\label{sec:prefix}
+
+With a \setting{Module prefix}, for example \code{soc1}, BAG renames the in-house modules,
+the modules it derives from PULP, and the sub-wrappers to \code{soc1_<name>}, in the
+declaration, in every instantiation and in the \code{endmodule} label. The files of those
+modules get the same prefix, and the file list follows. The top wrapper, the parameter
+package, the interfaces and the flat harness keep their names, and so do instance names, so
+hierarchical paths do not change. Comments and messages inside the files keep the old
+names. A file that BAG derives from PULP also gets a line after its SPDX line that says
+that its unit names carry the prefix. \file{doc/port_map.md} keeps the sub-wrapper names
+of the Hierarchy sheet. The vendored PULP files are not renamed yet. A lint waiver of your
+own that matches an in-house file by its base name, such as \code{rtl/inhouse/bag_*.sv},
+stops matching once the files are renamed; write it as \code{rtl/inhouse/*bag_*.sv}.
+
+\lstinputlisting[style=console]{examples/console/out-prefix.txt}
 
 \subsection{The two port styles}
 

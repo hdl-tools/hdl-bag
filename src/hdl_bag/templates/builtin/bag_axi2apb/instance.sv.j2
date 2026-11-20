@@ -15,7 +15,7 @@
 
 {% if up.protocol == "AXI4" or dn.data_width == 8 %}
   // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
-  bag_axi2apb #(
+  {{ unit("bag_axi2apb") }} #(
       .UpAddrWidth  ({{ up.addr_width }}),
       .DownAddrWidth({{ dn.addr_width }}),
       .UpDataWidth  ({{ up.data_width }}),
@@ -88,7 +88,7 @@
   );
 {% else %}
   // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
-  bag_axil2apb #(
+  {{ unit("bag_axil2apb") }} #(
       .UpAddrWidth  ({{ up.addr_width }}),
       .DownAddrWidth({{ dn.addr_width }}),
       .UpDataWidth  ({{ up.data_width }}),

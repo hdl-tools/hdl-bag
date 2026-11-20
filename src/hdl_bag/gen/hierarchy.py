@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import emitted_units, label, subwrapper_signal_name
+from hdl_bag.naming import emitted_name, emitted_units, label, subwrapper_signal_name, unit_name
 from hdl_bag.protocols import PROTO_TOKEN, towards_slave
 
 
@@ -169,9 +169,10 @@ def collisions(netlist: Netlist, p: Plan) -> list[tuple[str, str, list[str]]]:
 
 
 def reserved_units(netlist: Netlist) -> dict[str, str]:
-    """Design units the generator writes besides the wrappers: name -> what it is."""
+    """Design units the generator writes besides the wrappers: name as written -> what it is."""
     spec = netlist.spec
-    units = {name: label(unit) for name, unit in emitted_units().items()}
+    prefix = spec.project.module_prefix
+    units = {emitted_name(prefix, u): label(u) for u in emitted_units().values()}
     units |= {f"{spec.project.name}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
     units[f"{spec.hierarchy.top}_flat"] = "the generated flat harness"
     units[spec.wrapper.package] = "the parameter package"
@@ -217,14 +218,10 @@ def problems(netlist: Netlist, p: Plan) -> list[Problem]:
                 out.append(Problem("HIER-RTL-NAME", w, what))
     units = reserved_units(netlist)
     for w in sorted(p.parent):
-        if w in units:
-            out.append(
-                Problem(
-                    "HIER-RESERVED-NAME",
-                    w,
-                    f"sub-wrapper {w} has the name of {units[w]}; rename the sub-wrapper",
-                )
-            )
+        if (written := unit_name(netlist.spec.project.module_prefix, w)) in units:
+            how = "has" if written == w else f"is generated as {written}, which is"
+            what = f"sub-wrapper {w} {how} the name of {units[written]}; rename the sub-wrapper"
+            out.append(Problem("HIER-RESERVED-NAME", w, what))
         subtree = [x for x in p.wrappers() if w in p.path_up(x)]
         if not any(p.instances[x] for x in subtree):
             out.append(Problem("HIER-EMPTY", w, f"sub-wrapper {w} has no instances", error=False))

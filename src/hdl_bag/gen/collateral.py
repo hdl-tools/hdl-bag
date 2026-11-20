@@ -21,6 +21,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from hdl_bag.gen.decode import fabric_offset
+from hdl_bag.gen.prefix import unit
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import TieOff
 from hdl_bag.ir.model import Spec, UserPort
@@ -341,7 +342,8 @@ def reset_md(spec: Spec, user_header: str | None) -> str:
              "therefore reset together, then the sequence to follow. hdl-bag's documentation "
              "explains why (docs/reset-sequence.md in its repository).", "",
              "## Domains", "",
-             f"The top wrapper conditions each reset with sync deassertion in bag_rst_sync ({n} "
+             f"The top wrapper conditions each reset with sync deassertion in "
+             f"{unit(spec, 'bag_rst_sync')} ({n} "
              f"stages): an async assertion takes effect at once, a sync one after {n} edges of "
              "the domain's clock. A reset with async deassertion is connected as it is.",
              ""]  # fmt: skip

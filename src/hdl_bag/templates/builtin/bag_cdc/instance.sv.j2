@@ -13,7 +13,7 @@
 
 {% if up.protocol == "AXI4" %}
   // {{ adapter.name }}: cdc {{ up.protocol }} -> {{ dn.protocol }}
-  bag_axi_cdc #(
+  {{ unit("bag_axi_cdc") }} #(
       .AddrWidth   ({{ aw }}),
       .SlvDataWidth({{ up.data_width }}),
       .MstDataWidth({{ dn.data_width }}),
@@ -116,7 +116,7 @@
   );
 {% else %}
   // {{ adapter.name }}: cdc {{ up.protocol }} -> {{ dn.protocol }}
-  bag_axil_cdc #(
+  {{ unit("bag_axil_cdc") }} #(
       .AddrWidth   ({{ aw }}),
       .SlvDataWidth({{ up.data_width }}),
       .MstDataWidth({{ dn.data_width }})

@@ -1,0 +1,27 @@
+$ bag generate files/nested_prefix.ir.yaml -o out
+nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+wrote 37 file(s) to out (top demo_ss_bus_top)
+$ ls out/rtl
+demo_ss_bus_top.sv
+inhouse/
+pkg/
+soc1_aon_wrapper.sv
+soc1_per_wrapper.sv
+$ ls out/rtl/inhouse
+soc1_bag_addr_decode.sv
+soc1_bag_ahb2apb.sv
+soc1_bag_ahb_lite_bus.sv
+soc1_bag_apb_mux.sv
+soc1_bag_rst_sync.sv
+soc1_bag_sync.sv
+$ cat out/demo_ss.f
+rtl/pkg/demo_ss_bus_pkg.sv
+rtl/inhouse/soc1_bag_addr_decode.sv
+rtl/inhouse/soc1_bag_ahb2apb.sv
+rtl/inhouse/soc1_bag_ahb_lite_bus.sv
+rtl/inhouse/soc1_bag_apb_mux.sv
+rtl/inhouse/soc1_bag_rst_sync.sv
+rtl/inhouse/soc1_bag_sync.sv
+rtl/soc1_per_wrapper.sv
+rtl/soc1_aon_wrapper.sv
+rtl/demo_ss_bus_top.sv

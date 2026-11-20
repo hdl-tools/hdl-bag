@@ -6,7 +6,7 @@
 {% set up = inst.up %}
 {% set dn = inst.down %}
   // {{ bridge.name }}: {{ bridge.upstream }} ({{ up.protocol }}) -> {{ bridge.downstream }} ({{ dn.protocol }})
-  bag_apb2ahb #(
+  {{ unit("bag_apb2ahb") }} #(
       .PAddrWidth({{ up.addr_width }}),
       .PDataWidth({{ up.data_width }}),
       .HAddrWidth({{ dn.addr_width }}),
