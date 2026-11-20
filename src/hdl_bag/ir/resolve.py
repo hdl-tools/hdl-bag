@@ -17,7 +17,7 @@ from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
 from hdl_bag.checks.memory import access_rules
 from hdl_bag.ir import model as ir
-from hdl_bag.protocols import OPTIONAL_SIGNALS, signal_applies
+from hdl_bag.protocols import AXI_FAMILY, OPTIONAL_SIGNALS, Protocol, signal_applies
 from hdl_bag.reader.model import Cell, Row
 from hdl_bag.reader.values import parse_connection
 from hdl_bag.template import SCHEMA_VERSION
@@ -243,9 +243,19 @@ def _fabric(
     masters = [lk.end for lk in mports]
     ids = ctx.fabric_id_widths(name)
 
-    def opt_int(col: str, minimum: int) -> int | None:
+    def opt_int(col: str, minimum: int, applies: bool = True) -> int | None:
+        """COL as an integer: None when it is blank, n/a, or does not apply to this fabric.
+
+        A setting that does not apply is warned about (FAB-NA-SETTING) and never parsed by the
+        checks, so resolve must not parse it either. It would report VALUE-ILLEGAL from inside
+        resolve, after the checks had already found the spec free of errors (#156).
+        """
         v = r[col].value
-        return None if v in (None, "n/a") else _int(ctx, r[col], minimum)
+        if not applies or v in (None, "n/a"):
+            return None
+        return _int(ctx, r[col], minimum)
+
+    axi = Protocol(_req(ctx.text(r["Protocol"]))) in AXI_FAMILY
 
     midpoint = None
     if topology == "shared-bus":
@@ -277,8 +287,8 @@ def _fabric(
         latency_mode=None
         if r["Latency mode"].value in (None, "n/a")
         else ctx.text(r["Latency mode"]),
-        max_mst_trans=opt_int("Max mst trans", 1),
-        max_slv_trans=opt_int("Max slv trans", 1),
+        max_mst_trans=opt_int("Max mst trans", 1, axi),
+        max_slv_trans=opt_int("Max slv trans", 1, axi),
         midpoint=midpoint,
         template=_req(ctx.text(r["Backing template"])),
         backing_ip=ctx.text(r["Backing IP"]),
