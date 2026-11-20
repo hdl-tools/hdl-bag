@@ -238,8 +238,9 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
   (\code{soc1_NO_SYNOPSYS_FF}, \code{soc1_ASSERT_RPT}, \code{soc1_TARGET_VSIM},
   \code{soc1_INC_ASSERT}, \code{soc1_SLAVE_ASSUME}, \code{soc1_SLAVE_ASSERT}); the macros that
   only the environment defines (\code{VERILATOR}, \code{SYNTHESIS}, \code{UVM} and the like)
-  are shared (section~\ref{sec:limits-output}). Blank is legal. \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or
-  ends with an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
+  are shared (section~\ref{sec:limits-output}). Blank is legal.
+  \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or ends with
+  an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
   sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the flat harness, the parameter
   package, an interface, a user module or a SystemVerilog keyword; the top wrapper, the
   parameter package and user modules are never renamed. \ruleid{PROJ-NAME-LENGTH} warns
