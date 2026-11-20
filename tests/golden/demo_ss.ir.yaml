@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: demo_ss
+  module_prefix: null
   revision: r4
   author: Chris
   sv_std: IEEE 1800-2017
@@ -1227,4 +1228,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: demo_ss.xlsx
-  sha256: 4a81c4a260032e4279922d9f9df8751a627146ebda7e35f613b9cc65e6bb2e27
+  sha256: 420f6038ee7b4854fa46044214e3c8a3445ff553153dfe35a742f91b769e35ae

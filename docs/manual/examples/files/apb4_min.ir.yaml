@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: apb4_min
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017

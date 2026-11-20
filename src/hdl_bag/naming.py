@@ -2,6 +2,16 @@
 # Copyright 2026 The hdl-bag Authors
 """Names shared by the checks and the generators, so both always agree."""
 
+from typing import Final
+
+# Longest generated unit name that PROJ-NAME-LENGTH accepts without a warning.
+MAX_UNIT_NAME: Final = 64
+
+
+def unit_name(prefix: str | None, name: str) -> str:
+    """NAME with Project > Module prefix in front, joined by an underscore; blank means NAME."""
+    return f"{prefix}_{name}" if prefix else name
+
 
 def flat_signal_name(pattern: str, port: str, proto: str, signal: str, prefix: str | None) -> str:
     """Wrapper port name of SIGNAL on PORT (Wrapper > Signal naming pattern).

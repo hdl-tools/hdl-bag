@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_narrow_apb
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -916,4 +917,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_narrow_apb.xlsx
-  sha256: d2eecf50ec1f5b29265f18b03645b4aaed5331df813fae0af4fb29c20c70a4d9
+  sha256: c3351d8c3750fffa288d5db5b438da1a2289030fa0d8bd53e3664dc5c547c872

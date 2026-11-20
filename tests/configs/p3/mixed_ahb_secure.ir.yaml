@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_ahb_secure
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -396,4 +397,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_ahb_secure.xlsx
-  sha256: 4b4c1b273e0fd4def89518fbbd6fdba19a148e8fe217bf323cdc087a604c3c55
+  sha256: 1ab0af481ceaf732e620ac4029173d95d027b2cdb5570ab420a28c0614c1f7fd

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_shared_chain
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -424,4 +425,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_shared_chain.xlsx
-  sha256: 4604c2a9d355a440c79b11e263555b774febae4141e02223b8abe35d29bdd184
+  sha256: 9ee64e9a626660bedbb7156936bcbbaff236067593e12b8820693effafaf5d59

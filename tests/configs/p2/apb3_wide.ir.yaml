@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: apb3_wide
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -445,4 +446,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: apb3_wide.xlsx
-  sha256: 930e0f6eaaa49df0680f7e342ab93ed476a47807bd5bcef18516979369744519
+  sha256: d0c0949361424fdf23c33ee5b8c71dca86474614cd598876174416811ba99866

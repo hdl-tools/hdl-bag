@@ -69,13 +69,18 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
     0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column), then 0.4 -> 0.5
     (notes, and br_ahb2main's FIFO depth, which its bridge ignores), then 0.5 -> 0.6 (D45: the
     External module column, last on Fabrics), then the Phase 6 cleanup (D103, PR 110): notes
-    and formulas that match the code."""
+    and formulas that match the code, then 0.6 -> 0.7 (issue 106: Module prefix, last on
+    Project)."""
     if isinstance(old, str) and isinstance(new, str):
         renamed = old.replace("BusGen", "BAG").replace("busgen_", "bag_")
         if renamed == new:
             return True
     if (sheet, coord) == ("Project", "B6"):
-        return (old, new) == ("0.2", "0.6")
+        return (old, new) == ("0.2", "0.7")
+    if sheet == "Project" and coord in {"A18", "B18", "C18"} and old is None:
+        return True  # 0.6 -> 0.7: the Module prefix row, last on Project
+    if (sheet, coord) == ("Project", "C5"):
+        return isinstance(new, str) and new.startswith("Names the project:")
     if sheet == "Fabrics" and coord == "U4" and old is None:
         return isinstance(new, str) and new.startswith(("External module", "bag_external only"))
     if (sheet, coord, old, new) == ("Bridges", "G7", 2, 0):

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_wide_to_narrow
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -418,4 +419,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_wide_to_narrow.xlsx
-  sha256: b034b4e92f2d1e6f79095722a59df662816089f4cd261e00ce083bf3383da3e6
+  sha256: 3284c9797f93e61f7932883fdbc71aa138951635f4e6dbf730bac18d9d62813f

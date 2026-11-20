@@ -22,7 +22,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from hdl_bag.template.data import Cell, SpecData
 from hdl_bag.template.sample_demo_ss import SAMPLE
 
-SCHEMA_VERSION: Final = "0.6"
+SCHEMA_VERSION: Final = "0.7"
 COMMENT_AUTHOR: Final = "BAG"
 
 FONT = "Arial"
@@ -300,7 +300,7 @@ class _Builder:
         name = self.project_value("Project name")
         header_note = f"{name or '<project name>'}_memmap.h from Memory_Map."
         self.kv(ws, HDR_ROW, [
-            ("Project name", self.project_value("Project name"), "Prefix for generated module and package names."),
+            ("Project name", self.project_value("Project name"), "Names the project: the top wrapper, parameter package and interfaces are built from it."),
             ("Spec schema version", SCHEMA_VERSION, "Must match the schema version the BAG release expects."),
             ("Spec revision", self.project_value("Spec revision"), "Free text; stamped into every generated file header."),
             ("Author", self.project_value("Author"), ""),
@@ -313,6 +313,7 @@ class _Builder:
             ("Generate formal (SymbiYosys)", self.project_value("Generate formal (SymbiYosys)"), "Decode and port-protocol properties."),
             ("Lint tools", self.project_value("Lint tools"), "All must pass with zero un-waived warnings."),
             ("Simulator", self.project_value("Simulator"), "verilator: the only simulator bag sim runs in v1."),
+            ("Module prefix", self.project_value("Module prefix"), "Optional. Put in front of the BAG and PULP module, package and macro names and their file names, with an underscore, so that two BAG subsystems or another copy of PULP can be compiled together. Blank: names as in schema 0.6. The top wrapper, the parameter package and user modules are never renamed."),
         ])  # fmt: skip
         v = DataValidation(type="list", formula1=self.lref["YesNo"], allow_blank=False)
         ws.add_data_validation(v)

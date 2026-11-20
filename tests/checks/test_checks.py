@@ -104,7 +104,22 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
      ["Resets row 5: Polarity 'low' is not one of active-low, active-high (VALUE-ILLEGAL)"]),
     ("PROJ-SCHEMA-VERSION", [("Project", 6, "Value", "0.2")],
-     ["Project row 6: Spec schema version '0.2' differs from '0.6' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+     ["Project row 6: Spec schema version '0.2' differs from '0.7' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+    ("PROJ-MODULE-PREFIX", [("Project", 18, "Value", "Demo-SS")],
+     ["Project row 18: Module prefix 'Demo-SS' is not a lowercase SystemVerilog identifier (PROJ-MODULE-PREFIX)"]),
+    ("PROJ-MODULE-PREFIX-underscore", [("Project", 18, "Value", "demo_ss_")],
+     ["Project row 18: Module prefix 'demo_ss_' must not end with an underscore: BAG adds one (PROJ-MODULE-PREFIX)"]),
+    ("PROJ-PREFIX-COLLISION", [("Project", 18, "Value", "demo_ss"), ("Hierarchy", 9, "Sub-wrapper", "bus_top"),
+                               ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "bus_top")],
+     ["Project row 18: with Module prefix 'demo_ss', sub-wrapper bus_top is generated as demo_ss_bus_top, the name of the top wrapper; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-PREFIX-COLLISION-interface", [("Project", 18, "Value", "demo_ss"), ("Hierarchy", 9, "Sub-wrapper", "apb4_if"),
+                                         ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "apb4_if")],
+     ["Project row 18: with Module prefix 'demo_ss', sub-wrapper apb4_if is generated as demo_ss_apb4_if, the name of a generated interface; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-PREFIX-COLLISION-keyword", [("Project", 18, "Value", "always"), ("Hierarchy", 9, "Sub-wrapper", "comb"),
+                                       ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "comb")],
+     ["Project row 18: with Module prefix 'always', sub-wrapper comb is generated as always_comb, a SystemVerilog keyword; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-NAME-LENGTH", [("Project", 18, "Value", "abcdefghij" * 4)],
+     ["Project row 18: with Module prefix 'abcdefghijabcdefghijabcdefghijabcdefghij', 5 names BAG can generate are longer than 64 characters; the longest is abcdefghijabcdefghijabcdefghijabcdefghij_axi_burst_splitter_gran_counters (73); shorten the prefix (PROJ-NAME-LENGTH)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
@@ -429,6 +444,10 @@ def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected:
 )
 def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
     assert _messages(tmp_path, edits) == []
+
+
+def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:
+    assert _messages(tmp_path, [("Project", 18, "Value", "demo_ss")]) == []
 
 
 def test_every_rule_has_a_broken_workbook() -> None:

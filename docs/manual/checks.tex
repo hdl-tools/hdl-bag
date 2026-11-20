@@ -56,7 +56,10 @@
 \checkrule{PORTOPT-ERROR-MASKED}{warning}{Port\_Options row 18: PSLVERR is tied on br\_ahb2aon: errors from aon\_apb, its miss response included, never reach it (PORTOPT-ERROR-MASKED)}
 \checkrule{PORTOPT-SIGNAL}{error}{Port\_Options row 10: QOS does not exist on APB4; use n/a (PORTOPT-SIGNAL)}
 \checkrule{PORTOPT-UNKNOWN-PORT}{error}{Port\_Options row 18: ghost is not a connected master, slave or bridge (PORTOPT-UNKNOWN-PORT)}
-\checkrule{PROJ-SCHEMA-VERSION}{error}{Project row 6: Spec schema version '0.2' differs from '0.6' expected by this BAG release (PROJ-SCHEMA-VERSION)}
+\checkrule{PROJ-MODULE-PREFIX}{error}{Project row 18: Module prefix 'Demo-SS' is not a lowercase SystemVerilog identifier (PROJ-MODULE-PREFIX)}
+\checkrule{PROJ-NAME-LENGTH}{warning}{Project row 18: with Module prefix 'abcdefghijabcdefghijabcdefghijabcdefghij', 5 names BAG can generate are longer than 64 characters; the longest is abcdefghijabcdefghijabcdefghijabcdefghij\_axi\_burst\_splitter\_gran\_counters (73); shorten the prefix (PROJ-NAME-LENGTH)}
+\checkrule{PROJ-PREFIX-COLLISION}{error}{Project row 18: with Module prefix 'demo\_ss', sub-wrapper bus\_top is generated as demo\_ss\_bus\_top, the name of the top wrapper; choose another Module prefix (PROJ-PREFIX-COLLISION)}
+\checkrule{PROJ-SCHEMA-VERSION}{error}{Project row 6: Spec schema version '0.2' differs from '0.7' expected by this BAG release (PROJ-SCHEMA-VERSION)}
 \checkrule{REF-UNKNOWN}{error}{Masters row 6: domain D\_X is not defined on Clocks (REF-UNKNOWN)}
 \checkrule{SEC-PROT-TIED}{error}{Memory\_Map row 9: secure-only pmu0 regs is reachable from dma0, whose PROT is tied (SEC-PROT-TIED)}
 \checkrule{TMPL-BRIDGE}{error}{Bridges row 6: bag\_axi2apb needs a AXI4 or AXI4-Lite upstream fabric; ahb\_bus is AHB-Lite (TMPL-BRIDGE)}

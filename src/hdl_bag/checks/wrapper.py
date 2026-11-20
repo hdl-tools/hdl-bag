@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
-from hdl_bag.naming import SV_KEYWORDS, flat_signal_name
+from hdl_bag.naming import MAX_UNIT_NAME, SV_KEYWORDS, flat_signal_name, unit_name
 from hdl_bag.protocols import (
     OPTIONAL_SIGNAL_NAMES,
     OPTIONAL_SIGNALS,
@@ -406,3 +406,66 @@ def check_external_modules(ctx: Context) -> None:
             ctx.report("EXT-MODULE-SHARED", cell,
                        f"{name} and {first} share module {module} but differ in protocol, widths, "
                        "attachments or user ports")  # fmt: skip
+
+
+def _prefixed_units(ctx: Context) -> dict[str, str]:
+    """Units that take Module prefix: base name -> what it is. The top wrapper is not among
+    them (it is instantiated by the integrator under the name the user gave it)."""
+    index = json.loads(
+        (files("hdl_bag") / "rtl" / "vendor" / "pulp" / "index.json").read_text(encoding="utf-8")
+    )
+    out = {unit: "PULP unit" for f in index["files"] for unit in f["defines"]}
+    for sub in ("inhouse", "vendor/derived"):
+        for f in sorted((files("hdl_bag") / "rtl" / sub).iterdir(), key=lambda p: p.name):
+            if f.name.endswith(".sv"):
+                out[f.name[:-3]] = "in-house module"
+    out |= {n: "sub-wrapper" for r in ctx.raw.sub_wrappers[1:] if (n := ctx.text(r["Sub-wrapper"]))}
+    return out
+
+
+def _fixed_units(ctx: Context, prefixed: dict[str, str]) -> dict[str, str]:
+    """Units that keep their name under a prefix: name -> what it is."""
+    s = ctx.raw.wrapper
+    top = ctx.text(s["Top module name"]) if "Top module name" in s else None
+    package = ctx.text(s["Parameter package"]) if "Parameter package" in s else None
+    kept = _generated_modules(ctx) - prefixed.keys()
+    project = (
+        ctx.text(ctx.raw.project["Project name"]) if "Project name" in ctx.raw.project else None
+    )
+    out = dict.fromkeys(kept, "a module BAG generates")
+    out |= {f"{project}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
+    out |= {f"{top}_flat": "the generated flat harness", package or "": "the parameter package"}
+    out[top or ""] = "the top wrapper"
+    for row in ctx.raw.fabrics:
+        if (module := ctx.external_module(row)) is not None:
+            out[module] = "a user module"
+    return out
+
+
+def check_module_prefix(ctx: Context) -> None:
+    """Project > Module prefix (schema 0.7): no prefixed name may equal one that is not
+    prefixed (this is what keeps the top wrapper's name) or a SystemVerilog keyword; and a
+    warning when prefixed names grow past MAX_UNIT_NAME."""
+    cell = ctx.raw.project.get("Module prefix")
+    prefix = ctx.text(cell) if cell else None
+    if cell is None or not prefix or any(f.rule == "PROJ-MODULE-PREFIX" for f in ctx.findings):
+        return
+    prefixed = _prefixed_units(ctx)
+    fixed = _fixed_units(ctx, prefixed)
+    for base, what in prefixed.items():
+        name = unit_name(prefix, base)
+        if name in fixed:
+            ctx.report("PROJ-PREFIX-COLLISION", cell,
+                       f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
+                       f"the name of {fixed[name]}; choose another Module prefix")  # fmt: skip
+        elif name in SV_KEYWORDS:
+            ctx.report("PROJ-PREFIX-COLLISION", cell,
+                       f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
+                       "a SystemVerilog keyword; choose another Module prefix")  # fmt: skip
+    long = sorted(n for b in prefixed if len(n := unit_name(prefix, b)) > MAX_UNIT_NAME)
+    if long:
+        worst = max(long, key=len)
+        ctx.report("PROJ-NAME-LENGTH", cell,
+                   f"with Module prefix {prefix!r}, {len(long)} names BAG can generate are longer "
+                   f"than {MAX_UNIT_NAME} characters; the longest is {worst} ({len(worst)}); "
+                   "shorten the prefix")  # fmt: skip

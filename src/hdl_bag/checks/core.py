@@ -22,6 +22,9 @@ RULES: Final[dict[str, Severity]] = {
     "VALUE-MISSING": E,
     "VALUE-ILLEGAL": E,
     "PROJ-SCHEMA-VERSION": E,
+    "PROJ-MODULE-PREFIX": E,
+    "PROJ-PREFIX-COLLISION": E,
+    "PROJ-NAME-LENGTH": W,
     "WRAP-FILE-HEADER": E,
     "WRAP-PATTERN": E,
     # names and references

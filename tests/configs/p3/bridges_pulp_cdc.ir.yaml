@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: bridges_pulp_cdc
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -652,4 +653,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_pulp_cdc.xlsx
-  sha256: e9107ec718bd4c5e0cfe9123ab2cc5d08ed33114097f173368ca245f8420136c
+  sha256: bd7bce61c36378a324efdc725fc7fec56af0b06de836379a3c2516dd3ca8521d

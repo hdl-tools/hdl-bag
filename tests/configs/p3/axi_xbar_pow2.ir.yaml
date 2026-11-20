@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: axi_xbar_pow2
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -307,4 +308,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axi_xbar_pow2.xlsx
-  sha256: 36a93f88fff4f29ba814c1707a2156ecb88ab27fbe59bf39e86a9b9f6f3a4fcb
+  sha256: 5c2b3009270f7211b29cb9ff7f8a185409c39202741142935ac765aed3239508

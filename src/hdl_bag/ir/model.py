@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""IR models (schema 0.6). The YAML dump of ``Spec`` is the canonical spec.
+"""IR models (schema 0.7). The YAML dump of ``Spec`` is the canonical spec.
 
 Field order is the dump order. Every list is sorted by resolve, so equal specs give
 byte-identical files. Addresses and sizes are ints here and hex text in YAML.
@@ -51,6 +51,7 @@ class Outputs(_M):
 
 class Project(_M):
     name: str
+    module_prefix: str | None
     revision: str | None
     author: str | None
     sv_std: str
