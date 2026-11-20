@@ -34,7 +34,7 @@ import pytest
 from test_module_prefix import _declared
 from test_negative_elaboration import USER_RULES, _VerilatorToElaboration
 
-from hdl_bag.flows.backends import BACKENDS
+from hdl_bag.flows.backends import Slang
 from hdl_bag.flows.base import Finding, run_backend
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.prefix import include_renames, macro_renames
@@ -54,6 +54,8 @@ DUPLICATE_TEXT = re.compile(
     r"duplicate definition of|redefinition of|Duplicate declaration of module", re.I
 )
 UNDEFINED_TEXT = re.compile(r"unknown macro or compiler directive|Define or directive not defined")
+# A tool's own last word once it has given up: an error, but not one about a name.
+ABORT_TEXT = re.compile(r"Cannot continue|too many errors|error limit", re.I)
 _QUOTED = re.compile(r"'(\w+)'")
 _MACRO = re.compile(r"`(\w+)")
 
@@ -127,8 +129,16 @@ def _soc(
     )  # fmt: skip
 
 
+class _SlangEveryError(Slang):
+    """slang stops at twenty errors by default, which on this file list is the common_cells
+    duplicates and none of the axi ones. The whole set is what the control asserts."""
+
+    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
+        return [*super().command(files, top, incdirs), "--error-limit=1000"]
+
+
 def _compile(tmp_path: Path, soc: Soc, tool: str) -> list[Finding]:
-    backend = BACKENDS[tool] if tool == "slang" else _VerilatorToElaboration()
+    backend = _SlangEveryError() if tool == "slang" else _VerilatorToElaboration()
     return run_backend(backend, soc.files, "soc_top", tmp_path, soc.incdirs)
 
 
@@ -186,14 +196,21 @@ def _check_blank(tmp_path: Path, soc: Soc, found: list[Finding], tool: str) -> N
 
 
 def _check_headers(found: list[Finding], tool: str) -> None:
+    """Every error is about an undefined prefixed macro, bar the tool's own abort line.
+
+    Which project's macros go undefined first depends on the file order and on when the tool
+    gives up, so the prefixes seen are a non-empty subset rather than both: one project is
+    enough to show that a restored header name undefines the macros that header should define.
+    """
     errors = _errors(found)
     assert errors
-    assert all(UNDEFINED_TEXT.search(f.message) for f in errors), [f.format() for f in errors]
-    names = {m[1] for f in errors if (m := _MACRO.search(f.message))}
+    undefined = [f for f in errors if UNDEFINED_TEXT.search(f.message)]
+    assert undefined, [f.format() for f in errors]
+    other = [f for f in errors if f not in undefined and not ABORT_TEXT.search(f.message)]
+    assert other == [], [f.format() for f in other]
+    names = {m[1] for f in undefined if (m := _MACRO.search(f.message))}
     assert names
-    prefixes = {n.split("_", 1)[0] for n in names}
-    # Verilator may stop at its error limit before it reaches beta's files.
-    assert prefixes == {"alpha", "beta"} if tool == "slang" else prefixes <= {"alpha", "beta"}
+    assert {n.split("_", 1)[0] for n in names} <= {"alpha", "beta"}
     assert {n.split("_", 1)[1] for n in names} <= set(macro_renames("p"))
 
 
