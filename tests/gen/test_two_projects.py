@@ -216,9 +216,7 @@ def _check_headers(found: list[Finding], tool: str) -> None:
     other = [
         f
         for f in errors
-        if f not in undefined
-        and (f.file, f.line) not in where
-        and not ABORT_TEXT.search(f.message)
+        if f not in undefined and (f.file, f.line) not in where and not ABORT_TEXT.search(f.message)
     ]
     assert other == [], [f.format() for f in other]
     names = {m[1] for f in undefined if (m := _MACRO.search(f.message))}
