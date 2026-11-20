@@ -43,7 +43,8 @@ unwaived findings.
 ## Formal properties
 
 hdl-bag ships four of [ZipCPU](https://github.com/ZipCPU/wb2axip)'s formal
-property files in `src/hdl_bag/formal/vendor/zipcpu/`, unmodified: the AXI4-Lite
+property files in `src/hdl_bag/formal/vendor/zipcpu/`, unmodified in the package (a generated copy under a
+Project > Module prefix carries renamed unit and macro names and says so on its first line): the AXI4-Lite
 (`faxil_master.v`, `faxil_slave.v`) and APB (`fapb_master.v`, `fapb_slave.v`)
 protocol properties. `bag generate` copies the ones a design needs into
 `formal/vendor/zipcpu/` of the output, with the `LICENSE`.

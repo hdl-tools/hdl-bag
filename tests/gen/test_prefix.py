@@ -93,7 +93,8 @@ def test_the_derived_note_follows_the_spdx_line_and_only_under_a_prefix() -> Non
     rel = "rtl/vendor/derived/bag_axi_mux.sv"
     assert note(rel, text, "soc1") == (
         "// SPDX-License-Identifier: SHL-0.51\n"
-        '// Unit names carry the prefix "soc1_" (hdl-bag Project > Module prefix).\n// Derived\n'
+        '// Unit, macro and include-file names carry the prefix "soc1_"'
+        " (Project > Module prefix).\n// Derived\n"
     )
     assert note(rel, text, None) is text
     assert note("rtl/inhouse/bag_sync.sv", text, "soc1") is text
@@ -160,6 +161,8 @@ MAC = {"FOO": "p_FOO", "__AXI": "p___AXI"}
         ("// `define FOO 1", "// `define FOO 1"),
         ('$display("`FOO");', '$display("`FOO");'),
         ("FOO", "FOO"),
+        ("x``FOO y``_z", "x``FOO y``_z"),
+        ("`FOO``_z", "`p_FOO``_z"),
     ],
 )  # fmt: skip
 def test_a_macro_is_renamed_where_it_is_defined_tested_or_used(text: str, expected: str) -> None:
@@ -255,3 +258,17 @@ def test_a_prefixed_header_rewrite_is_reversible_and_keeps_its_lines() -> None:
     out = rewrite(text, renames("soc1"), macro_renames("soc1"), include_renames("soc1"))
     assert out.count("\n") == text.count("\n") and out != text
     assert out.replace("soc1_", "") == text
+
+
+def test_no_pasted_fragment_in_a_packaged_file_is_a_macro_or_unit_name() -> None:
+    """Pasting (a``b) is skipped by the rewrite, which is only right while no fragment is a
+    name that would have been renamed."""
+    names = set(macro_renames("p")) | set(renames("p"))
+    strip = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+    fragments = {
+        f
+        for text in _packaged_rtl()
+        for chain in re.findall(r"\w*(?:``\w*)+", strip.sub("", text))
+        for f in chain.split("``")
+    }
+    assert len(fragments) > 20 and not fragments & names

@@ -151,8 +151,8 @@ def _reference_rewrite(text: str) -> str:
                 if name == "include" and k > j and text.startswith('"', k):
                     close = text.index('"', k + 1)
                     inc = text[k + 1 : close]
-                    out.append(text[i:k] + '"' + HEADERS.get(inc, inc))
-                    i = close
+                    out.append(text[i:k] + '"' + HEADERS.get(inc, inc) + '"')
+                    i = close + 1
                     continue
                 if name != "include" and k > j:
                     end = _ident_end(text, k)
@@ -494,7 +494,8 @@ def test_the_derived_files_say_the_prefix_and_in_house_files_do_not(
     trees: Trees,
 ) -> None:
     _, blank, pre = trees("p3/axi_shared_rr", None)
-    note = f'// Unit names carry the prefix "{PREFIX}_" (hdl-bag Project > Module prefix).'
+    note = (f'// Unit, macro and include-file names carry the prefix "{PREFIX}_"'
+            " (Project > Module prefix).")  # fmt: skip
     derived = [r for r in pre if r.startswith(f"{DERIVED}{PREFIX}_")]
     assert derived
     for rel in derived:
@@ -749,7 +750,7 @@ BUILTIN_MACROS = {"__FILE__", "__LINE__", "uvm_error", "include", "define", "ifd
                   "else", "elsif", "endif", "undef", "timescale", "default_nettype", "resetall",
                   "begin_keywords", "end_keywords", "celldefine", "endcelldefine", "line",
                   "pragma", "unconnected_drive", "nounconnected_drive"}  # fmt: skip
-_MACRO_USE = re.compile(r"`(?:(?:define|ifdef|ifndef|elsif|undef)[ \t]+)?(\w+)")
+_MACRO_USE = re.compile(r"(?<!`)`(?:(?:define|ifdef|ifndef|elsif|undef)[ \t]+)?(\w+)")
 
 
 def _rtl_texts(tree: dict[str, bytes]) -> dict[str, str]:
@@ -769,7 +770,12 @@ def test_no_generated_source_defines_tests_or_uses_an_unprefixed_macro(
     names: set[str] = set()
     for text in _rtl_texts(pre).values():
         names |= set(_MACRO_USE.findall(_STRIP.sub("", text)))
-    unprefixed = {n for n in names if not n.startswith(f"{PREFIX}_")} - ENV - BUILTIN_MACROS
+    # BAG_COVER_<port>, BAG_IDLE_<port>, BAG_READS_<port> and the like are made per design by
+    # formal_gen and defined by that design's own .sby; no packaged file defines them, so they are
+    # not among the 193 (asserted above) and they carry the project's own port names.
+    per_design = {n for n in names if n.startswith("BAG_")}
+    unprefixed = {n for n in names if not n.startswith(f"{PREFIX}_")}
+    unprefixed -= ENV | BUILTIN_MACROS | per_design
     assert not unprefixed, sorted(unprefixed)
     assert not names & MACROS
     count = {n: 0 for n in ENV}
@@ -780,7 +786,7 @@ def test_no_generated_source_defines_tests_or_uses_an_unprefixed_macro(
             count = found
         else:
             assert found == count
-    assert any(count.values())
+    assert any(count.values()) or not any(r.startswith(PULP) for r in blank)
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
@@ -805,8 +811,9 @@ def test_every_include_of_a_prefixed_tree_names_a_header_only_that_tree_has(
             assert len(hits) == 1, (rel, inc, hits)
             assert posixpath.join(hits[0], inc) not in blank
     pre_headers = {r for r in pre if r.endswith(".svh")}
-    assert pre_headers and not pre_headers & set(blank)
-    assert seen or not any(r.startswith(PULP) for r in blank)
+    assert not pre_headers & set(blank)
+    if any(r.endswith(".svh") for r in blank):
+        assert pre_headers and seen
 
 
 def _spec_name(tree: dict[str, bytes]) -> str:
