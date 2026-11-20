@@ -54,7 +54,7 @@ from hdl_bag.gen.collateral import (
     reset_md,
     tieoffs_md,
 )
-from hdl_bag.gen.constraints import SDC, XDC, cdc_constraints
+from hdl_bag.gen.constraints import SDC, XDC, cdc_constraints, tcl_banner
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
@@ -206,9 +206,8 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     filelist = f"{spec.project.name}.f"
     incdirs = "".join(f"+incdir+{d}\n" for d in src.incdirs)
     _write(outdir, filelist, incdirs + "".join(f"{p}\n" for p in order), written)
-    from hdl_bag.formal_gen import _sby_header
 
-    banner = _sby_header(spec, user_header)  # the same '#'-commented banner as the .sby files
+    banner = tcl_banner(spec, user_header)
     for fmt in (SDC, XDC):
         text = cdc_constraints(spec, netlist, fmt, banner)
         _write(outdir, f"constraints/{spec.project.name}_cdc.{fmt}", text, written)

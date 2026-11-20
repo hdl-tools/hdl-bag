@@ -34,7 +34,7 @@ CONFIGS = {
 }
 DEMO = CONFIGS["golden/demo_ss"]
 FORMATS = ("sdc", "xdc")
-RULE = "# // " + "-" * 76  # the //-comment banner, commented again for SDC
+RULE = "# " + "-" * 76  # the banner rule, re-commented for Tcl (tcl_banner)
 SELECTOR = re.compile(r"\[get_(pins|cells) (?:\{([^}]*)\}|(\S+))\]")
 
 

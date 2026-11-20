@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from hdl_bag.gen.collateral import crossings
 from hdl_bag.gen.hierarchy import plan
 from hdl_bag.gen.netlist import Netlist
-from hdl_bag.gen.render import GenerateError
+from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.ir.model import Clock, Spec
 
 # FIFO crossings: the scope of the axi_cdc instance in the template's instance. The crossing
@@ -83,20 +83,38 @@ def _max_delay(fmt: str, ns: str, where: str) -> list[str]:
     return [f"set_max_delay {ns} {where}", f"set_false_path -hold {where}"]
 
 
-def _paths(template: str, path: str) -> tuple[list[str], list[str], list[str]]:
-    """(through-pin selectors, payload cell patterns, response cell patterns) of one crossing
-    instance at PATH."""
+def _paths(template: str, path: str) -> tuple[list[tuple[str, bool | None]], list[str], list[str]]:
+    """(through-pins, payload cell patterns, response cell patterns) of one crossing instance at
+    PATH. Each pin carries its direction: True for source to destination, False for the reverse,
+    None for both. A gray-coded FIFO passes pointers each way through the same pins; a 4-phase
+    request is only ever launched by the source and its acknowledge only by the destination, so
+    constraining the other direction would bound a path that does not exist."""
     if template in FIFO_SCOPE:
-        return [f"{path}/{FIFO_SCOPE[template]}/{FIFO_PINS}"], [], []
+        return [(f"{path}/{FIFO_SCOPE[template]}/{FIFO_PINS}", None)], [], []
     hs = HANDSHAKE.get(template)
     if hs is None:  # a new template with a synchronizer must say what its crossing is
         raise GenerateError(
             f"template {template} has a clock-domain crossing but no CDC constraint recipe "
             "(gen/constraints.py)"
         )
-    pins = [f"{path}/{hs.sync}.{s}/d_i" for s in ("u_req_sync", "u_ack_sync")]
+    pins: list[tuple[str, bool | None]] = [
+        (f"{path}/{hs.sync}.u_req_sync/d_i", True),
+        (f"{path}/{hs.sync}.u_ack_sync/d_i", False),
+    ]
     payload, response = ([f"{path}/{r}_reg*" for r in group] for group in (hs.payload, hs.response))
     return pins, payload, response
+
+
+def tcl_banner(spec: Spec, user_header: str | None) -> str:
+    """The file banner as Tcl comments. The user's File header is written for SystemVerilog, so
+    its lines are already ``//`` comments; a constraints file is Tcl, and ``# // Copyright`` in a
+    file a synthesis engineer opens reads as a mistake. The ``.sby`` jobs keep the double comment
+    because nothing but a tool reads them."""
+    out = []
+    for line in header(spec, user_header).splitlines():
+        text = line.removeprefix("//").lstrip() if line.startswith("//") else line
+        out.append(f"# {text}".rstrip())
+    return "\n".join(out) + "\n"
 
 
 def cdc_constraints(spec: Spec, netlist: Netlist, fmt: str, banner: str) -> str:
@@ -127,8 +145,14 @@ def cdc_constraints(spec: Spec, netlist: Netlist, fmt: str, banner: str) -> str:
         lines += ["", f"# crossing {name}: {kind}, {a} ({ca.name}) -> {b} ({cb.name}), "
                       f"max delay {ns} ns"]  # fmt: skip
         pins, payload, response = _paths(i.template, path)
-        for pin in pins:
-            lines += _max_delay(fmt, ns, f"-through {_selector('pins', [pin])}")
+        for pin, forward in pins:
+            # Both clocks are named, not the pin alone: Vivado's -datapath_only requires -from,
+            # and -through by itself would also bound same-clock paths through that pin.
+            ways = [(ca, cb), (cb, ca)] if forward is None else [(ca, cb) if forward else (cb, ca)]
+            for src, dst in ways:
+                sel = (f"-from [get_clocks {src.name}] -through {_selector('pins', [pin])} "
+                       f"-to [get_clocks {dst.name}]")  # fmt: skip
+                lines += _max_delay(fmt, ns, sel)
         for cells, dst in ((payload, cb), (response, ca)):
             if cells:
                 sel = f"-from {_selector('cells', cells)} -to [get_clocks {dst.name}]"
