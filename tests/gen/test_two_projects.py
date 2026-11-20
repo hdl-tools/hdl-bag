@@ -209,7 +209,17 @@ def _check_headers(found: list[Finding], tool: str) -> None:
     assert errors
     undefined = [f for f in errors if UNDEFINED_TEXT.search(f.message)]
     assert undefined, [f.format() for f in errors]
-    other = [f for f in errors if f not in undefined and not ABORT_TEXT.search(f.message)]
+    # An undefined macro takes its line down with it: to Verilator, `alpha_ASSERT_INIT( is also
+    # a syntax error at that line. A leftover error is allowed only where a macro went undefined,
+    # or if it is the tool giving up.
+    where = {(f.file, f.line) for f in undefined}
+    other = [
+        f
+        for f in errors
+        if f not in undefined
+        and (f.file, f.line) not in where
+        and not ABORT_TEXT.search(f.message)
+    ]
     assert other == [], [f.format() for f in other]
     names = {m[1] for f in undefined if (m := _MACRO.search(f.message))}
     assert names
