@@ -429,7 +429,11 @@ def _fixed_units(ctx: Context, prefixed: dict[str, str]) -> dict[str, str]:
     top = ctx.text(s["Top module name"]) if "Top module name" in s else None
     package = ctx.text(s["Parameter package"]) if "Parameter package" in s else None
     kept = _generated_modules(ctx) - prefixed.keys()
+    project = (
+        ctx.text(ctx.raw.project["Project name"]) if "Project name" in ctx.raw.project else None
+    )
     out = dict.fromkeys(kept, "a module BAG generates")
+    out |= {f"{project}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
     out |= {f"{top}_flat": "the generated flat harness", package or "": "the parameter package"}
     out[top or ""] = "the top wrapper"
     for row in ctx.raw.fabrics:
@@ -453,14 +457,15 @@ def check_module_prefix(ctx: Context) -> None:
         if name in fixed:
             ctx.report("PROJ-PREFIX-COLLISION", cell,
                        f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
-                       f"the name of {fixed[name]}")  # fmt: skip
+                       f"the name of {fixed[name]}; choose another Module prefix")  # fmt: skip
         elif name in SV_KEYWORDS:
             ctx.report("PROJ-PREFIX-COLLISION", cell,
                        f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
-                       "a SystemVerilog keyword")  # fmt: skip
+                       "a SystemVerilog keyword; choose another Module prefix")  # fmt: skip
     long = sorted(n for b in prefixed if len(n := unit_name(prefix, b)) > MAX_UNIT_NAME)
     if long:
         worst = max(long, key=len)
         ctx.report("PROJ-NAME-LENGTH", cell,
-                   f"with Module prefix {prefix!r}, {len(long)} generated names are longer than "
-                   f"{MAX_UNIT_NAME} characters; the longest is {worst} ({len(worst)})")  # fmt: skip
+                   f"with Module prefix {prefix!r}, {len(long)} names BAG can generate are longer "
+                   f"than {MAX_UNIT_NAME} characters; the longest is {worst} ({len(worst)}); "
+                   "shorten the prefix")  # fmt: skip
