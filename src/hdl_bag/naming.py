@@ -2,10 +2,45 @@
 # Copyright 2026 The hdl-bag Authors
 """Names shared by the checks and the generators, so both always agree."""
 
+import re
+from collections.abc import Mapping
+from functools import cache
+from importlib.resources import files
 from typing import Final
 
 # Longest generated unit name that PROJ-NAME-LENGTH accepts without a warning.
 MAX_UNIT_NAME: Final = 64
+
+
+_DECL = re.compile(r"^\s*(module|interface|package)\s+(?:automatic\s+)?(\w+)", re.MULTILINE)
+
+
+@cache
+def emitted_units() -> Mapping[str, str]:
+    """Every design unit BAG can copy or write, name -> what it is.
+
+    Static: the per-design units (wrappers, interfaces, the package) are not here. Interfaces and
+    packages share the design-unit namespace with modules, so they are labelled as what they are.
+    """
+    from hdl_bag.templates.sources import VENDOR, vendored_units
+
+    out: dict[str, str] = {}
+    for path in sorted(set(vendored_units().values())):
+        text = (files("hdl_bag") / VENDOR / path).read_text(encoding="utf-8")
+        kinds = {name: kind for kind, name in _DECL.findall(text)}
+        for unit, p in vendored_units().items():
+            if p == path:
+                out[unit] = f"a vendored PULP {kinds.get(unit, 'module')}"
+    for sub, what in (
+        ("inhouse", "an in-house module"),
+        ("vendor/derived", "a module BAG derives from PULP"),
+    ):
+        out |= {
+            f.name[:-3]: what
+            for f in (files("hdl_bag") / "rtl" / sub).iterdir()
+            if f.name.endswith(".sv")
+        }
+    return out
 
 
 def unit_name(prefix: str | None, name: str) -> str:

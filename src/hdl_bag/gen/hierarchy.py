@@ -15,12 +15,11 @@ boundary-name collisions before anything is generated.
 """
 
 from dataclasses import dataclass, field
-from importlib.resources import files
 
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import subwrapper_signal_name
+from hdl_bag.naming import emitted_units, subwrapper_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, towards_slave
 
 
@@ -172,8 +171,7 @@ def collisions(netlist: Netlist, p: Plan) -> list[tuple[str, str, list[str]]]:
 def reserved_units(netlist: Netlist) -> dict[str, str]:
     """Design units the generator writes besides the wrappers: name -> what it is."""
     spec = netlist.spec
-    inhouse = files("hdl_bag") / "rtl" / "inhouse"
-    units = {f.name[:-3]: "an in-house module" for f in inhouse.iterdir() if f.name.endswith(".sv")}
+    units = dict(emitted_units())
     units |= {f"{spec.project.name}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
     units[f"{spec.hierarchy.top}_flat"] = "the generated flat harness"
     units[spec.wrapper.package] = "the parameter package"
@@ -221,7 +219,11 @@ def problems(netlist: Netlist, p: Plan) -> list[Problem]:
     for w in sorted(p.parent):
         if w in units:
             out.append(
-                Problem("HIER-RESERVED-NAME", w, f"sub-wrapper {w} has the name of {units[w]}")
+                Problem(
+                    "HIER-RESERVED-NAME",
+                    w,
+                    f"sub-wrapper {w} has the name of {units[w]}; rename the sub-wrapper",
+                )
             )
         subtree = [x for x in p.wrappers() if w in p.path_up(x)]
         if not any(p.instances[x] for x in subtree):
