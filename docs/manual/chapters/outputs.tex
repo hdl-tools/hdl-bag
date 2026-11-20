@@ -83,10 +83,10 @@ emits to \code{soc1_<name>}: the in-house modules, the modules it derives from P
 vendored PULP modules, interfaces and packages, BAG's own formal checkers, the vendored ZipCPU
 checkers, and the sub-wrappers. The new name is in the declaration, in every instantiation, in
 every \code{pkg::} scope and in the \code{endmodule} label. The files of those units get the
-same prefix, and the file list and the formal jobs follow. The top wrapper, the parameter
-package, the generated interfaces, the flat harness, a user-supplied fabric module and the
-generated formal modules, which carry the project name, keep their names, and so do instance
-names, so hierarchical paths do not change. Comments and messages inside the files keep the
+same prefix, and the file list and the formal jobs follow. Six kinds of name are never
+prefixed: the top wrapper, the parameter package, the generated interfaces, the flat harness,
+a user-supplied fabric module, and the generated formal modules, which are named after the
+project instead. Instance names keep their names too, so hierarchical paths do not change. Comments and messages inside the files keep the
 old names.
 
 The prefix also reaches every macro that a packaged file defines, in its definition, its
