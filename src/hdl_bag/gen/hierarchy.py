@@ -20,6 +20,7 @@ from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import (
+    describe,
     emitted_name,
     emitted_units,
     formal_unit,
@@ -251,9 +252,16 @@ def _reserved_formal_names(netlist: Netlist) -> list[Problem]:
     for unit in emitted_units().values():
         written = emitted_name(prefix, unit)
         if kind := formal_unit(project, written):
+            # Name the unit when the prefix renamed it: "a vendored PULP module" alone does not
+            # tell the user which of the 94 it is.
+            whose = (
+                f"the name of the {describe(unit)}"
+                if written == unit.name
+                else f"how the {describe(unit)} {unit.name} is generated"
+            )
             what = (
                 f"with Project name {project!r}, {kind} is named {written}, which is also "
-                f"the generated name of {label(unit)}; {fix}"
+                f"{whose}; {fix}"
             )
             out.append(Problem("NAME-RESERVED", top, what, setting="Project name"))
     for name, setting, role in (

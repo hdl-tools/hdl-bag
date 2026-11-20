@@ -22,6 +22,8 @@ from hdl_bag.flows import compile_design, lint
 from hdl_bag.flows.formal import run_formal
 from hdl_bag.flows.sim import run_tests
 from hdl_bag.gen import MANIFEST, generate, include_dirs, sources
+from hdl_bag.gen.hierarchy import plan, problems
+from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import Spec, load, loads
 from hdl_bag.templates import builtin_registry
@@ -589,6 +591,42 @@ def test_a_project_named_addr_is_refused_because_its_formal_decode_harness_is_ta
     with pytest.raises(GenerateError, match="bag_addr_decode") as exc:
         generate(spec, tmp_path, DEMO.parent)
     assert "NAME-RESERVED" in str(exc.value)
+
+
+def _with_top(spec: Spec, top: str) -> Spec:
+    """SPEC with the top wrapper renamed, and every reference to it retargeted, so that only
+    the new name is in question."""
+    old = spec.hierarchy.top
+    h = spec.hierarchy.model_copy(update={
+        "top": top,
+        "wrappers": tuple(w.model_copy(update={"parent": top}) if w.parent == old else w
+                          for w in spec.hierarchy.wrappers),
+        "placement": tuple(x.model_copy(update={"wrapper": top}) if x.wrapper == old else x
+                           for x in spec.hierarchy.placement),
+    })  # fmt: skip
+    return spec.model_copy(update={"hierarchy": h})
+
+
+@pytest.mark.parametrize(
+    ("top", "expected"),
+    [
+        ("bag_demo_ss_decode",
+         "the top module is named bag_demo_ss_decode, which is also the formal decode harness; "
+         "choose another Top module name"),
+        ("bag_demo_ss_unit",
+         "the flat harness of top module bag_demo_ss_unit is named bag_demo_ss_unit_flat, which "
+         "is also a formal unit harness; choose another Top module name"),
+    ],
+    ids=["top", "flat"],
+)  # fmt: skip
+def test_a_top_module_name_that_takes_a_formal_unit_name_is_refused(
+    top: str, expected: str
+) -> None:
+    """The second arm of NAME-RESERVED: a name the user chose, not one BAG derived. The flat
+    harness is the case where the name BAG writes is not the one the user typed."""
+    netlist = build_netlist(_with_top(load(DEMO), top))
+    reserved = [p for p in problems(netlist, plan(netlist)) if p.rule == "NAME-RESERVED"]
+    assert [(p.setting, p.what) for p in reserved] == [("Top module name", expected)]
 
 
 @pytest.mark.parametrize("prefix", [None, "bag"])
