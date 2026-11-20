@@ -236,8 +236,11 @@ and a bridge window.
   ports.
 \item[\file{doc/tieoffs.md}] The ports of BAG's components that are not simply wired to a
   bus signal: inputs tied to a constant, defaults, fitted widths and outputs that nothing
-  reads, each with the reason. The report does not list every such port yet
-  (chapter~\ref{ch:limits}).
+  reads, each with the reason. It includes the constant bits of a fabric's alias enable
+  vector: an alias set to \code{always} in \sheet{Address_Decode}, and a position with no
+  alias at all. Their
+  \col{Bus} is \code{-} and their signal is \code{alias_en_i[}\emph{n}\code{]}, where
+  alias \emph{n} counts from 0 in the order master, then base.
 \item[\file{doc/reset.md}] The \term{reset sequence} that the design needs: its clock
   domains and reset ports, every clock-domain crossing, the \term{reset groups} (the
   domains that must reset together because a crossing joins them), and the steps to

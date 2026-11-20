@@ -46,6 +46,8 @@ ABSENT = "not on this bus"
 NARROW = "bus narrower"
 WIDE = "bus wider"
 USER = "User_Ports"
+ALIAS_ON = "alias always on (Address_Decode)"
+NO_ALIAS = "no alias at this position (Address_Decode)"
 
 
 def builtin_root() -> Path:
@@ -323,9 +325,12 @@ class InstanceContext:
         fab = self.inst.fabric
         enables = decode_tables(fab, fabric_offset(self.scope.spec, fab)).alias_enables
         bits = []
-        for e in reversed(enables):
+        for i, e in reversed(list(enumerate(enables))):  # alias i is bit i
             if e in ("0", "1"):
                 bits.append(f"1'b{e}")
+                reason = ALIAS_ON if e == "1" else NO_ALIAS
+                tie = TieOff(self.inst.name, "-", f"alias_en_i[{i}]", "input", bits[-1], reason)
+                self.scope.tieoffs.add(tie)
             else:
                 self.scope.inputs_used.add(e)
                 bits.append(e)
