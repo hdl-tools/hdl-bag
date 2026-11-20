@@ -244,8 +244,8 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
   \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or ends with
   an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
   sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the flat harness, the parameter
-  package, an interface, a user module or a SystemVerilog keyword; the top wrapper, the
-  parameter package and user modules are never renamed. \ruleid{PROJ-NAME-LENGTH} warns
+  package, an interface, a user module or a SystemVerilog keyword; none of those names is
+  ever prefixed (section~\ref{sec:prefix}). \ruleid{PROJ-NAME-LENGTH} warns
   when a prefixed name would be longer than 64 characters.\\
 \end{wbtable}
 
