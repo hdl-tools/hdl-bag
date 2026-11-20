@@ -272,3 +272,12 @@ def test_no_pasted_fragment_in_a_packaged_file_is_a_macro_or_unit_name() -> None
         for f in chain.split("``")
     }
     assert len(fragments) > 20 and not fragments & names
+
+
+def test_no_packaged_file_writes_an_escaped_identifier() -> None:
+    """gen.prefix skips an escaped identifier (backslash, name, space), which IEEE 1800 says is
+    the same name as the plain one, so a vendored one would be silently missed. None exists
+    today; this fires at the next re-vendor that brings one in."""
+    strip = re.compile(r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"", re.DOTALL)
+    found = {m for text in _packaged_rtl() for m in re.findall(r"\\\S+", strip.sub("", text))}
+    assert not found, sorted(found)

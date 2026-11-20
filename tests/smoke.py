@@ -22,7 +22,8 @@ What it keeps:
   ID-width adapter, bridge offsets, a narrow APB and a CDC chain;
 - one mutant of each gate bug on AHB-Lite or APB, four on AXI4 and AXI4-Lite, two in the PULP
   bridges' wrappers, and the secure-check polarity in the RTL;
-- one READY-shim run.
+- one READY-shim run;
+- two prefixed subsystems beside an unmodified PULP copy, and the two controls that must fail.
 
 What only the full list runs: the remaining Phase 3 configs and their sv-interface lint, the
 other mutants (most of the AXI ones and every ``-last`` variant), and the remaining READY-shim
@@ -54,6 +55,7 @@ SMOKE: Final[tuple[str, ...]] = (
     "tests/gen/test_external.py::*",
     "tests/gen/test_tests_gen.py::*",
     "tests/gen/test_wrapper_sim.py::*",
+    "tests/gen/test_two_projects.py::*",
     f"{_LINT}[golden/demo_ss-*]",
     f"{_ROUTE}[golden/demo_ss*]",
     f"{_LINT}[p2/*]",

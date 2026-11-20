@@ -226,7 +226,9 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
 \setting{Module prefix} & No & lowercase name, e.g.\ \code{demo_ss}, without a trailing
   underscore &
   Put, with an underscore, in front of the names of the modules that BAG writes, so that
-  two BAG subsystems can be compiled together. It applies to every design unit BAG
+  two BAG subsystems can be compiled together. The two subsystems also need different
+  \setting{Project name}, \setting{Top module name} and \setting{Parameter package}, which the
+  prefix never renames (section~\ref{sec:two-subsystems}). It applies to every design unit BAG
   packages---the in-house modules, the modules BAG derives from PULP, the vendored PULP
   modules, packages and interfaces, BAG's own formal property modules and the vendored
   ZipCPU protocol checkers---and to the sub-wrapper modules, and to the names of the files
@@ -242,8 +244,8 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
   \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or ends with
   an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
   sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the flat harness, the parameter
-  package, an interface, a user module or a SystemVerilog keyword; the top wrapper, the
-  parameter package and user modules are never renamed. \ruleid{PROJ-NAME-LENGTH} warns
+  package, an interface, a user module or a SystemVerilog keyword; none of those names is
+  ever prefixed (section~\ref{sec:prefix}). \ruleid{PROJ-NAME-LENGTH} warns
   when a prefixed name would be longer than 64 characters.\\
 \end{wbtable}
 

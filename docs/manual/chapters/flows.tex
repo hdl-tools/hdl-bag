@@ -339,7 +339,8 @@ unit with one clock domain runs on one clock, and each solver step is one edge.
   for what the design drives and assumes them for what the environment drives; on a
   port where the design is the master, the other way round. AXI4-Lite and APB ports use
   the ZipCPU checkers, AXI4 ports \file{bag_faxi4.sv} and AHB-Lite ports
-  \file{bag_fahb.sv}. The checks that a response comes within a bounded time are off,
+  \file{bag_fahb.sv} (these file names take the \setting{Module prefix},
+  section~\ref{sec:prefix}). The checks that a response comes within a bounded time are off,
   because a port waits as long as the slaves beyond it stall. Tasks: \code{bmc} (depth
   16), and a \code{cover_<port>} task for each port, at a depth that fits the path from
   that port to a peer (at least 16). A port whose covers its fabric's route job already

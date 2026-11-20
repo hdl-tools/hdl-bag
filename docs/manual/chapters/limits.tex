@@ -298,6 +298,13 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 \label{sec:limits-output}
 
 \begin{itemize}
+\item \textbf{Two subsystems need different names that you choose.} The module prefix does
+  not rename \setting{Project name}, \setting{Top module name} or \setting{Parameter
+  package}, nor the generated interfaces and flat harness that carry them. Two subsystems
+  with the same ones declare the same units, and BAG cannot check that across runs
+  (section~\ref{sec:two-subsystems}). The joint compile of two prefixed subsystems and an
+  unmodified PULP copy is tested with slang and Verilator, against the same PULP version
+  only.
 \item \textbf{The environment's macros are shared by design.} The module prefix reaches
   every macro that a packaged file defines, but not the macros that only the environment
   defines and the files merely test: \code{VERILATOR}, \code{SYNTHESIS}, \code{UVM},
