@@ -221,11 +221,12 @@ present (\ruleid{VALUE-MISSING}) and each may appear once.
 \setting{Module prefix} & No & lowercase name, e.g.\ \code{demo_ss}, without a trailing
   underscore &
   Put, with an underscore, in front of the names of the modules that BAG writes, so that
-  two BAG subsystems can be compiled together. It applies to the in-house modules, the
-  modules BAG derives from PULP, and the sub-wrapper modules, and to the names of the files
-  that hold them (\file{rtl/inhouse/soc1_bag_sync.sv}). It does not yet apply to the
-  vendored PULP modules, packages and interfaces, to the formal checker files, or to the
-  macros and include guards (section~\ref{sec:limits-output}). Blank is
+  two BAG subsystems can be compiled together. It applies to every design unit BAG
+  packages---the in-house modules, the modules BAG derives from PULP, the vendored PULP
+  modules, packages and interfaces, BAG's own formal property modules and the vendored
+  ZipCPU protocol checkers---and to the sub-wrapper modules, and to the names of the files
+  that hold them (\file{rtl/inhouse/soc1_bag_sync.sv}). It does not apply to the macros, the
+  include guards or the header file names (section~\ref{sec:limits-output}). Blank is
   legal. \ruleid{PROJ-MODULE-PREFIX} refuses a value that is not a lowercase identifier or
   ends with an underscore. \ruleid{PROJ-PREFIX-COLLISION} refuses a prefix under which a
   sub-wrapper or a BAG or PULP unit would get the name of the top wrapper, the flat harness, the parameter
