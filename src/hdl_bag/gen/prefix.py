@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""Project > Module prefix applied to BAG's own RTL (stage 2 of issue #106).
+"""Project > Module prefix applied to every design unit BAG emits (issue #106).
 
-Three kinds of unit take the prefix: the in-house modules, the modules BAG derives from PULP,
-and the sub-wrappers. The first two are renamed in the copied source by ``rewrite``; sub-wrapper
-names are a user's words and are only ever joined in the generator (``unit``), never put in the
-rename map, so a sub-wrapper called like a local signal cannot rename that signal. The vendored
-PULP units, the formal checker units and the macros are not touched yet. What the checks call
-prefixed and fixed (``checks/wrapper.py``) is what this module does.
+All five kinds of unit take the prefix: the in-house modules, the modules BAG derives from PULP,
+the vendored PULP units, BAG's own formal units and the vendored ZipCPU units. They are renamed
+in the copied source by ``rewrite``, and the file that holds them takes the prefix on its
+basename (``out_path``). Sub-wrapper names are a user's words and are only ever joined in the
+generator (``unit``), never put in the rename map, so a sub-wrapper called like a local signal
+cannot rename that signal. Macros, include guards and header names are not touched (stage 4).
+What the checks call prefixed and fixed (``checks/wrapper.py``) is what this module does.
+
+The rename exists only in the generated copy: the packaged PULP and ZipCPU files are never
+edited. A renamed upstream file says so on its first line (``note``).
 """
 
 import re
@@ -18,6 +22,10 @@ from types import MappingProxyType
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
 from hdl_bag.naming import PREFIXED_ORIGINS, Unit, emitted_units, unit_name
+from hdl_bag.templates.sources import VENDOR
+
+_RTL = (".sv", ".v", ".svh", ".vh")
+_UPSTREAM = (f"{VENDOR}/", "formal/vendor/zipcpu/")
 
 # One alternative per kind of token that must not be renamed, then the identifier itself, so a
 # unit name is replaced only where it is a whole identifier outside a comment or string.
@@ -30,7 +38,7 @@ _TOKEN = re.compile(
 
 @cache
 def _applied() -> tuple[Unit, ...]:
-    """The units the prefix is applied to."""
+    """The units the prefix is applied to: every unit BAG emits."""
     return tuple(u for u in emitted_units().values() if u.origin in PREFIXED_ORIGINS)
 
 
@@ -41,7 +49,7 @@ def _applied_files() -> frozenset[str]:
 
 @cache
 def renames(prefix: str | None) -> Mapping[str, str]:
-    """Old unit name -> new, for the in-house and derived units; empty for a blank prefix."""
+    """Old unit name -> new, for every unit BAG emits; empty for a blank prefix."""
     if not prefix:
         return MappingProxyType({})
     return MappingProxyType({u.name: unit_name(prefix, u.name) for u in _applied()})
@@ -64,23 +72,47 @@ def out_path(rel: str, prefix: str | None) -> str:
 
 
 def unit(spec: Spec, name: str) -> str:
-    """The generated name of the in-house or derived unit NAME; a typo fails here."""
-    prefix = spec.project.module_prefix
-    if name not in {u.name for u in _applied()}:
-        raise GenerateError(f"{name} is not an in-house or derived unit")
-    return unit_name(prefix, name)
+    """The generated name of the unit NAME that BAG emits; a typo fails here."""
+    if name not in emitted_units():
+        raise GenerateError(f"{name} is not a unit BAG emits")
+    return unit_name(spec.project.module_prefix, name)
 
 
-def note(rel: str, text: str, prefix: str | None) -> str:
-    """TEXT of derived file REL with a line saying the unit names carry PREFIX, after the SPDX
-    line: its header names the module it was derived into, which the rename makes stale."""
-    if not prefix or not rel.startswith("rtl/vendor/derived/"):
+def note(rel: str, text: str, prefix: str | None, changed: bool = True) -> str:
+    """TEXT of file REL with a line saying the unit names carry PREFIX.
+
+    A derived file gets it after the SPDX line: its header names the module it was derived
+    into, which the rename makes stale. A vendored PULP or ZipCPU RTL file gets it as line 1,
+    above the upstream header (a copyright paragraph or a banner that a line after line 1 would
+    split), but only if the rewrite CHANGED its text; the licence still travels in the file.
+    """
+    if not prefix:
         return text
-    first, _, rest = text.partition("\n")
-    line = f'// Unit names carry the prefix "{prefix}_" (hdl-bag Project > Module prefix).'
-    return f"{first}\n{line}\n{rest}"
+    if rel.startswith("rtl/vendor/derived/"):
+        first, _, rest = text.partition("\n")
+        line = f'// Unit names carry the prefix "{prefix}_" (hdl-bag Project > Module prefix).'
+        return f"{first}\n{line}\n{rest}"
+    if changed and rel.startswith(_UPSTREAM) and rel.endswith(_RTL):
+        line = (f'// Modified by hdl-bag: design unit names carry the prefix "{prefix}_" '
+                "(Project > Module prefix). No other change.")  # fmt: skip
+        return f"{line}\n{text}"
+    return text
+
+
+def source_note(text: str, prefix: str | None) -> str:
+    """The ZipCPU SOURCE.md as written: it says "unmodified", so under a prefix one line says
+    what changed. Blank prefix: verbatim."""
+    if not prefix:
+        return text
+    line = (f'In this output the module names and file names carry the prefix "{prefix}_" '
+            "(hdl-bag Project > Module prefix), as each file's first line states.")  # fmt: skip
+    return f"{text}{line}\n"
 
 
 def transform(rel: str, text: str, prefix: str | None) -> str:
-    """The copy of packaged file REL as it is written: renamed units, plus the derived note."""
-    return note(rel, rewrite(text, renames(prefix)), prefix)
+    """The copy of packaged file REL as it is written: renamed units and the notes. Only RTL
+    files pass through the identifier rewrite; licences and other prose are returned as is."""
+    if not rel.endswith(_RTL):
+        return text
+    out = rewrite(text, renames(prefix))
+    return note(rel, out, prefix, out != text)

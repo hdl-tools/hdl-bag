@@ -12,7 +12,8 @@ Output layout (relative to the output directory)::
     rtl/inhouse/<prefix>_*.sv  copies of the in-house IP the design uses, with their modules
                                renamed
     rtl/vendor/derived/<prefix>_*.sv  the modules BAG derives from PULP, likewise
-    rtl/vendor/pulp/...        copies of the vendored PULP files the design uses
+    rtl/vendor/pulp/...        copies of the vendored PULP files the design uses, with their units
+                               renamed
     rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
@@ -25,12 +26,14 @@ Output layout (relative to the output directory)::
     formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job
                                (Generate formal; see hdl_bag.formal_gen)
     formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (D60)
-    formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE
+    formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE and SOURCE.md
+    formal/<prefix>_bag_step.v, <prefix>_bag_faxi4.sv, <prefix>_bag_fahb.sv  BAG's own checkers
     bag_outputs.json           every file written (with sha256), the top and the file list
 
 With a blank Project > Module prefix the ``<prefix>_`` parts are absent and the copies are
-byte for byte the packaged files. The top wrapper, the package, the flat harness, the
-interfaces and the vendored PULP files keep their names (``gen.prefix``).
+byte for byte the packaged files. The top wrapper, the parameter package, the flat harness, the
+generated interfaces, the headers and the generated formal files keep their names; every unit
+BAG packages, vendored PULP and ZipCPU included, takes the prefix (``gen.prefix``).
 """
 
 import hashlib
@@ -50,7 +53,7 @@ from hdl_bag.gen.collateral import (
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
-from hdl_bag.gen.prefix import out_path, transform
+from hdl_bag.gen.prefix import out_path, source_note, transform
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import TieOff, render_harness, render_interface, render_modules
 from hdl_bag.ir import dumps
@@ -221,7 +224,10 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
                                        user_header):  # fmt: skip
             _write(outdir, rel, text, written)
         for rel in vendored_files(spec, netlist):  # the ZipCPU checkers, with their LICENSE
-            _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+            text = transform(rel, (pkg_root / rel).read_text(encoding="utf-8"), prefix)
+            if rel.endswith("/SOURCE.md"):
+                text = source_note(text, prefix)
+            _write(outdir, out_path(rel, prefix), text, written)
         sby = tuple(sorted(r for r in written if r.startswith("formal/") and r.endswith(".sby")))
     _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,

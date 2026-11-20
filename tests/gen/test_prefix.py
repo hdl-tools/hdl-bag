@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from hdl_bag.gen.prefix import note, out_path, renames, rewrite, unit
+from hdl_bag.gen.prefix import note, out_path, renames, rewrite, source_note, transform, unit
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import load
 from hdl_bag.naming import emitted_units
@@ -65,7 +65,13 @@ def test_out_path_prefixes_the_basename_of_applied_files_only() -> None:
     )
     assert out_path("rtl/inhouse/bag_axi_cut.sv", None) == "rtl/inhouse/bag_axi_cut.sv"
     pulp = next(u.path for u in emitted_units().values() if u.origin == "pulp")
-    assert out_path(pulp, "soc1") == pulp
+    head, _, base = pulp.rpartition("/")
+    assert out_path(pulp, "soc1") == f"{head}/soc1_{base}"
+    assert out_path("formal/bag_step.v", "soc1") == "formal/soc1_bag_step.v"
+    assert out_path("rtl/vendor/pulp/axi/include/axi/typedef.svh", "soc1") == (
+        "rtl/vendor/pulp/axi/include/axi/typedef.svh"
+    )
+    assert out_path("formal/vendor/zipcpu/LICENSE", "soc1") == "formal/vendor/zipcpu/LICENSE"
 
 
 def test_the_derived_note_follows_the_spdx_line_and_only_under_a_prefix() -> None:
@@ -81,6 +87,38 @@ def test_the_derived_note_follows_the_spdx_line_and_only_under_a_prefix() -> Non
 
 def test_a_name_that_is_not_a_unit_fails_at_render() -> None:
     spec = load(GOLDEN_IR)
-    with pytest.raises(GenerateError, match="bag_nope is not an in-house or derived unit"):
+    with pytest.raises(GenerateError, match="bag_nope is not a unit BAG emits"):
         unit(spec, "bag_nope")
     assert unit(spec, "bag_sync") == "bag_sync"
+    assert unit(spec, "bag_faxi4") == "bag_faxi4"
+
+
+def test_only_rtl_files_pass_through_the_rewrite() -> None:
+    text = "axi_cut is licensed under the Solderpad licence"
+    assert transform("rtl/vendor/pulp/axi/LICENSE", text, "p") is text
+    assert transform("formal/vendor/zipcpu/SOURCE.md", text, "p") is text
+
+
+def test_an_upstream_file_the_rewrite_changed_gets_the_note_as_line_one() -> None:
+    rel = "rtl/vendor/pulp/axi/src/axi_cut.sv"
+    out = transform(rel, "// Copyright ETH\nmodule axi_cut;\n", "p")
+    assert out == (
+        '// Modified by hdl-bag: design unit names carry the prefix "p_" (Project > Module prefix).'
+        " No other change.\n// Copyright ETH\nmodule p_axi_cut;\n"
+    )
+    plain = "// Copyright ETH\n`define X 1\n"
+    assert transform("rtl/vendor/pulp/axi/include/axi/assign.svh", plain, "p") == plain
+    assert transform(rel, "module axi_cut;\n", None) == "module axi_cut;\n"
+    assert not transform("rtl/inhouse/bag_sync.sv", "module bag_sync;\n", "p").startswith(
+        "// Modified"
+    )
+    assert not transform("formal/bag_step.v", "module bag_step_ff0;\n", "p").startswith(
+        "// Modified"
+    )
+
+
+def test_the_source_note_is_one_appended_line_and_only_under_a_prefix() -> None:
+    text = "Files ... unmodified.\n"
+    assert source_note(text, None) is text
+    out = source_note(text, "p")
+    assert out.startswith(text) and out.count("\n") == 2 and '"p_"' in out
