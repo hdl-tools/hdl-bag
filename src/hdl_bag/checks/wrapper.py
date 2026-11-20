@@ -10,12 +10,10 @@ from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
 from hdl_bag.naming import (
     MAX_UNIT_NAME,
-    PREFIXED_ORIGINS,
     SV_KEYWORDS,
     describe,
     emitted_units,
     flat_signal_name,
-    label,
     unit_name,
 )
 from hdl_bag.protocols import (
@@ -413,9 +411,10 @@ def check_external_modules(ctx: Context) -> None:
 
 
 def _prefixed_units(ctx: Context) -> list[tuple[str, str]]:
-    """Units that take Module prefix: (base name, what it is). The top wrapper is not among
-    them (it is instantiated by the integrator under the name the user gave it). A sub-wrapper
-    that shares a name with an emitted unit is listed next to it, so the clash is reported."""
+    """Units that take Module prefix: (base name, what it is): every unit BAG emits, PULP and
+    ZipCPU included, and the sub-wrappers. The top wrapper is not among them (it is instantiated
+    by the integrator under the name the user gave it). A sub-wrapper that shares a name with an
+    emitted unit is listed next to it, so the clash is reported."""
     out = [(name, describe(unit)) for name, unit in emitted_units().items()]
     # A repeated sub-wrapper name is NAME-UNIQUE's to report, not a clash with itself.
     names = dict.fromkeys(n for r in ctx.raw.sub_wrappers[1:] if (n := ctx.text(r["Sub-wrapper"])))
@@ -423,18 +422,23 @@ def _prefixed_units(ctx: Context) -> list[tuple[str, str]]:
 
 
 def _fixed_units(ctx: Context, prefixed: set[str]) -> dict[str, str]:
-    """Units that keep their name under a prefix: name -> what it is."""
+    """Units that keep their name under a prefix: name -> what it is. Every unit BAG packages
+    takes the prefix, so these are the generated top wrapper, parameter package, flat harness and
+    interfaces, the default stub of an opaque fabric, and a user's External modules.
+
+    Not every name that keeps it: the generated formal units (``bag_<project>_decode`` and the
+    rest, formal_gen) also do, and are not here, so a clash with one of them is not reported.
+    Issue #152 has the case and the fix; it is reachable without a prefix, so it is not this
+    check's to fix.
+    """
     s = ctx.raw.wrapper
     top = ctx.text(s["Top module name"]) if "Top module name" in s else None
     package = ctx.text(s["Parameter package"]) if "Parameter package" in s else None
-    # Only what the generator really prefixes leaves `fixed`: PULP, formal and ZipCPU names stay.
-    unreached = {n: u for n, u in emitted_units().items() if u.origin not in PREFIXED_ORIGINS}
-    kept = (_generated_modules(ctx) - prefixed) | set(unreached)
+    kept = _generated_modules(ctx) - prefixed
     project = (
         ctx.text(ctx.raw.project["Project name"]) if "Project name" in ctx.raw.project else None
     )
     out = dict.fromkeys(kept, "a module BAG generates")
-    out |= {n: label(u) for n, u in unreached.items()}
     out |= {f"{project}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
     out |= {f"{top}_flat": "the generated flat harness", package or "": "the parameter package"}
     out[top or ""] = "the top wrapper"

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-"""Project > Module prefix in the generated RTL (stage 2 of issue #106): the in-house modules,
-the modules BAG derives from PULP and the sub-wrappers take it, nothing else does yet, and a
-blank prefix changes nothing."""
+"""Project > Module prefix in the generated RTL (stages 2 and 3 of issue #106): every unit BAG
+emits takes it (in-house, derived, vendored PULP, BAG's formal units, vendored ZipCPU, and the
+sub-wrappers), the formal jobs follow the renamed files, and a blank prefix changes nothing."""
 
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -40,11 +41,40 @@ def _stems(sub: str) -> set[str]:
 
 # Computed from the package directories, not from gen.prefix, so the tests do not depend on it.
 BAG = _stems("rtl/inhouse") | _stems("rtl/vendor/derived")
+PULP, ZIPCPU = "rtl/vendor/pulp/", "formal/vendor/zipcpu/"
+NOTE = (
+    '// Modified by hdl-bag: design unit names carry the prefix "{}_" (Project > Module prefix). '
+    "No other change."
+)
 _STRIP = re.compile(r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"", re.DOTALL)
 _IDENT = re.compile(r"[A-Za-z_]\w*")
 _DECL = re.compile(
     r"^\s*(?:module|macromodule|interface|package)\s+(?:static\s+|automatic\s+)?(\w+)", re.M
 )
+
+
+def _package_units() -> set[str]:
+    """Every unit name BAG emits, from the package directories and the PULP index."""
+    names: set[str] = set()
+    for sub in ("rtl/inhouse", "rtl/vendor/derived", "formal", "formal/vendor/zipcpu"):
+        for f in (files("hdl_bag") / sub).iterdir():
+            if f.name.endswith((".sv", ".v")):
+                names |= _declared(f.read_text(encoding="utf-8"))
+    index = json.loads((files("hdl_bag") / "rtl/vendor/pulp/index.json").read_text("utf-8"))
+    return names | {u for f in index["files"] for u in f["defines"]}
+
+
+FORMAL_OWN = {f.name for f in (files("hdl_bag") / "formal").iterdir()
+              if f.name.endswith((".sv", ".v"))}  # fmt: skip
+_REF = re.compile(
+    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|`\w+|\$\w+|\\\S+|[A-Za-z_][A-Za-z0-9_$]*",
+    re.DOTALL,
+)
+
+
+def _reference_rewrite(text: str) -> str:
+    """The test's own token rewrite: whole identifiers outside comments, strings and macros."""
+    return _REF.sub(lambda m: f"{PREFIX}_{m[0]}" if m[0] in UNITS else m[0], text)
 
 
 def _with_prefix(spec: Spec) -> Spec:
@@ -62,6 +92,9 @@ def _declared(text: str) -> set[str]:
 
 def _tokens(text: str) -> set[str]:
     return set(_IDENT.findall(_STRIP.sub("", text)))
+
+
+UNITS = _package_units()
 
 
 # ---- Every template names BAG's units through unit() -------------------------------------
@@ -88,15 +121,16 @@ def test_no_template_names_a_bag_unit_without_the_prefix(template: Path) -> None
 # ---- A blank prefix changes nothing ------------------------------------------------------
 
 
-@pytest.mark.parametrize("config", [GOLDEN, "p3/axi_shared_rr", "p3/mixed_adapters_bridges"])
+@pytest.mark.parametrize("config", [GOLDEN, "p3/mixed_apb_masters", "p3/mixed_adapters_bridges"])
 def test_a_blank_prefix_copies_every_file_as_packaged(config: str, tmp_path: Path) -> None:
     configs, name = _split(config)
     generate(load(configs / f"{name}.ir.yaml"), tmp_path, configs)
-    copied = [r for r in _tree(tmp_path) if r.startswith((INHOUSE, "rtl/vendor/"))]
-    assert copied
-    for rel in copied:
-        if rel.endswith("/LICENSE"):
-            continue
+    packaged = [r for r in _tree(tmp_path) if r.startswith((INHOUSE, "rtl/vendor/", "formal/"))
+                and (files("hdl_bag") / r).is_file()]  # fmt: skip
+    assert any(r.startswith("formal/vendor/") for r in packaged)
+    assert any(r.startswith("formal/bag_") for r in packaged)
+    assert any(r.endswith("/LICENSE") for r in packaged)
+    for rel in packaged:
         assert (tmp_path / rel).read_bytes() == (files("hdl_bag") / rel).read_bytes(), rel
 
 
@@ -112,7 +146,10 @@ def _expect(spec: Spec) -> Callable[[str], str]:
 
     def expect(rel: str) -> str:
         head, _, base = rel.rpartition("/")
-        if rel in subs or head in (INHOUSE.rstrip("/"), DERIVED.rstrip("/")):
+        rtl = rel.endswith((".sv", ".v"))
+        own = head == "formal" and base in FORMAL_OWN  # not the generated formal files
+        under = rel.startswith((INHOUSE, DERIVED, PULP, ZIPCPU))
+        if rel in subs or (rtl and (under or own)):
             return f"{head}/{PREFIX}_{base}"
         return rel
 
@@ -137,31 +174,38 @@ def trees(tmp_path_factory: pytest.TempPathFactory) -> Trees:
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
-def test_the_prefix_reaches_in_house_derived_and_sub_wrapper_files_and_no_others(
+def test_the_prefix_reaches_every_unit_file_and_no_other(
     trees: Trees,
     config: str,
     style: str | None,
 ) -> None:
     """A. The generator-side statement of checks/wrapper._fixed_units: the top, the package,
-    <top>_flat, <project>_<proto>_if, rtl/ext and every formal file keep their paths."""
+    <top>_flat, <project>_<proto>_if, rtl/ext, headers, LICENSE, SOURCE.md and the generated
+    formal files keep their paths; every other unit file takes the prefix on its basename."""
     spec, blank, pre = trees(config, style)
     expect = _expect(spec)
     assert set(pre) == {expect(rel) for rel in blank}
     assert any(r.startswith(f"{INHOUSE}{PREFIX}_") for r in pre)
+    if any(r.startswith(PULP) for r in blank):
+        assert any(r.startswith(PULP) and "/" + PREFIX + "_" in r for r in pre)
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
-def test_no_generated_source_names_an_unprefixed_bag_unit(
+def test_no_generated_source_names_an_unprefixed_unit(
     trees: Trees,
     config: str,
     style: str | None,
 ) -> None:
-    """B. Outside the vendored PULP and ZipCPU trees, no identifier is a bare in-house or
-    derived unit name (comments and strings keep theirs: messages are left untouched)."""
-    _, _, pre = trees(config, style)
-    for rel, data in pre.items():
-        if rel.endswith(".sv") and not rel.startswith(("rtl/vendor/pulp/", "formal/vendor/")):
-            assert not _tokens(data.decode()) & BAG, rel
+    """B. No identifier in any generated source or header is a bare unit name (comments and
+    strings keep theirs: messages are left untouched)."""
+    _, blank, pre = trees(config, style)
+    assert len(UNITS) >= 143 and {"axi_pkg", "AXI_BUS", "lzc", "faxil_slave"} <= UNITS
+    scanned = {r: d for r, d in pre.items() if r.endswith((".sv", ".v", ".svh", ".vh"))}
+    for rel, data in scanned.items():
+        assert not _tokens(data.decode()) & UNITS, rel
+    for tree in (PULP, "formal/vendor/"):
+        if any(r.startswith(tree) for r in blank):
+            assert any(r.startswith(tree) for r in scanned), tree
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
@@ -170,13 +214,19 @@ def test_a_copied_file_declares_the_prefixed_units_of_its_packaged_file(
     config: str,
     style: str | None,
 ) -> None:
-    """C. Not 'one unit named as its stem': a file may hold several units."""
+    """C. Not 'one unit named as its stem': a file may hold several units (axi_intf.sv declares
+    seven interfaces, bag_step.v two modules)."""
     spec, blank, pre = trees(config, style)
     expect = _expect(spec)
-    for rel in (r for r in blank if r.startswith((INHOUSE, DERIVED))):
+    checked = 0
+    for rel in (r for r in blank if r.endswith((".sv", ".v")) and expect(r) != r):
+        if not (files("hdl_bag") / rel).is_file():
+            continue  # a sub-wrapper
+        checked += 1
         packaged = (files("hdl_bag") / rel).read_text(encoding="utf-8")
         want = {f"{PREFIX}_{u}" for u in _declared(packaged)}
-        assert _declared(pre[expect(rel)].decode()) == want
+        assert _declared(pre[expect(rel)].decode()) == want, rel
+    assert checked
 
 
 @pytest.mark.parametrize(("config", "style"), CASES)
@@ -215,18 +265,107 @@ def test_the_file_list_the_jobs_and_the_manifest_follow_the_renamed_files(
     assert manifest["top"] == json.loads(blank[MANIFEST])["top"]
 
 
+def _resolve(files_: dict[str, str], tree: dict[str, bytes], name: str) -> str | None:
+    """The written file that NAME (as a job's script names it, inside the job's [files]) is."""
+    for dest, src in files_.items():
+        if name == dest or name.startswith(dest + "/"):
+            found = posixpath.normpath(posixpath.join("formal", src, name[len(dest) :].lstrip("/")))
+            return found if found in tree else None
+    return None
+
+
+def _job_problems(rel: str, tree: dict[str, bytes]) -> list[str]:
+    """What is wrong with the SymbiYosys job REL of TREE: a source it names that was not
+    written, or a `copy` of a module that none of the files it reads declares."""
+    section, files_, reads, copies, bad = "", {}, [], [], []
+    for line in tree[rel].decode().split("\n"):
+        if line.startswith("["):
+            section = line
+        elif section == "[files]" and line.strip():
+            dest, _, src = line.partition(" ")
+            files_[dest] = src or dest
+        elif section == "[script]":
+            words = re.sub(r"^\w+: ", "", line).split()
+            if words[:2] == ["read_verilog", "-formal"]:
+                reads.append(words[2])
+            elif words[:1] == ["read_slang"]:
+                reads += [w for w in words if w.endswith((".sv", ".v"))]
+            elif words[:1] == ["copy"]:
+                copies.append(words[1])
+    for dest, src in files_.items():
+        target = posixpath.normpath(posixpath.join("formal", src))
+        if target not in tree and not any(t.startswith(target + "/") for t in tree):
+            bad.append(f"[files] {dest} <- {src} was not written")
+    declared: set[str] = set()
+    for name in dict.fromkeys(reads):
+        found = _resolve(files_, tree, name)
+        if found is None:
+            bad.append(f"{name} is read but not in [files] or not written")
+        elif not name.startswith("rtl/"):
+            declared |= _declared(tree[found].decode())
+    bad += [f"copy {m}: no file the job reads declares it" for m in copies if m not in declared]
+    return bad
+
+
 @pytest.mark.parametrize(("config", "style"), CASES)
-def test_the_vendored_and_formal_trees_are_not_touched_yet(
+def test_every_formal_job_names_only_files_and_modules_it_has(
     trees: Trees,
     config: str,
     style: str | None,
 ) -> None:
-    """F. Stage 3 changes this on purpose."""
+    """E. Blank and prefixed alike: a job's [files], read_verilog, read_slang and copy lines all
+    resolve in the written tree (the job is the only thing that knows the renamed file names)."""
     _, blank, pre = trees(config, style)
-    keep = [r for r in blank if r.startswith(("rtl/vendor/pulp/", "formal/vendor/"))
-            or r in ("formal/bag_step.v", "formal/bag_faxi4.sv", "formal/bag_fahb.sv")]  # fmt: skip
-    for rel in keep:
-        assert pre[rel] == blank[rel], rel
+    jobs = [r for r in blank if r.startswith("formal/") and r.endswith(".sby")]
+    for tree in (blank, pre):
+        assert [r for r in tree if r.startswith("formal/") and r.endswith(".sby")] == jobs
+        for rel in jobs:
+            assert _job_problems(rel, tree) == [], rel
+    assert jobs or not any(r.startswith("formal/") for r in blank)
+
+
+def test_the_job_check_sees_a_missing_file_and_a_copy_of_an_undeclared_module(
+    trees: Trees,
+) -> None:
+    _, blank, _ = trees("p3/mixed_apb_masters", None)
+    job = "formal/mixed_apb_masters_protocol.sby"
+    assert _job_problems(job, blank) == []
+    gone = {r: d for r, d in blank.items() if r != "formal/bag_step.v"}
+    assert _job_problems(job, gone)
+    text = blank[job].decode().replace("copy fapb_slave ", "copy nope ", 1)
+    assert _job_problems(job, {**blank, job: text.encode()})
+
+
+@pytest.mark.parametrize(("config", "style"), CASES)
+def test_renamed_upstream_files_differ_from_the_packaged_ones_by_the_note_and_the_names(
+    trees: Trees,
+    config: str,
+    style: str | None,
+) -> None:
+    """F. (a) Each upstream file the rewrite changed is the note line plus the packaged bytes
+    with unit names replaced, nothing else; (b) the files that are byte for byte as packaged
+    are the licences and the headers that name no unit."""
+    spec, blank, pre = trees(config, style)
+    expect = _expect(spec)
+    upstream = [r for r in blank if r.startswith((PULP, ZIPCPU)) and r.endswith(
+        (".sv", ".v", ".svh"))]  # fmt: skip
+    for rel in upstream:
+        packaged = (files("hdl_bag") / rel).read_text(encoding="utf-8")
+        renamed = _reference_rewrite(packaged)
+        want = f"{NOTE.format(PREFIX)}\n{renamed}" if renamed != packaged else packaged
+        assert pre[expect(rel)].decode() == want, rel
+        assert rel.endswith(".svh") or renamed != packaged, rel
+    same = {r for r in blank if r.startswith((PULP, "formal/vendor/"))
+            and pre[expect(r)] == (files("hdl_bag") / r).read_bytes()}  # fmt: skip
+    headers = {r for r in same if not r.endswith("/LICENSE")}
+    assert {Path(r).name for r in headers} <= {"assign.svh", "assertions.svh", "registers.svh"}
+    assert all(r.endswith(".svh") for r in headers)
+    assert same - headers == {r for r in blank if r.endswith("/LICENSE")
+                              and r.startswith((PULP, "formal/vendor/"))}  # fmt: skip
+    if any(r.startswith(PULP) for r in blank):
+        assert same
+    if config == GOLDEN:
+        assert {Path(r).name for r in headers} == {"assign.svh", "assertions.svh", "registers.svh"}
 
 
 def test_the_corpus_uses_every_builtin_template() -> None:
@@ -260,6 +399,45 @@ def test_the_derived_files_say_the_prefix_and_in_house_files_do_not(
     assert not any(note.encode() in d for d in blank.values())
 
 
+def test_upstream_files_say_what_the_rewrite_changed_on_their_first_line(
+    trees: Trees,
+) -> None:
+    _, blank, pre = trees(GOLDEN, None)
+    note = NOTE.format(PREFIX)
+    noted = {r for r, d in pre.items() if d.decode().split("\n")[0] == note}
+    assert noted
+    assert all(r.endswith((".sv", ".v", ".svh")) for r in noted)
+    assert any(r.startswith(PULP) for r in noted) and any(r.startswith(ZIPCPU) for r in noted)
+    assert any(r.endswith("/typedef.svh") for r in noted)
+    for rel in pre:
+        if rel.startswith((INHOUSE, "formal/bag_")) or Path(rel).name in (
+            "assign.svh", "assertions.svh", "registers.svh"):  # fmt: skip
+            assert rel not in noted, rel
+    assert not any(note.encode() in d or b"Modified by hdl-bag" in d for d in blank.values())
+    # Derived files keep the stage-2 note and position.
+    assert all(note.encode() not in d for r, d in pre.items() if r.startswith(DERIVED))
+
+
+def test_the_generated_source_note_says_the_names_carry_the_prefix_only_under_one(
+    trees: Trees,
+) -> None:
+    _, blank, pre = trees(GOLDEN, None)
+    rel = f"{ZIPCPU}SOURCE.md"
+    packaged = (files("hdl_bag") / rel).read_bytes()
+    assert blank[rel] == packaged
+    assert pre[rel].startswith(packaged) and pre[rel] != packaged
+    extra = pre[rel][len(packaged) :].decode()
+    assert PREFIX in extra and "first line" in extra and extra.endswith("\n")
+    # Its own paragraph, or Markdown folds it into the preceding one.
+    assert extra.startswith("\n")
+
+
+def _regenerate_blank(tmp_path: Path, configs: Path, name: str) -> Path:
+    out = tmp_path.with_name(tmp_path.name + "_blank")
+    generate(load(configs / f"{name}.ir.yaml"), out, configs)
+    return out
+
+
 def test_changing_the_prefix_leaves_no_file_of_the_old_name(tmp_path: Path) -> None:
     configs, name = _split("p2/ahb2apb_nested")
     spec = load(configs / f"{name}.ir.yaml")
@@ -268,6 +446,10 @@ def test_changing_the_prefix_leaves_no_file_of_the_old_name(tmp_path: Path) -> N
     after = _tree(tmp_path)
     old = {f"{b}.sv" for b in BAG}
     assert not [r for r in after if r.startswith((INHOUSE, DERIVED)) and Path(r).name in old]
+    blank_tree = _tree(_regenerate_blank(tmp_path, configs, name))
+    stale = [r for r in blank_tree if r.startswith((PULP, "formal/")) and r.endswith((".sv", ".v"))
+             and (files("hdl_bag") / r).is_file() and r in after]  # fmt: skip
+    assert stale == [], "files of the unprefixed names remain after the prefix was set"
     assert any(r.startswith(f"{INHOUSE}{PREFIX}_") for r in after)
 
 
@@ -319,15 +501,18 @@ def test_a_prefixed_ahb_design_simulates_its_routes() -> None:
 
 
 @pytest.mark.eda
-def test_a_prefixed_ahb_design_passes_formal() -> None:
-    configs, name = _split("p2/ahb_fixed")
+@pytest.mark.parametrize("config", ["p2/ahb_fixed", "p3/mixed_apb_masters"])
+def test_a_prefixed_design_passes_formal(config: str) -> None:
+    """mixed_apb_masters adds Yosys's own Verilog frontend, `copy` of the renamed ZipCPU modules
+    and a route job, none of which ahb_fixed reaches."""
+    configs, name = _split(config)
     root = REPO / "out" / "prefix" / f"{name}_formal"
     out = generate(_with_prefix(load(configs / f"{name}.ir.yaml")), root, configs)
     report = run_formal(out)
     assert report.ok, report.format()
 
 
-# ---- A prefixed sub-wrapper name never equals a unit the prefix does not reach ------------
+# ---- A prefixed sub-wrapper name never equals a unit's emitted name ------------------------
 
 NESTED = REPO / "tests/configs/p3/nested_adapters.ir.yaml"
 
@@ -347,33 +532,40 @@ def _declarations(root: Path) -> list[str]:
     ]
 
 
-def test_a_prefixed_sub_wrapper_cannot_take_the_name_of_an_unprefixed_unit(
+def test_a_sub_wrapper_cut_under_prefix_axi_sits_beside_pulps_prefixed_axi_cut(
     tmp_path: Path,
 ) -> None:
-    """Sub-wrapper cut under prefix axi is axi_cut, PULP's axi_cut, which the prefix does not
-    reach: the generator must refuse, not write two modules of one name."""
-    spec = _renamed_sub_wrapper("cut", "axi")
-    try:
-        generate(spec, tmp_path, NESTED.parent)
-    except GenerateError as exc:
-        assert "axi_cut" in str(exc)
-        return
+    """The sub-wrapper is axi_cut and PULP's axi_cut is axi_axi_cut: both generate, once each."""
+    generate(_renamed_sub_wrapper("cut", "axi"), tmp_path, NESTED.parent)
     names = _declarations(tmp_path)
-    assert sorted(n for n in set(names) if names.count(n) > 1) == []
-    raise AssertionError("generate() succeeded; expected a refusal naming axi_cut")
-
-
-def test_a_prefixed_sub_wrapper_and_an_unprefixed_unit_get_distinct_module_names(
-    tmp_path: Path,
-) -> None:
-    """Sub-wrapper axi_cut under prefix p is p_axi_cut next to PULP's axi_cut: distinct.
-
-    This is the generator's side only. `bag check` refuses this workbook anyway, for the clash
-    stage 3 of #106 will create once the PULP units take the prefix too -- see
-    test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_stage_3_clash. What is pinned
-    here is that generation itself never writes two modules under one name.
-    """
-    generate(_renamed_sub_wrapper("axi_cut", "p"), tmp_path, NESTED.parent)
-    names = _declarations(tmp_path)
-    assert {"p_axi_cut", "axi_cut"} <= set(names)
+    assert names.count("axi_cut") == 1 and names.count("axi_axi_cut") == 1
     assert len(names) == len(set(names))
+
+
+def test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_under_a_prefix(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper axi_cut under prefix p is p_axi_cut, which is also PULP's axi_cut."""
+    with pytest.raises(GenerateError, match="p_axi_cut") as exc:
+        generate(_renamed_sub_wrapper("axi_cut", "p"), tmp_path, NESTED.parent)
+    assert "HIER-RESERVED-NAME" in str(exc.value)
+
+
+def test_a_prefix_that_makes_units_collide_with_their_own_bases_renames_each_exactly_once(
+    tmp_path: Path,
+) -> None:
+    """Prefix bag: bag_axi_cut is the in-house/derived name, and PULP's axi_cut becomes it.
+    The rewrite is single-pass, so every unit is bag_<name> and none is declared twice."""
+    configs, name = _split("p3/axi_adapters")
+    spec = load(configs / f"{name}.ir.yaml")
+    blank = tmp_path / "blank"
+    generate(spec, blank, configs)
+    project = spec.project.model_copy(update={"module_prefix": "bag"})
+    pre = tmp_path / "pre"
+    generate(spec.model_copy(update={"project": project}), pre, configs)
+    old, names = _declarations(blank), _declarations(pre)
+    assert len(names) == len(set(names)) and len(names) == len(old)
+    assert {f"bag_{u}" for u in old if u in UNITS} <= set(names)
+    # In-house bag_axi_cut is bag_bag_axi_cut; PULP's axi_cut is bag_axi_cut, which it instantiates.
+    text = (pre / "rtl/inhouse/bag_bag_axi_cut.sv").read_text(encoding="utf-8")
+    assert re.search(r"^\s*bag_axi_cut\b", text, re.M)

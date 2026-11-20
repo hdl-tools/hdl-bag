@@ -78,17 +78,25 @@ are. It does not add its file header to them (section~\ref{sec:header}). The lin
 \subsection{The module prefix}
 \label{sec:prefix}
 
-With a \setting{Module prefix}, for example \code{soc1}, BAG renames the in-house modules,
-the modules it derives from PULP, and the sub-wrappers to \code{soc1_<name>}, in the
-declaration, in every instantiation and in the \code{endmodule} label. The files of those
-modules get the same prefix, and the file list follows. The top wrapper, the parameter
-package, the interfaces and the flat harness keep their names, and so do instance names, so
-hierarchical paths do not change. Comments and messages inside the files keep the old
-names. A file that BAG derives from PULP also gets a line after its SPDX line that says
-that its unit names carry the prefix. \file{doc/port_map.md} keeps the sub-wrapper names
-of the Hierarchy sheet. The vendored PULP files are not renamed yet. A lint waiver of your
-own that matches an in-house file by its base name, such as \code{rtl/inhouse/bag_*.sv},
-stops matching once the files are renamed; write it as \code{rtl/inhouse/*bag_*.sv}.
+With a \setting{Module prefix}, for example \code{soc1}, BAG renames every design unit it
+emits to \code{soc1_<name>}: the in-house modules, the modules it derives from PULP, the
+vendored PULP modules, interfaces and packages, BAG's own formal checkers, the vendored ZipCPU
+checkers, and the sub-wrappers. The new name is in the declaration, in every instantiation, in
+every \code{pkg::} scope and in the \code{endmodule} label. The files of those units get the
+same prefix, and the file list and the formal jobs follow. The top wrapper, the parameter
+package, the generated interfaces and the flat harness keep their names, and so do instance
+names, so hierarchical paths do not change. Comments and messages inside the files keep the
+old names. The headers keep their names too, so every include line still resolves. A file
+that BAG derives from PULP also gets a line after its SPDX line that says that its unit names
+carry the prefix. A vendored PULP or ZipCPU file whose text the rename changed gets a line
+above its upstream header: \code{Modified by hdl-bag: design unit names carry the prefix},
+and no other change is made to it; the licence files are copied as they are. The copy of the
+ZipCPU \file{SOURCE.md} gets one added line that says the same. \file{doc/port_map.md} keeps
+the sub-wrapper names of the Hierarchy sheet. A lint waiver of your
+own that matches a copied file by its base name stops matching once the files are renamed:
+\code{rtl/inhouse/bag_*.sv}, \code{rtl/vendor/pulp/**/axi_*.sv} and \code{formal/bag_*.sv} all
+do. Put a wildcard in front of the base name, as in \code{rtl/inhouse/*bag_*.sv}. The waivers
+that ship with BAG match \file{rtl/pkg/}, which never takes the prefix, so they are unaffected.
 
 \lstinputlisting[style=console]{examples/console/out-prefix.txt}
 

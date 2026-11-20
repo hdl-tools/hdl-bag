@@ -92,11 +92,6 @@ def emitted_units() -> Mapping[str, Unit]:
     return MappingProxyType(dict(sorted(out.items())))
 
 
-# The origins whose units Project > Module prefix renames. Stage 3 of #106 adds pulp, formal and
-# zipcpu. `bag check` and the generator both read this, so they cannot disagree about it.
-PREFIXED_ORIGINS: Final[frozenset[UnitOrigin]] = frozenset({"inhouse", "derived"})
-
-
 def unit_name(prefix: str | None, name: str) -> str:
     """NAME with Project > Module prefix in front, joined by an underscore; blank means NAME."""
     return f"{prefix}_{name}" if prefix else name
@@ -104,7 +99,7 @@ def unit_name(prefix: str | None, name: str) -> str:
 
 def emitted_name(prefix: str | None, unit: Unit) -> str:
     """The name the generator writes for UNIT under PREFIX."""
-    return unit_name(prefix, unit.name) if unit.origin in PREFIXED_ORIGINS else unit.name
+    return unit_name(prefix, unit.name)
 
 
 def flat_signal_name(pattern: str, port: str, proto: str, signal: str, prefix: str | None) -> str:
