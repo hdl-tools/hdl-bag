@@ -128,6 +128,10 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Wrapper row 9: the parameter package is named bag_demo_ss_reset_props, which is also the formal reset property module; choose another Parameter package (NAME-RESERVED)"]),
     ("HIER-RESERVED-NAME-formal-unit", [("Hierarchy", 7, "Sub-wrapper", "bag_demo_ss_unit_x"), ("Hierarchy", 20, "Sub-wrapper", "bag_demo_ss_unit_x")],
      ["Hierarchy row 7: sub-wrapper bag_demo_ss_unit_x has the name of a formal unit harness; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    # A setting that does not apply is warned about and ignored, never validated: one message,
+    # and not a VALUE-ILLEGAL from inside resolve (#156).
+    ("FAB-NA-SETTING-junk-value", [("Fabrics", 7, "Max mst trans", "abc")],
+     ["Fabrics row 7: Max mst trans 'abc' does not apply to a non-AXI fabric; set n/a (FAB-NA-SETTING)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
