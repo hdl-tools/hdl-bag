@@ -399,6 +399,8 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
     ("HIER-RESERVED-NAME-formal", [("Hierarchy", 7, "Sub-wrapper", "faxil_slave"), ("Hierarchy", 20, "Sub-wrapper", "faxil_slave")],
      ["Hierarchy row 7: sub-wrapper faxil_slave has the name of a vendored ZipCPU module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    ("HIER-RESERVED-NAME-header-package", [("Hierarchy", 7, "Sub-wrapper", "assert_rpt_pkg"), ("Hierarchy", 20, "Sub-wrapper", "assert_rpt_pkg")],
+     ["Hierarchy row 7: sub-wrapper assert_rpt_pkg has the name of a vendored PULP package; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
     ("HIER-EMPTY", [("Hierarchy", 9, "Sub-wrapper", "spare_wrapper"), ("Hierarchy", 9, "Parent", "demo_ss_bus_top")],
      ["Hierarchy row 9: sub-wrapper spare_wrapper has no instances (HIER-EMPTY)"]),
     ("WRAP-PORT-NOT-LISTED", _clear("Wrapper", 31, ("Port", "Exposed at top", "Top-level prefix")),
