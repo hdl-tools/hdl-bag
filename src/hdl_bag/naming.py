@@ -4,43 +4,92 @@
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
-from typing import Final
+from types import MappingProxyType
+from typing import Final, Literal
 
 # Longest generated unit name that PROJ-NAME-LENGTH accepts without a warning.
 MAX_UNIT_NAME: Final = 64
 
 
-_DECL = re.compile(r"^\s*(module|interface|package)\s+(?:automatic\s+)?(\w+)", re.MULTILINE)
+_DECL = re.compile(
+    r"^\s*(module|macromodule|interface|package)\s+(?:(?:static|automatic)\s+)?(?!class\b)(\w+)",
+    re.MULTILINE,
+)
+
+UnitKind = Literal["module", "interface", "package"]
+UnitOrigin = Literal["pulp", "inhouse", "derived", "formal", "zipcpu"]
+
+# origin -> (package directory, noun phrase around the kind). Each noun reads after "a"/"an".
+_ORIGINS: Final = (
+    ("inhouse", "rtl/inhouse"),
+    ("derived", "rtl/vendor/derived"),
+    ("formal", "formal"),
+    ("zipcpu", "formal/vendor/zipcpu"),
+)
+
+
+@dataclass(frozen=True)
+class Unit:
+    """One design unit BAG can copy into an output: where it lives and what it is."""
+
+    name: str
+    path: str  # package-relative, as importlib.resources takes it; one file may hold several
+    kind: UnitKind
+    origin: UnitOrigin
+
+
+def describe(unit: Unit) -> str:
+    """The unit as a noun phrase without an article, e.g. ``vendored PULP module``."""
+    return {
+        "pulp": f"vendored PULP {unit.kind}",
+        "inhouse": f"in-house {unit.kind}",
+        "derived": f"{unit.kind} BAG derives from PULP",
+        "formal": f"BAG formal checker {unit.kind}",
+        "zipcpu": f"vendored ZipCPU {unit.kind}",
+    }[unit.origin]
+
+
+def label(unit: Unit) -> str:
+    """The unit as a phrase for messages, e.g. ``a vendored PULP module``."""
+    noun = describe(unit)
+    return f"{'an' if noun[0] in 'aeiou' else 'a'} {noun}"
+
+
+def _declared(text: str) -> list[tuple[UnitKind, str]]:
+    return [
+        ("module" if kind == "macromodule" else kind, name) for kind, name in _DECL.findall(text)
+    ]
 
 
 @cache
-def emitted_units() -> Mapping[str, str]:
-    """Every design unit BAG can copy or write, name -> what it is.
+def emitted_units() -> Mapping[str, Unit]:
+    """Every design unit BAG can copy into an output, by name, in sorted order.
 
     Static: the per-design units (wrappers, interfaces, the package) are not here. Interfaces and
-    packages share the design-unit namespace with modules, so they are labelled as what they are.
+    packages share the design-unit namespace with modules, so each carries its kind. The vendored
+    headers are left out on purpose: the one unit they declare, ``assert_rpt_pkg``, sits inside
+    ``ifdef UVM``, which BAG never defines, so it is never elaborated and cannot collide
+    (``tests/test_naming.py`` fails if a re-vendor adds another).
     """
     from hdl_bag.templates.sources import VENDOR, vendored_units
 
-    out: dict[str, str] = {}
-    for path in sorted(set(vendored_units().values())):
+    out: dict[str, Unit] = {}
+    vendored = vendored_units()
+    for path in sorted(set(vendored.values())):
         text = (files("hdl_bag") / VENDOR / path).read_text(encoding="utf-8")
-        kinds = {name: kind for kind, name in _DECL.findall(text)}
-        for unit, p in vendored_units().items():
-            if p == path:
-                out[unit] = f"a vendored PULP {kinds.get(unit, 'module')}"
-    for sub, what in (
-        ("inhouse", "an in-house module"),
-        ("vendor/derived", "a module BAG derives from PULP"),
-    ):
-        out |= {
-            f.name[:-3]: what
-            for f in (files("hdl_bag") / "rtl" / sub).iterdir()
-            if f.name.endswith(".sv")
-        }
-    return out
+        kinds = {name: kind for kind, name in _declared(text)}
+        for unit in sorted(u for u, p in vendored.items() if p == path):
+            out[unit] = Unit(unit, f"{VENDOR}/{path}", kinds.get(unit, "module"), "pulp")
+    for origin, sub in _ORIGINS:
+        directory = files("hdl_bag") / sub
+        for f in sorted(directory.iterdir(), key=lambda t: t.name):
+            if f.name.endswith((".sv", ".v")):
+                for kind, name in _declared(f.read_text(encoding="utf-8")):
+                    out[name] = Unit(name, f"{sub}/{f.name}", kind, origin)  # type: ignore[arg-type]
+    return MappingProxyType(dict(sorted(out.items())))
 
 
 def unit_name(prefix: str | None, name: str) -> str:

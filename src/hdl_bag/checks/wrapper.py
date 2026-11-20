@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
-from hdl_bag.naming import MAX_UNIT_NAME, SV_KEYWORDS, emitted_units, flat_signal_name, unit_name
+from hdl_bag.naming import (
+    MAX_UNIT_NAME,
+    SV_KEYWORDS,
+    describe,
+    emitted_units,
+    flat_signal_name,
+    unit_name,
+)
 from hdl_bag.protocols import (
     OPTIONAL_SIGNAL_NAMES,
     OPTIONAL_SIGNALS,
@@ -407,11 +414,10 @@ def _prefixed_units(ctx: Context) -> list[tuple[str, str]]:
     """Units that take Module prefix: (base name, what it is). The top wrapper is not among
     them (it is instantiated by the integrator under the name the user gave it). A sub-wrapper
     that shares a name with an emitted unit is listed next to it, so the clash is reported."""
-    out = [(unit, what.split(" ", 1)[1]) for unit, what in emitted_units().items()]
-    out += [
-        (n, "sub-wrapper") for r in ctx.raw.sub_wrappers[1:] if (n := ctx.text(r["Sub-wrapper"]))
-    ]
-    return out
+    out = [(name, describe(unit)) for name, unit in emitted_units().items()]
+    # A repeated sub-wrapper name is NAME-UNIQUE's to report, not a clash with itself.
+    names = dict.fromkeys(n for r in ctx.raw.sub_wrappers[1:] if (n := ctx.text(r["Sub-wrapper"])))
+    return out + [(n, "sub-wrapper") for n in names]
 
 
 def _fixed_units(ctx: Context, prefixed: set[str]) -> dict[str, str]:

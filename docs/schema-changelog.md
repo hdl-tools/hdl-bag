@@ -8,7 +8,7 @@ Changes from 0.6, approved by the owner (issue 106):
 
 - **New setting Project > Module prefix** (optional, the last Project row, so no other row moves). When set, BAG will put it and an underscore in front of every in-house and PULP module, package and macro name it writes, the sub-wrapper module names, and their file names. **Not yet applied: this release only reads and checks the setting.** The note of Project name no longer says it prefixes module names.
 - Never renamed: the top wrapper, the parameter package, the generated `<project>_<proto>_if` interfaces and a `bag_external` user module.
-- **New errors:** PROJ-MODULE-PREFIX (not a lowercase identifier, or ends with an underscore) and PROJ-PREFIX-COLLISION (a prefixed name equals the top wrapper, the flat harness, the package, an interface, a user module or an SV keyword). **New warning:** PROJ-NAME-LENGTH (a generated name over 64 characters, only when a prefix is set).
+- **New errors:** PROJ-MODULE-PREFIX (not a lowercase identifier, or ends with an underscore) and PROJ-PREFIX-COLLISION (a prefixed name equals the top wrapper, the flat harness, the package, an interface, a user module or an SV keyword, or a sub-wrapper named like a module, interface or package BAG can copy: PULP, in-house, derived or formal). **New warning:** PROJ-NAME-LENGTH (a generated name over 64 characters, only when a prefix is set).
 - **IR:** new field `module_prefix` on `project`.
 - No other sheet, column or dropdown-list changes. A 0.6 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.7 and add the Module prefix row, left blank. The generated RTL is then unchanged.
 

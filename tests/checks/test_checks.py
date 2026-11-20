@@ -372,6 +372,8 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Hierarchy row 7: sub-wrapper bag_axi_mux has the name of a module BAG derives from PULP; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
     ("PROJ-PREFIX-COLLISION-sub-wrapper-and-pulp", [("Project", 18, "Value", "p"), ("Hierarchy", 7, "Sub-wrapper", "axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "axi_mux")],
      ["Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
+    ("HIER-RESERVED-NAME-formal", [("Hierarchy", 7, "Sub-wrapper", "faxil_slave"), ("Hierarchy", 20, "Sub-wrapper", "faxil_slave")],
+     ["Hierarchy row 7: sub-wrapper faxil_slave has the name of a vendored ZipCPU module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
     ("HIER-EMPTY", [("Hierarchy", 9, "Sub-wrapper", "spare_wrapper"), ("Hierarchy", 9, "Parent", "demo_ss_bus_top")],
      ["Hierarchy row 9: sub-wrapper spare_wrapper has no instances (HIER-EMPTY)"]),
     ("WRAP-PORT-NOT-LISTED", _clear("Wrapper", 31, ("Port", "Exposed at top", "Top-level prefix")),
@@ -450,6 +452,22 @@ def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected:
 )
 def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
     assert _messages(tmp_path, edits) == []
+
+
+@pytest.mark.parametrize("name", ["foo", "Foo-bar"], ids=["legal", "illegal"])
+def test_a_repeated_sub_wrapper_name_is_not_a_prefix_collision_with_itself(
+    tmp_path: Path, name: str
+) -> None:
+    """NAME-UNIQUE (or NAME-IDENT) owns a repeated name; the prefix check must not add a
+    sub-wrapper-against-itself error on top, whether or not the name is a legal identifier."""
+    edits: list[Edit] = [
+        ("Project", 18, "Value", "p"),
+        ("Hierarchy", 8, "Sub-wrapper", name),
+        ("Hierarchy", 9, "Sub-wrapper", name),
+    ]
+    messages = _messages(tmp_path, edits)
+    assert not [m for m in messages if "PROJ-PREFIX-COLLISION" in m], messages
+    assert any("NAME-UNIQUE" in m or "NAME-IDENT" in m for m in messages)
 
 
 def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:

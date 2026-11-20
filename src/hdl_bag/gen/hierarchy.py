@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import emitted_units, subwrapper_signal_name
+from hdl_bag.naming import emitted_units, label, subwrapper_signal_name
 from hdl_bag.protocols import PROTO_TOKEN, towards_slave
 
 
@@ -171,7 +171,7 @@ def collisions(netlist: Netlist, p: Plan) -> list[tuple[str, str, list[str]]]:
 def reserved_units(netlist: Netlist) -> dict[str, str]:
     """Design units the generator writes besides the wrappers: name -> what it is."""
     spec = netlist.spec
-    units = dict(emitted_units())
+    units = {name: label(unit) for name, unit in emitted_units().items()}
     units |= {f"{spec.project.name}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
     units[f"{spec.hierarchy.top}_flat"] = "the generated flat harness"
     units[spec.wrapper.package] = "the parameter package"
