@@ -23,6 +23,7 @@ bus models, coverage) and `formal_gen/` (generated SymbiYosys jobs).
 | `src/hdl_bag/rtl/inhouse/` | Hand-written RTL |
 | `src/hdl_bag/rtl/vendor/pulp/` | Vendored PULP IP. Never edit by hand: use `scripts/vendor_pulp.py` |
 | `src/hdl_bag/formal/` | Property files. `formal/vendor/` is managed by `scripts/vendor_zipcpu.py` |
+| `src/hdl_bag/shrink/` | `bag shrink`: the edits, the greedy engine and the oracle that runs one EDA step |
 | `src/hdl_bag/regress/` | The workbook DSL, the random config generator and the per-seed runner |
 | `src/hdl_bag/bursts.py` | AXI4 burst refusal logic, shared by `bag check` and the tests |
 | `docs/manual/` | The LaTeX user manual |
