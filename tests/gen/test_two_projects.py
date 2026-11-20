@@ -34,7 +34,7 @@ import pytest
 from test_module_prefix import _declared
 from test_negative_elaboration import USER_RULES, _VerilatorToElaboration
 
-from hdl_bag.flows.backends import Slang
+from hdl_bag.flows.backends import BACKENDS
 from hdl_bag.flows.base import Finding, run_backend
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.prefix import include_renames, macro_renames
@@ -129,16 +129,12 @@ def _soc(
     )  # fmt: skip
 
 
-class _SlangEveryError(Slang):
-    """slang stops at twenty errors by default, which on this file list is the common_cells
-    duplicates and none of the axi ones. The whole set is what the control asserts."""
-
-    def command(self, files: list[Path], top: str, incdirs: list[Path]) -> list[str]:
-        return [*super().command(files, top, incdirs), "--error-limit=1000"]
-
-
 def _compile(tmp_path: Path, soc: Soc, tool: str) -> list[Finding]:
-    backend = _SlangEveryError() if tool == "slang" else _VerilatorToElaboration()
+    # Both tools stop after a score of errors, which is what keeps these controls readable: the
+    # errors reported are the cause, not the cascade. Raising slang's --error-limit buries one
+    # undefined macro under 558 "use of undeclared identifier" errors for the types that macro
+    # would have declared.
+    backend = BACKENDS[tool] if tool == "slang" else _VerilatorToElaboration()
     return run_backend(backend, soc.files, "soc_top", tmp_path, soc.incdirs)
 
 
@@ -183,14 +179,21 @@ def _blank_expectation(tmp_path: Path, soc: Soc) -> set[str]:
     return declared & set(vendored_units())
 
 
+# Units beta certainly shares with the upstream copy, so a duplicate of each must be reported
+# however few errors the tool prints before it stops.
+BLANK_WITNESSES = frozenset({"fifo_v3", "lzc"})
+
+
 def _check_blank(tmp_path: Path, soc: Soc, found: list[Finding], tool: str) -> None:
+    """Every name reported is one beta really does share with upstream, and the units it is
+    certain to share are among them. Not the whole set: both tools stop early, and which
+    duplicates they reach depends on the file order (slang's first twenty are common_cells',
+    none of the axi ones)."""
     expected = _blank_expectation(tmp_path, soc)
     assert expected
     names = _duplicated_names(found)
-    if tool == "slang":
-        assert names == expected
-    else:  # Verilator stops reporting at its error limit (50)
-        assert names and names <= expected
+    assert names and names <= expected, sorted(names - expected)
+    assert names >= BLANK_WITNESSES, sorted(BLANK_WITNESSES - names)
     assert not [n for n in names if n.startswith("alpha_")]
     assert all(_is_duplicate(f) for f in _errors(found)), [f.format() for f in _errors(found)]
 
@@ -212,6 +215,10 @@ def _check_headers(found: list[Finding], tool: str) -> None:
     assert names
     assert {n.split("_", 1)[0] for n in names} <= {"alpha", "beta"}
     assert {n.split("_", 1)[1] for n in names} <= set(macro_renames("p"))
+    # The projects' files cannot see their macros; the upstream copy itself is untouched, and
+    # nothing is a duplicate, so this is the header shadowing and not a failed rename.
+    assert not [f for f in errors if f.file.startswith("upstream/")], [f.format() for f in errors]
+    assert not [f for f in errors if _is_duplicate(f)], [f.format() for f in errors]
 
 
 CONTROLS = [(c, t) for c in ("blank", "headers") for t in TOOLS]
