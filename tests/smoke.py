@@ -23,6 +23,7 @@ What it keeps:
 - one mutant of each gate bug on AHB-Lite or APB, four on AXI4 and AXI4-Lite, two in the PULP
   bridges' wrappers, and the secure-check polarity in the RTL;
 - one READY-shim run;
+- bag shrink on a seeded decode mutant, with real formal runs;
 - two prefixed subsystems beside an unmodified PULP copy, and the two controls that must fail.
 
 What only the full list runs: the remaining Phase 3 configs and their sv-interface lint, the
@@ -56,6 +57,7 @@ SMOKE: Final[tuple[str, ...]] = (
     "tests/gen/test_tests_gen.py::*",
     "tests/gen/test_wrapper_sim.py::*",
     "tests/gen/test_two_projects.py::*",
+    "tests/shrink/*",
     f"{_LINT}[golden/demo_ss-*]",
     f"{_ROUTE}[golden/demo_ss*]",
     f"{_LINT}[p2/*]",
