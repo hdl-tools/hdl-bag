@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
+import dataclasses
 from pathlib import Path
 
 import openpyxl
@@ -9,6 +10,8 @@ from dsl import SAMPLE_WRAP, unexpected
 
 from hdl_bag import __version__
 from hdl_bag.cli import main
+from hdl_bag.template import build_workbook
+from hdl_bag.template.sample_demo_ss import SAMPLE
 
 
 def test_version() -> None:
@@ -167,3 +170,15 @@ def test_a_folder_that_is_not_an_output_directory_is_an_error_not_a_traceback(
     result = CliRunner().invoke(main, [command, str(tmp_path)])
     assert (result.exit_code, result.output) == (1, f"error: {tmp_path}: {message}\n")
     assert isinstance(result.exception, SystemExit)
+
+
+def test_generate_refuses_a_spec_with_no_fabric_and_writes_nothing(tmp_path: Path) -> None:
+    """The issue: such a spec checked clean and generate wrote 17 files that do nothing."""
+    path = tmp_path / "spec.xlsx"
+    build_workbook(data=dataclasses.replace(SAMPLE, fabrics=[])).save(path)
+    (tmp_path / "header.txt").write_text("// header\n")
+    out = tmp_path / "out"
+    result = CliRunner().invoke(main, ["generate", str(path), "-o", str(out)])
+    assert result.exit_code == 1
+    assert "(FAB-NONE)" in result.output
+    assert not out.exists()

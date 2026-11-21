@@ -58,7 +58,7 @@ def test_shrink_prints_each_kept_edit_and_writes_the_ir(
     ]
     assert "kept: drop master dma" not in lines
     assert lines[-3:] == [
-        "2 pass(es), 22 run(s); kept 21 edit(s); 19 candidate(s) failed bag check",
+        "2 pass(es), 21 run(s); kept 21 edit(s); 20 candidate(s) failed bag check",
         "wrote multi.shrunk.ir.yaml",
         "reproduce: bag flow multi.shrunk.ir.yaml",
     ]

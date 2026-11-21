@@ -43,6 +43,7 @@ RULES: Final[dict[str, Severity]] = {
     "WIDTH-USER": E,
     "TMPL-FABRIC": E,
     "TMPL-BRIDGE": E,
+    "FAB-NONE": E,
     "FAB-TOPOLOGY": E,
     "FAB-ARBITRATION": E,
     "FAB-SINGLE-MASTER": E,

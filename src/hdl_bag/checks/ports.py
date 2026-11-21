@@ -61,6 +61,13 @@ def _na_or_value(ctx: Context, cell: Cell, applies: bool, why: str) -> bool:
 
 
 def check_fabrics(ctx: Context) -> None:
+    if not ctx.raw.fabrics:
+        # A port without a fabric is already refused; this is the spec with no bus at all.
+        ctx.report(
+            "FAB-NONE",
+            "Fabrics",
+            "the spec lists no fabric, so there is no bus to generate. Add a row for each fabric",
+        )
     for row in ctx.raw.fabrics:
         name = ctx.text(row["Fabric"])
         protocol = ctx.protocol(row["Protocol"])
