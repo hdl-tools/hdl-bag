@@ -844,7 +844,7 @@
  "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_misroute[swapped_port_index-axi_xbar_rules]": 864.97,
  "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_misroute[swapped_port_index-axil_xbar_rules]": 46.64,
  "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_priority_inversion[priority_inversion-ahb_fixed]": 4.47,
- "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_priority_inversion[priority_inversion-axi_shared_fixed]": 803.57,
+ "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_priority_inversion[priority_inversion-axi_shared_fixed]": 1027.94,
  "tests/mutation/test_decode_mutations.py::test_the_route_job_catches_the_priority_inversion[priority_inversion-axil_shared_fixed]": 28.23,
  "tests/mutation/test_decode_mutations.py::test_the_route_job_holds_unmutated[p2/ahb_fixed-ahb]": 10.75,
  "tests/mutation/test_decode_mutations.py::test_the_route_job_holds_unmutated[p2/apb4_rules-apb]": 1.16,
