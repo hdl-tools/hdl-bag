@@ -26,9 +26,11 @@ bus models, coverage) and `formal_gen/` (generated SymbiYosys jobs).
 | `src/hdl_bag/shrink/` | `bag shrink`: the edits, the greedy engine and the oracle that runs one EDA step |
 | `src/hdl_bag/regress/` | The workbook DSL, the random config generator and the per-seed runner |
 | `src/hdl_bag/bursts.py` | AXI4 burst refusal logic, shared by `bag check` and the tests |
+| `examples/` | The example workbooks (`apb_min`, `mcu_ahb`, `soc_4x8`) and their `header.txt`, rebuilt from `tests/examples/build.py` |
 | `docs/manual/` | The LaTeX user manual |
 | `tests/<area>/` | Tests, mirroring the source |
 | `tests/configs/` | The gate corpora and their committed IR |
+| `tests/examples/` | The example workbooks' builder and tests. Not part of the gate corpora |
 | `tests/golden/` | `demo_ss` (workbook, IR) and the collateral snapshots |
 | `tests/mutation/` | The mutation harness |
 | `tests/manual/` | The manual's rules and transcript replayer |
@@ -62,6 +64,7 @@ not have them. Nothing may depend on them, and tests that need them skip when th
   `golden-demo_ss` artifact (its `demo_ss.recalc.xlsx` replaces `tests/golden/demo_ss.xlsx`), then
   the golden IR (`uv run bag ir tests/golden/demo_ss.xlsx -o tests/golden/demo_ss.ir.yaml`) and the
   collateral snapshots (`BAG_UPDATE_SNAPSHOTS=1`). The snapshot diffs should be hash lines only.
+  Rebuild `examples/` too (`uv run python tests/examples/build.py`), or their signature tests fail.
   The maintainer also runs the private reference-workbook comparison for template changes.
 - **Licences.** Only permissive third-party RTL. Every `.py`, `.sv` and Dockerfile carries an SPDX
   header (`scripts/check_spdx.py`); vendored files keep their upstream headers.
@@ -101,6 +104,7 @@ Run the full host suite before every push, not only the tests you changed.
 `BAG_MANUAL_UPDATE=1 uv run pytest tests/manual` rewrites the manual's host transcripts and
 `docs/manual/checks.tex` from what the code prints now. Transcripts under
 `docs/manual/examples/console/eda/` need the same variable with `-m eda` in the tools image.
+`uv run python tests/examples/build.py` rebuilds `examples/*.xlsx` (needs LibreOffice, so run it in the tools image).
 `BAG_UPDATE_SNAPSHOTS=1` rewrites the collateral snapshots. Read the diff before committing either.
 
 EDA tests need the pinned tools in `tools.lock`. Build the tools image once, then run in it. The

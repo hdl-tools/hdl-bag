@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent / "mutation"))
 sys.path.insert(0, str(Path(__file__).parent / "flows"))
 sys.path.insert(0, str(Path(__file__).parent / "manual"))  # the transcript replayer
 sys.path.insert(0, str(Path(__file__).parent / "checks"))  # the broken-workbook cases
+sys.path.insert(0, str(Path(__file__).parent / "examples"))  # the example workbooks' builder
+sys.path.insert(0, str(Path(__file__).parent / "golden"))  # the golden workbook's check columns
 sys.path.insert(0, str(Path(__file__).parent))
 
 

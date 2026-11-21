@@ -42,3 +42,4 @@ docs/manual/*.fdb_latexmk
 docs/manual/*.lof
 docs/manual/*.lot
 docs/manual/*.synctex.gz
+.~lock.*#

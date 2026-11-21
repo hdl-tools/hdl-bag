@@ -23,6 +23,7 @@ What it keeps:
 - one mutant of each gate bug on AHB-Lite or APB, four on AXI4 and AXI4-Lite, two in the PULP
   bridges' wrappers, and the secure-check polarity in the RTL;
 - one READY-shim run;
+- `bag flow` on each of the three workbooks in examples/, the 4-master, 8-slave one included;
 - bag shrink on a seeded decode mutant, with real formal runs;
 - two prefixed subsystems beside an unmodified PULP copy, and the two controls that must fail.
 
@@ -58,6 +59,7 @@ SMOKE: Final[tuple[str, ...]] = (
     "tests/gen/test_wrapper_sim.py::*",
     "tests/gen/test_two_projects.py::*",
     "tests/shrink/*",
+    "tests/examples/*",
     f"{_LINT}[golden/demo_ss-*]",
     f"{_ROUTE}[golden/demo_ss*]",
     f"{_LINT}[p2/*]",
