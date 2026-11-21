@@ -8,6 +8,7 @@ machine's locale and LibreOffice build, so its bytes differ from one rebuild to 
 """
 
 import io
+import zipfile
 from pathlib import Path
 
 import openpyxl
@@ -71,3 +72,13 @@ def test_every_example_is_named_in_the_docs(name: str) -> None:
 def test_flow_takes_the_example_from_workbook_to_passing_tests(name: str, tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["flow", str(EXAMPLES / f"{name}.xlsx"), "-o", str(tmp_path)])
     assert result.exit_code == 0, result.output
+
+
+def test_no_committed_workbook_carries_the_locale_of_whoever_built_it() -> None:
+    """LibreOffice stamps the recalculating machine's locale into docProps/core.xml, and these
+    files are committed to a public repository. build.drop_locale removes it, so a rebuild on
+    another machine changes the metadata no more than it has to."""
+    for name in BUILT:
+        with zipfile.ZipFile(EXAMPLES / f"{name}.xlsx") as zf:
+            core = zf.read("docProps/core.xml").decode("utf-8")
+        assert "dc:language" not in core, f"{name}.xlsx carries a locale; rebuild with {REBUILD}"

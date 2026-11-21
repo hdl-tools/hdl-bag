@@ -8,8 +8,10 @@ so that it opens with its check columns filled in. Recalculation is presentation
 never trusts cached results, so tests compare content (``signature``), never bytes.
 """
 
+import re
 import sys
 import tempfile
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -119,6 +121,30 @@ def soc_4x8() -> Cfg:
 BUILT: dict[str, Callable[[], Cfg]] = {f.__name__: f for f in (apb_min, mcu_ahb, soc_4x8)}
 
 
+_LANGUAGE = re.compile(r"<dc:language>[^<]*</dc:language>")
+
+
+def drop_locale(path: Path) -> None:
+    """Remove ``dc:language`` from PATH's metadata, in place.
+
+    LibreOffice stamps the recalculating machine's locale into ``docProps/core.xml``: this one
+    writes ``en-SG``, the CI job that built tests/golden/demo_ss.xlsx wrote ``en-US``. openpyxl
+    writes no locale at all, so it is purely an artefact of who ran the recalculation, and it has
+    no bearing on the spec. Dropping it keeps a committed workbook the same whoever builds it,
+    and keeps one contributor's locale out of a public repository.
+    """
+    members = []
+    with zipfile.ZipFile(path) as zf:
+        for info in zf.infolist():
+            data = zf.read(info.filename)
+            if info.filename == "docProps/core.xml":
+                data = _LANGUAGE.sub("", data.decode("utf-8")).encode("utf-8")
+            members.append((info, data))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as out:
+        for info, data in members:
+            out.writestr(info, data)
+
+
 def main() -> None:
     sys.path.insert(0, str(HERE.parents[1] / "scripts"))
     from recalc import recalc
@@ -134,6 +160,7 @@ def main() -> None:
             raw = Path(tmp) / f"{name}.xlsx"
             build_workbook(data=make().data).save(raw)
             recalc(raw, OUT / f"{name}.xlsx")
+            drop_locale(OUT / f"{name}.xlsx")
             print(f"{name}: written")
 
 
