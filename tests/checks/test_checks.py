@@ -5,6 +5,7 @@
 Each case is the demo_ss sample plus one mutation, and asserts the exact messages.
 """
 
+import dataclasses
 import shutil
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from openpyxl import Workbook
 from hdl_bag.checks import RULES, run_checks
 from hdl_bag.reader import read_workbook
 from hdl_bag.template import build_workbook
+from hdl_bag.template.data import SpecData
+from hdl_bag.template.sample_demo_ss import SAMPLE as SAMPLE_SPEC
 
 GOLDEN_DIR = Path(__file__).parents[1] / "golden"
 HEADER_ROWS = {("Hierarchy", "placement"): 15, ("Wrapper", "exposed"): 17}
@@ -49,9 +52,13 @@ def _row(sheet: str, row: int, **values: Value) -> list[Edit]:
     return [(sheet, row, k.replace("_", " "), v) for k, v in values.items()]
 
 
-def _messages(tmp_path: Path, edits: list[Edit]) -> list[str]:
-    wb = build_workbook(sample=True)
-    _apply(wb, edits)
+def _messages(tmp_path: Path, edits: list[Edit] | SpecData) -> list[str]:
+    """Checks of the sample with EDITS applied, or of the whole workbook EDITS when it is a spec."""
+    if isinstance(edits, SpecData):
+        wb = build_workbook(data=edits)
+    else:
+        wb = build_workbook(sample=True)
+        _apply(wb, edits)
     path = tmp_path / "spec.xlsx"
     wb.save(path)
     shutil.copy(GOLDEN_DIR / "header.txt", tmp_path / "header.txt")
@@ -106,8 +113,17 @@ def _freq_case(kind: str, value: Value) -> tuple[str, list[Edit], list[str]]:
     )
 
 
-# (case id, edits, expected messages)
-CASES: list[tuple[str, list[Edit], list[str]]] = [
+# A workbook with no bus at all: a case for a rule that edits of the sample cannot reach.
+NO_BUS = dataclasses.replace(
+    SAMPLE_SPEC, fabrics=[], masters=[], slaves=[], bridges=[], topology=[], access_rules=[],
+    memory_map=[], address_decode=[], port_options=[], user_ports=[], exposed_ports=[],
+    placement=[], sub_wrappers=[list(SAMPLE_SPEC.sub_wrappers[0])],
+)  # fmt: skip
+
+# (case id, edits or a whole spec, expected messages)
+CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
+    ("FAB-NONE", NO_BUS,
+     ["Fabrics: the spec lists no fabric, so there is no bus to generate. Add a row for each fabric (FAB-NONE)"]),
     ("VALUE-MISSING", [("Clocks", 5, "Freq (MHz)", None)],
      ["Clocks row 5: Freq (MHz) is required (VALUE-MISSING)"]),
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
@@ -473,7 +489,9 @@ def test_blank_template_reports_missing_settings(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("case", "edits", "expected"), CASES, ids=[c[0] for c in CASES])
-def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected: list[str]) -> None:
+def test_broken_workbook(
+    tmp_path: Path, case: str, edits: list[Edit] | SpecData, expected: list[str]
+) -> None:
     assert _messages(tmp_path, edits) == expected
 
 

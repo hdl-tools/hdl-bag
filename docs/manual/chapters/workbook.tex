@@ -327,7 +327,8 @@ is your job: the workbook cannot show it.
 
 The \sheet{Fabrics} sheet has one row per fabric. The \term{backing template} names the
 BAG template that implements the fabric. You do not type the number of ports: BAG counts
-the links of the fabric on \sheet{Topology}.
+the links of the fabric on \sheet{Topology}. A spec must list at least one fabric
+(\ruleid{FAB-NONE}): without one there is no bus to generate.
 
 \begin{wbtable}{Column}
 \col{Fabric} & Yes & lowercase name, e.g.\ \code{main_xbar} & The instance name.\\

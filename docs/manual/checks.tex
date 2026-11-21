@@ -28,6 +28,7 @@
 \checkrule{FAB-GUARD-ID-WIDTH}{warning}{Fabrics row 5: master-side ID width of main\_xbar is 9 bits (> 8): each master port's guard keeps 512 in-flight counters per channel, one per ID (D65); narrow the master IDs if that area matters (FAB-GUARD-ID-WIDTH)}
 \checkrule{FAB-ID-GROWTH}{warning}{Fabrics row 5: master-side ID width of main\_xbar is 16 bits (> 8): each master port's guard keeps 65536 in-flight counters per channel, one per ID (D65); narrow the master IDs if that area matters (FAB-GUARD-ID-WIDTH)}
 \checkrule{FAB-NA-SETTING}{warning}{Fabrics row 7: Latency mode 'CUT\_ALL\_AX' does not apply outside a crossbar; set n/a (FAB-NA-SETTING)}
+\checkrule{FAB-NONE}{error}{Fabrics: the spec lists no fabric, so there is no bus to generate. Add a row for each fabric (FAB-NONE)}
 \checkrule{FAB-SINGLE-MASTER}{error}{Fabrics row 7: periph\_apb has 2 master ports but Arbitration is single-master (FAB-SINGLE-MASTER)}
 \checkrule{FAB-TOPOLOGY}{error}{Fabrics row 9: topology single-layer does not suit APB4 (decoder-mux) (FAB-TOPOLOGY)}
 \checkrule{HIER-EMPTY}{warning}{Hierarchy row 9: sub-wrapper spare\_wrapper has no instances (HIER-EMPTY)}
