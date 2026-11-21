@@ -28,6 +28,10 @@ out/
 Thumbs.db
 ~$*.xlsx
 
+# Coding-agent scratch: worktrees here are whole repositories, and git add -A in the root
+# records them as embedded repos rather than ignoring them.
+.claude/
+
 # Bender checkouts (scripts/vendor_pulp.py)
 .bender/
 

@@ -144,12 +144,16 @@ repository.
   and don't start it until your current PR is merged.
 - **Reviews.** Every RTL, verification or documentation PR gets an independent, review-only pass by
   a person or agent that did not write it. Fix the findings in the same PR, with a failing test
-  first for bugs, and summarise the review in the PR description.
+  first for bugs, and summarise the review in the PR description. Reproduce a finding before
+  accepting or dismissing it: a review's claim and a reviewer's dismissal are both unverified
+  until someone runs them. When briefing another agent, mark which facts you verified and which
+  you inherited, so it knows what to re-derive.
 - **CI.** A PR is ready only when CI passes on its final commit. Record the run link and the slowest
   EDA shard in the PR description.
 - **Attribution.** None in commit messages or PR descriptions.
 - **Reporting.** State results plainly, including your own mistakes, and say what was verified
-  locally and what in CI.
+  locally and what in CI. Never record a count, a duration or a verdict you have not read: write
+  it after the run reports, not from what it is expected to say.
 - **Decisions.** Decisions cited in the code as D-numbers are settled and are not re-argued. Their
   full record is private, so ask the maintainer if the code comment does not explain one. Ask too
   when a choice is genuinely theirs, such as user-visible behaviour, and offer options with a
