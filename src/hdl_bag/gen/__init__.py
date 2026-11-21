@@ -20,6 +20,8 @@ Output layout (relative to the output directory)::
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
     doc/reset.md               reset sequence: domains, crossings, reset groups (D51)
+    constraints/<project>_cdc.sdc, .xdc  clocks and CDC timing exceptions, one per crossing
+                               (hdl_bag.gen.constraints); only with RTL, they name its instances
     tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
     tests/<project>.ir.yaml    the IR those tests read
     tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
@@ -52,6 +54,7 @@ from hdl_bag.gen.collateral import (
     reset_md,
     tieoffs_md,
 )
+from hdl_bag.gen.constraints import SDC, XDC, cdc_constraints, tcl_banner
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
@@ -203,6 +206,11 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     filelist = f"{spec.project.name}.f"
     incdirs = "".join(f"+incdir+{d}\n" for d in src.incdirs)
     _write(outdir, filelist, incdirs + "".join(f"{p}\n" for p in order), written)
+
+    banner = tcl_banner(spec, user_header)
+    for fmt in (SDC, XDC):
+        text = cdc_constraints(spec, netlist, fmt, banner)
+        _write(outdir, f"constraints/{spec.project.name}_cdc.{fmt}", text, written)
     # The tests drive the fabrics through the top, so a user-supplied fabric, whose behaviour
     # BAG does not know, has none (D8).
     opaque = any((m := registry.get(t)) and m.opaque for t in used)

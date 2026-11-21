@@ -1,6 +1,6 @@
 $ bag generate files/lite_ss.ir.yaml -o out --style sv-interface
 lite_ss.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
-wrote 54 file(s) to out (top lite_ss_top_flat)
+wrote 56 file(s) to out (top lite_ss_top_flat)
 $ ls out/rtl
 inhouse/
 lite_ss_axil_if.sv

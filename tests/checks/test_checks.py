@@ -97,12 +97,23 @@ def _mm_row(row: int, target: str, region: str, base: str, size: str) -> list[Ed
     return [("Memory_Map", row, h, v) for h, v in zip(MM_COLS, vals, strict=True)]
 
 
+def _freq_case(kind: str, value: Value) -> tuple[str, list[Edit], list[str]]:
+    """A Clocks > Freq (MHz) that is no positive number: every period is derived from it."""
+    return (
+        f"VALUE-ILLEGAL-freq-{kind}",
+        [("Clocks", 5, "Freq (MHz)", value)],
+        [f"Clocks row 5: Freq (MHz) {value!r} is not a positive number (VALUE-ILLEGAL)"],
+    )
+
+
 # (case id, edits, expected messages)
 CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("VALUE-MISSING", [("Clocks", 5, "Freq (MHz)", None)],
      ["Clocks row 5: Freq (MHz) is required (VALUE-MISSING)"]),
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
      ["Resets row 5: Polarity 'low' is not one of active-low, active-high (VALUE-ILLEGAL)"]),
+    *[_freq_case(kind, value)
+      for kind, value in (("zero", 0), ("negative", -50), ("text", "fast"), ("bool", True))],
     ("PROJ-SCHEMA-VERSION", [("Project", 6, "Value", "0.2")],
      ["Project row 6: Spec schema version '0.2' differs from '0.7' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
     ("PROJ-MODULE-PREFIX", [("Project", 18, "Value", "Demo-SS")],
