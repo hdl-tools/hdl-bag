@@ -23,7 +23,14 @@ from pulp_api import parameters, ports, struct_fields
 
 REPO = Path(__file__).parents[2]
 INDEX = json.loads((files("hdl_bag") / VENDOR / "index.json").read_text(encoding="utf-8"))
-PERMISSIVE = {"SHL-0.51", "Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause"}
+PERMISSIVE = {
+    "SHL-0.51",
+    "Apache-2.0",
+    "Apache-2.0 WITH SHL-2.1",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+}
 
 
 def test_index_matches_bender_lock() -> None:
@@ -162,5 +169,6 @@ def test_notice_points_at_files_that_exist() -> None:
     notice = (REPO / "NOTICE").read_text(encoding="utf-8")
     named = re.findall(r"\b(?:[\w.-]+/)+[\w.*-]+", notice)
     assert "docs/third-party.md" in named
+    assert "docs/bom.md" in named
     for path in named:
         assert list(REPO.glob(path)), f"NOTICE names {path}, which does not exist"
