@@ -10,13 +10,16 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
+Pre-alpha. Phases 1 to 4 of 6 are done. Phase 5's gate and report are outstanding (its
+nightly runs are not yet green), and Phase 6 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 96 validation checks | The nightly regression workflow, its shrinker and reports (Phase 5) |
+| Spec workbook template, reader and 96 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
 | Canonical YAML IR, byte-identical across runs | CDC constraints (SDC) and v1.0 release (Phase 6) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
+| Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
+| Example workbooks in [examples](examples), each `bag check` clean and run end to end in CI | |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
 | Per-port adapters: protocol, width, CDC, ID width, FIFO, register slice | |
