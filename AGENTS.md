@@ -22,6 +22,7 @@ bus models, coverage) and `formal_gen/` (generated SymbiYosys jobs).
 | `src/hdl_bag/template/` | The spec workbook builder and the `demo_ss` sample |
 | `src/hdl_bag/rtl/inhouse/` | Hand-written RTL |
 | `src/hdl_bag/rtl/vendor/pulp/` | Vendored PULP IP. Never edit by hand: use `scripts/vendor_pulp.py` |
+| `scripts/bom.py`, `docs/bom.md` | The bill of materials, generated from the vendored files' headers and `uv.lock`. Never edit `docs/bom.md` by hand |
 | `src/hdl_bag/formal/` | Property files. `formal/vendor/` is managed by `scripts/vendor_zipcpu.py` |
 | `src/hdl_bag/shrink/` | `bag shrink`: the edits, the greedy engine and the oracle that runs one EDA step |
 | `src/hdl_bag/regress/` | The workbook DSL, the random config generator and the per-seed runner |
@@ -100,6 +101,9 @@ cd docs/manual && latexmk -pdf -interaction=nonstopmode -halt-on-error hdl-bag.t
 ```
 
 Run the full host suite before every push, not only the tests you changed.
+
+`uv run --no-project python scripts/bom.py` rewrites `docs/bom.md`; run it after a vendor bump or a
+dependency change, and enter any new package's licence in `LICENCES`.
 
 `BAG_MANUAL_UPDATE=1 uv run pytest tests/manual` rewrites the manual's host transcripts and
 `docs/manual/checks.tex` from what the code prints now. Transcripts under
