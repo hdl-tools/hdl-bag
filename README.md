@@ -97,6 +97,13 @@ formal/bag_step.v, vendor/  the formal environment's step registers; the ZipCPU 
 sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 
+## Examples
+
+`examples/` in the repository holds three workbooks, each `bag check` clean: `apb_min.xlsx` (one
+APB4 master, three slaves), `mcu_ahb.xlsx` (an AHB-Lite microcontroller bus with an APB bus behind
+a bridge) and `soc_4x8.xlsx` (an AXI4 crossbar with 4 masters and 8 slaves). Try
+`bag flow examples/soc_4x8.xlsx -o out/`. See `examples/README.md`.
+
 ## Requirements
 
 - Python 3.11 or newer. Reading, checking, generating and the collateral need nothing

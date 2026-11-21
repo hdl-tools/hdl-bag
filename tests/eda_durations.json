@@ -1,4 +1,7 @@
 {
+ "tests/examples/test_examples.py::test_flow_takes_the_example_from_workbook_to_passing_tests[apb_min]": 8,
+ "tests/examples/test_examples.py::test_flow_takes_the_example_from_workbook_to_passing_tests[mcu_ahb]": 10,
+ "tests/examples/test_examples.py::test_flow_takes_the_example_from_workbook_to_passing_tests[soc_4x8]": 120,
  "tests/flows/test_formal_eda.py::test_a_bridge_with_no_reset_is_caught": 6.43,
  "tests/flows/test_formal_eda.py::test_a_design_master_burst_is_judged_by_the_axi_rules[32'h0-8'd0-3'd2-2'd3-1'b0-False]": 0.43,
  "tests/flows/test_formal_eda.py::test_a_design_master_burst_is_judged_by_the_axi_rules[32'h0-8'd0-3'd3-2'd1-1'b0-False]": 0.83,

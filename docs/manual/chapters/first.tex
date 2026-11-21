@@ -72,6 +72,15 @@ what errors look like: each names the sheet, the row and the rule ID. With an er
 Fill in the sheets in the order of chapter~\ref{ch:workbook}, and run \cmd{bag check}
 after each sheet.
 
+The repository also holds three finished workbooks in its top-level \file{examples/}
+directory (not the manual's \file{docs/manual/examples/}, and not part of a \code{pip install}).
+Each checks with zero findings, and \cmd{bag flow} takes each from workbook to passing tests.
+\file{apb_min.xlsx} is the smallest workbook that generates: one APB4 master and three slaves.
+\file{mcu_ahb.xlsx} is a microcontroller bus: an AHB-Lite processor, an SRAM, and an APB bus of
+three peripherals behind a \code{bag_ahb2apb} bridge. \file{soc_4x8.xlsx} is an AXI4 crossbar
+with four masters and eight slaves, with an APB bus of six peripherals behind a
+\code{bag_axi2apb} bridge; copy it as the start of a spec of your own.
+
 \section{Lint, simulation and formal}
 
 The rest of this chapter needs the EDA tools (section~\ref{sec:eda}). Proving the

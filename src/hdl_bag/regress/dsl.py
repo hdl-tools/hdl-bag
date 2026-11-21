@@ -127,21 +127,21 @@ class Cfg:
 
     def master(self, name: str, proto: str, dw: int, aw: int, domain: str,
                prefix: str | None = None, exposed: bool = True, id_width: int | None = None,
-               user: int = 0, outstanding: int = 1) -> "Cfg":  # fmt: skip
+               user: int = 0, outstanding: int = 1, description: str | None = None) -> "Cfg":  # fmt: skip
         """A master row; AXI4 masters need an ID width (default 4)."""
         idw = id_width if id_width is not None else (4 if proto == "AXI4" else None)
         self.data.masters.append([name, proto, dw, aw, idw, user, domain, outstanding,
-                                  outstanding, None, None])  # fmt: skip
+                                  outstanding, description, None])  # fmt: skip
         return self._expose(name, prefix, exposed)
 
     def slave(self, name: str, proto: str, dw: int, aw: int, domain: str,
               prefix: str | None = None, id_width: int | str | None = None,
-              user: int | None = None) -> "Cfg":  # fmt: skip
+              user: int | None = None, description: str | None = None) -> "Cfg":  # fmt: skip
         """A slave row; AXI4 slaves default to ID width auto, AXI slaves to user width 0."""
         idw = id_width if id_width is not None else ("auto" if proto == "AXI4" else None)
         uw = user if user is not None else (0 if proto in AXI else None)
-        self.data.slaves.append([name, proto, dw, aw, idw, uw, domain, ERROR[proto], 0, None,
-                                 None])  # fmt: skip
+        self.data.slaves.append([name, proto, dw, aw, idw, uw, domain, ERROR[proto], 0,
+                                 description, None])  # fmt: skip
         return self._expose(name, prefix, True)
 
     def bridge(self, name: str, window: int, pass_through: bool = True,
