@@ -80,7 +80,7 @@ OUTLINE (chapter files in this order; content may not be less)
 
  1  intro: what BAG is for; the pipeline workbook -> check -> IR -> generate -> lint ->
     compile -> sim -> formal; what is generated; deterministic output; what BAG does not do.
- 2  install: Python 3.11+; from a checkout or git URL (no package index yet); the `sim`
+ 2  install: Python 3.11+; from PyPI, a git URL or a checkout; the `sim`
     extra; the EDA tools and the pinned versions (tools.lock), the tools image.
  3  first: the demo_ss sample start to finish: template, check (its two warnings and why),
     ir, generate, the output tree; lint, sim and formal on a small design (EDA transcripts).
