@@ -321,3 +321,38 @@ def test_generate_over_a_corrupt_manifest_writes_a_fresh_one(tmp_path: Path) -> 
     (out / MANIFEST).write_text("{not json", encoding="utf-8")
     generate(load(CONFIG), out, CONFIG.parent)
     assert load_outputs(out).top
+
+
+def _manifest_with(root: Path, extra: dict[str, str]) -> None:
+    path = root / MANIFEST
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["files"] = {**data["files"], **extra}
+    path.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+
+
+def test_generate_removes_a_file_the_previous_run_wrote_and_this_one_did_not(
+    tmp_path: Path,
+) -> None:
+    """The pruning this guards: a file listed by the last run and not written by this one goes."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    stale = out / "rtl" / "stale.sv"
+    stale.write_text("// from a previous run\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not stale.exists()
+
+
+@pytest.mark.parametrize("escape", ["../victim.txt", "rtl/../../victim.txt"])
+def test_generate_does_not_delete_a_file_outside_the_output_directory(
+    tmp_path: Path, escape: str
+) -> None:
+    """The names pruned come from a manifest in a directory the user may not have written, and
+    pruning deletes whatever they name. An output tree from someone else took a file with it."""
+    out = tmp_path / "out"
+    victim = tmp_path / "victim.txt"
+    generate(load(CONFIG), out, CONFIG.parent)
+    victim.write_text("the user's own work\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {escape: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert victim.read_text(encoding="utf-8") == "the user's own work\n"

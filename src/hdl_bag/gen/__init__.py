@@ -289,6 +289,13 @@ def include_dirs(out: Outputs) -> list[Path]:
     return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
 
 
+def _inside(root: Path, rel: str) -> bool:
+    """Whether ROOT/REL stays under ROOT, following `..` and symlinks to decide it."""
+    if Path(rel).is_absolute():
+        return False
+    return (root / rel).resolve().is_relative_to(root.resolve())
+
+
 def _manifest(
     root: Path,
     written: list[str],
@@ -307,7 +314,10 @@ def _manifest(
     except (OSError, UnicodeDecodeError, ValueError, AttributeError):
         listed = {}  # an unreadable manifest lists nothing to clean up; this run replaces it
     for rel in listed if isinstance(listed, dict | list) else ():
-        if isinstance(rel, str) and rel not in written:
+        # Inside ROOT only. These names come from a manifest in a directory this run did not
+        # necessarily write, and this is a delete: a name reaching out of ROOT is skipped, as
+        # an unreadable manifest is, rather than stopping a generate that is otherwise fine.
+        if isinstance(rel, str) and rel not in written and _inside(root, rel):
             (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
     data = {
