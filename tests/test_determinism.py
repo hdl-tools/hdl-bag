@@ -28,8 +28,12 @@ def _text_writes_without_lf(root: Path) -> list[str]:
             if name not in ("write_text", "open"):
                 continue
             if name == "open":
+                # `path.open(mode)` takes the mode first; `open(path, mode)` takes it second.
+                # Reading args[1:2] for both missed every `path.open("w", ...)` in the package,
+                # which is the form it writes nearly every generated file with.
+                args = node.args[0:1] if isinstance(node.func, ast.Attribute) else node.args[1:2]
                 mode = next(
-                    (a.value for a in node.args[1:2] if isinstance(a, ast.Constant)),
+                    (a.value for a in args if isinstance(a, ast.Constant)),
                     next(
                         (k.value.value for k in node.keywords
                          if k.arg == "mode" and isinstance(k.value, ast.Constant)),

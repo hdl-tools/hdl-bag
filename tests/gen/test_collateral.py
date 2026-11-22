@@ -321,13 +321,14 @@ def test_c_header_compiles(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_an_arrow_in_the_user_header_does_not_close_the_comment() -> None:
+@pytest.mark.parametrize("arrow", ["-->", "--!>"])
+def test_an_arrow_in_the_user_header_does_not_close_the_comment(arrow: str) -> None:
     """Every document opens with the banner in an HTML comment, and `-->` is an ordinary ASCII
     arrow in a hand-written header. It closed the comment, so the rest of the banner, the IR
     sha256 and (in memmap.html) the <html> tag itself became body text. The html test's own
     `text.split("-->", 1)[1]` assumes the first `-->` ends the banner."""
     spec = load(GOLDEN_IR)
-    header = "Acme SoC bus\ncpu --> l2 --> dram\n"
+    header = f"Acme SoC bus\ncpu {arrow} l2 {arrow} dram\n"
     documents = {
         "memmap.md": memmap_md(spec, header),
         "memmap.html": memmap_html(spec, header),
@@ -336,8 +337,12 @@ def test_an_arrow_in_the_user_header_does_not_close_the_comment() -> None:
         "reset.md": reset_md(spec, header),
     }
     for name, text in documents.items():
-        banner, _, rest = text.partition("-->")
+        # Whichever sequence ends the comment first, not just `-->`: partitioning on `-->`
+        # alone finds the banner's own close and passes while `--!>` has ended it earlier.
+        close = min(i for i in (text.find("-->"), text.find("--!>")) if i != -1)
+        banner = text[:close]
         assert "DO NOT EDIT" in banner, f"{name}: the comment closes before the banner ends"
         assert "IR sha256" in banner, f"{name}: the comment closes before the IR hash"
         assert "cpu -" in banner, f"{name}: the header itself is not in the comment"
-        assert "l2" not in rest.split("\n", 1)[0], f"{name}: the header spilled into the document"
+    # The C header has no comment to close, so D4's verbatim header reaches it unaltered.
+    assert f"cpu {arrow} l2" in c_header(spec, header)

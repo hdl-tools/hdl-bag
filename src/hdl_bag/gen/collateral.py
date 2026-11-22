@@ -97,19 +97,23 @@ def _md_table(columns: tuple[str, ...], rows: list[dict[str, str]]) -> list[str]
     return lines
 
 
-def _banner(spec: Spec, user_header: str | None) -> str:
-    """The banner for a document, which every caller wraps in an HTML comment.
+def _html_comment(spec: Spec, user_header: str | None) -> str:
+    """The banner inside an HTML comment, for the documents that open with one.
 
-    A hand-written header may hold an ASCII arrow, and `-->` would close that comment early
-    and spill the rest of the banner into the document. The space keeps the text readable,
-    which an entity would not.
+    A hand-written header may hold an ASCII arrow, and both `-->` and `--!>` end a comment
+    (the second through HTML5's comment-end-bang state), so the rest of the banner, the IR
+    hash and the markup after it would become body text. The space keeps the text readable,
+    which an entity would not. Only this wrapper escapes: the header reaches the RTL, the C
+    header, the constraints and the generated tests verbatim, as D4 says it should, and those
+    have no comment to close.
     """
-    return header(spec, user_header).replace("-->", "-- >")
+    text = header(spec, user_header).replace("-->", "-- >").replace("--!>", "-- !>")
+    return f"<!--\n{text}-->"
 
 
 def memmap_md(spec: Spec, user_header: str | None) -> str:
     revision = spec.project.revision or "-"
-    lines = [f"<!--\n{_banner(spec, user_header)}-->", "",
+    lines = [_html_comment(spec, user_header), "",
              f"# {spec.project.name} memory map", "",
              f"Revision {revision}. System addresses; End is inclusive.", ""]  # fmt: skip
     for fm in memmap(spec):
@@ -148,7 +152,7 @@ def _html_table(columns: tuple[str, ...], rows: list[dict[str, str]]) -> list[st
 
 def memmap_html(spec: Spec, user_header: str | None) -> str:
     title = html.escape(f"{spec.project.name} memory map")
-    lines = ["<!DOCTYPE html>", f"<!--\n{_banner(spec, user_header)}-->", '<html lang="en">',
+    lines = ["<!DOCTYPE html>", _html_comment(spec, user_header), '<html lang="en">',
              "<head>", '<meta charset="utf-8">', f"<title>{title}</title>",
              f"<style>{_CSS}</style>", "</head>", "<body>", f"<h1>{title}</h1>",
              f"<p>Revision {html.escape(spec.project.revision or '-')}. "
@@ -190,7 +194,7 @@ def c_header(spec: Spec, user_header: str | None) -> str:
                 f"#define {stem}_BASE 0x{r.base:0{digits}X}ULL /* {', '.join(what)} */",
                 f"#define {stem}_SIZE 0x{r.size:0{digits}X}ULL",
             ]
-    lines = [_banner(spec, user_header).rstrip("\n"), "", f"#ifndef {guard}", f"#define {guard}",
+    lines = [header(spec, user_header).rstrip("\n"), "", f"#ifndef {guard}", f"#define {guard}",
              "", f"/* Memory map of {project} (system addresses). */", *body, "",
              f"#endif /* {guard} */", ""]  # fmt: skip
     return "\n".join(lines)
@@ -228,7 +232,7 @@ def port_map_md(spec: Spec, user_header: str | None) -> str:
             "Adapters (port side first)": ", ".join(adapters.get((port, f_name), [])) or "-",
         }  # fmt: skip
 
-    lines = [f"<!--\n{_banner(spec, user_header)}-->", "", f"# {spec.project.name} port map", ""]
+    lines = [_html_comment(spec, user_header), "", f"# {spec.project.name} port map", ""]
     for f in spec.fabrics:
         p = placement.get(f.name)
         where = f"{p.wrapper}, instance {p.rtl_name}" if p else f"{spec.hierarchy.top}, u_{f.name}"
@@ -260,7 +264,7 @@ TIEOFF_COLUMNS = ("Instance", "Bus", "Signal", "Direction", "Value", "Reason")
 
 def tieoffs_md(spec: Spec, rows: Iterable[TieOff], user_header: str | None) -> str:
     """Every component port BAG tied, defaulted, fitted or left unused, and why (D40)."""
-    lines = [f"<!--\n{_banner(spec, user_header)}-->", "",
+    lines = [_html_comment(spec, user_header), "",
              f"# {spec.project.name} tie-offs", "",
              "Component ports that are not simply wired to a bus signal. Direction is the "
              "component's. Inputs show the value they see; nothing reads the unused outputs.",
@@ -338,7 +342,7 @@ def reset_md(spec: Spec, user_header: str | None) -> str:
     clocks = {c.domain: c for c in spec.clocks}
     resets = {r.domain: r for r in spec.resets}
     n = RST_SYNC_STAGES
-    lines = [f"<!--\n{_banner(spec, user_header)}-->", "",
+    lines = [_html_comment(spec, user_header), "",
              f"# {spec.project.name} reset sequence", "",
              "BAG's clock-domain crossings keep state on both sides: the gray-coded pointers of "
              "a CDC FIFO (cdc adapters, and the bridges from AXI), or the request and acknowledge "
