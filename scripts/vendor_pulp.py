@@ -8,8 +8,9 @@
 Bender checks out the commits in Bender.lock. ``bender script flist-plus`` gives the
 compile order. Only the transitive closure of ``ROOTS`` (the PULP modules BAG's templates
 instantiate) is copied, together with the headers it includes and each package's LICENSE.
-``index.json`` records, per file, the design units it defines and the files it needs, so
-``bag generate`` copies only what a design uses. The script needs only the standard
+``index.json`` records, per file, the licence its own header names, the design units it
+defines and the files it needs, so ``bag generate`` copies only what a design uses and the
+texts of the licences it needs. The script needs only the standard
 library, so it runs with ``--no-project`` on the image's Python.
 """
 
@@ -50,13 +51,41 @@ ROOTS = (
     "axi_xbar",
     "rr_arb_tree",
 )
-LICENCE = "SHL-0.51"
 URL = "https://github.com/pulp-platform/{}.git"
 
 _UNIT = re.compile(r"^\s*(?:module|package|interface)\s+(?:automatic\s+|static\s+)?(\w+)", re.M)
 _INCLUDE = re.compile(r'`include\s+"([^"]+)"')
+_SPDX = re.compile(r"SPDX-License-Identifier:\s*(.+?)\s*$", re.M)
+# The same recognition as scripts/bom.py, which checks every file again against the tree.
+_NOTICES = (
+    ("solderpad.org/licenses/SHL-0.51", "SHL-0.51"),
+    ("Apache License, Version 2.0", "Apache-2.0"),
+)
+_TEXTS = (("SOLDERPAD HARDWARE LICENSE version 0.51", "SHL-0.51"), ("Apache License", "Apache-2.0"))
 _WORD = re.compile(r"\b[A-Za-z_]\w*\b")
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+
+
+def licence_of(path: Path) -> str:
+    """The SPDX id a file's own header names (SPDX line, else the Solderpad or Apache notice)."""
+    head = "\n".join(path.read_text(encoding="utf-8").splitlines()[:40])
+    if m := _SPDX.search(head):
+        return m[1]
+    for needle, spdx in _NOTICES:
+        if needle in head:
+            return spdx
+    raise SystemExit(f"{path}: no licence notice recognised in its first 40 lines; stop and check")
+
+
+def package_licence(path: Path) -> str:
+    """The licence a package's LICENSE text is, from its opening line."""
+    first = next(
+        (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()), ""
+    )
+    for opening, spdx in _TEXTS:
+        if first.startswith(opening):
+            return spdx
+    raise SystemExit(f"{path}: licence text not recognised from its opening line; stop and check")
 
 
 def _run(*cmd: str) -> str:
@@ -158,7 +187,7 @@ def build(dest: Path) -> None:
             p: {
                 "version": lock[p][0],
                 "revision": lock[p][1],
-                "licence": LICENCE,
+                "licence": package_licence(dest / p / "LICENSE"),
                 "url": URL.format(p),
             }
             for p in packages
@@ -167,13 +196,18 @@ def build(dest: Path) -> None:
         "files": [
             {
                 "path": rel,
+                "licence": licence_of(dict(srcs)[rel]),
                 "defines": sorted(u for u, f in defines.items() if f == rel),
                 "requires": requires[rel],
             }
             for rel, _ in srcs
             if rel in keep
         ],
-        "headers": [{"path": h, "requires": requires[h]} for h in sorted(headers) if h in keep],
+        "headers": [
+            {"path": h, "licence": licence_of(headers[h]), "requires": requires[h]}
+            for h in sorted(headers)
+            if h in keep
+        ],
     }
     with (dest / "index.json").open("w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(index, indent=2) + "\n")

@@ -45,7 +45,7 @@ def test_every_vendored_file_on_disk_is_in_exactly_one_file_set() -> None:
     """Walks the disk, so a directory the index does not know (derived/) is caught."""
     listed = [p for row in _bom().file_sets() for p in row.paths]
     assert len(listed) == len(set(listed)), "a file is listed twice"
-    skip = {"LICENSE", "SOURCE.md", "index.json"}
+    skip = {"SOURCE.md", "index.json"}
     src = REPO / "src" / "hdl_bag"
     on_disk = {
         p.relative_to(REPO).as_posix()
@@ -53,7 +53,9 @@ def test_every_vendored_file_on_disk_is_in_exactly_one_file_set() -> None:
         for p in root.rglob("*")
         if p.is_file() and p.name not in skip
     }
-    assert on_disk == set(listed)
+    # LICENSE files and licences/*.txt are not skipped: each must be named by a file set, so an
+    # orphan or misnamed text fails here.
+    assert on_disk == set(listed) | {t for row in _bom().file_sets() for t in row.texts}
 
 
 def test_no_file_set_is_empty() -> None:
@@ -72,22 +74,25 @@ def test_every_vendored_file_names_an_allowed_licence() -> None:
 
 
 def test_a_named_licence_text_is_that_licence() -> None:
+    """Each id of a row's licence (split at WITH) has a text that really is that licence."""
     bom = _bom()
-    named = [row for row in bom.file_sets() if row.text is not None]
-    assert len(named) >= 4
-    for row in named:
-        assert bom.licence_of_text(REPO / row.text) == row.licence, row.text
+    rows = bom.file_sets()
+    assert len(rows) >= 6
+    for row in rows:
+        names = {bom.licence_of_text(REPO / t) for t in row.texts}
+        assert names == set(row.licence.split(" WITH ")), row.texts
 
 
-def test_the_two_files_without_a_text_say_so() -> None:
-    """The gap is stated, and tracked by #172, not hidden."""
-    gaps = [row for row in _bom().file_sets() if row.text is None]
-    assert sorted(p for row in gaps for p in row.paths) == [
-        "src/hdl_bag/rtl/vendor/pulp/common_cells/include/common_cells/assertions.svh",
-        "src/hdl_bag/rtl/vendor/pulp/common_cells/src/read.sv",
-    ]
+def test_every_file_set_has_its_licence_text_beside_it_or_under_licences() -> None:
+    """Closes the gap the bill of materials once stated: no row says a text is missing."""
+    rows = _bom().file_sets()
+    assert all(row.texts for row in rows)
     bom = (REPO / "docs" / "bom.md").read_text(encoding="utf-8")
-    assert bom.count(NOT_BESIDE) == 2 and "#172" in bom
+    assert NOT_BESIDE not in bom and "#172" not in bom
+    texts = {row.licence: row.texts for row in rows if row.name == "common_cells"}
+    base = "src/hdl_bag/rtl/vendor/licences"
+    assert texts["Apache-2.0"] == (f"{base}/Apache-2.0.txt",)
+    assert texts["Apache-2.0 WITH SHL-2.1"] == (f"{base}/Apache-2.0.txt", f"{base}/SHL-2.1.txt")
 
 
 def test_a_file_with_no_licence_notice_stops_the_script(tmp_path: Path) -> None:

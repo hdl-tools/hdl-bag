@@ -84,7 +84,8 @@ Generated output (under the output directory):
 rtl/pkg/<package>.sv     parameter package (widths, decode tables)
 rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
 rtl/inhouse/*.sv         the in-house IP the design uses (names carry Module prefix, if set)
-rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files
+rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files and
+                         the texts of any other licence they are under
                          (unit, macro and file names, headers included, carry Module prefix, if set)
 rtl/ext/<module>.sv      stub of a user-supplied fabric: replace it with your RTL
 <project>.f              file list in compile order

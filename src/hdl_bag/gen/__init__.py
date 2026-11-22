@@ -15,6 +15,7 @@ Output layout (relative to the output directory)::
     rtl/vendor/pulp/...        copies of the vendored PULP files the design uses, with their units
                                and macros renamed; the headers are ``<prefix>_*.svh``
     rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
+    rtl/vendor/licences/<id>.txt   the text of any other licence a vendored file is under
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
@@ -65,7 +66,7 @@ from hdl_bag.ir import dumps
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
-from hdl_bag.templates.sources import VENDOR, resolve_sources
+from hdl_bag.templates.sources import VENDOR, licence_texts, resolve_sources
 
 # In-house cells the wrapper itself may instantiate (reset conditioning).
 _WRAPPER_CELLS = ("rtl/inhouse/bag_rst_sync.sv",)
@@ -156,6 +157,9 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     vendored = {rel.split("/")[3] for rel in [*srcs, *src.headers] if rel.startswith(f"{VENDOR}/")}
     for name in sorted(vendored):
         rel = f"{VENDOR}/{name}/LICENSE"
+        _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+    # A file under another licence than its package's brings that text too (not a source).
+    for rel in licence_texts([*src.files, *src.headers]):
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
     # Stubs for opaque fabrics: the user replaces them with the fabric's RTL.

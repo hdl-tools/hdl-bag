@@ -10,12 +10,14 @@ and generation copies them to the same relative path in the output directory.
 """
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
 from typing import Any
 
 VENDOR = "rtl/vendor/pulp"
+LICENCES = "rtl/vendor/licences"
 
 
 class SourceError(ValueError):
@@ -86,3 +88,22 @@ def resolve_sources(refs: list[str]) -> SourceSet:
         headers=tuple(f"{VENDOR}/{h}" for h in headers),
         incdirs=tuple(f"{VENDOR}/{d}" for d in incdirs),
     )
+
+
+def licence_texts(rels: Iterable[str]) -> tuple[str, ...]:
+    """The licence texts, beyond each package's own LICENSE, that the vendored files RELS need.
+
+    A file's licence may be a wraparound (``Apache-2.0 WITH SHL-2.1``), which is read together
+    with the text it wraps, so each id the file names that is not its package's licence brings
+    ``rtl/vendor/licences/<id>.txt``. RELS are package paths, not generated (prefixed) names.
+    """
+    index = _index()
+    licence = {e["path"]: e["licence"] for e in index["files"] + index["headers"]}
+    own = {p: v["licence"] for p, v in index["packages"].items()}
+    texts: set[str] = set()
+    for rel in rels:
+        if rel.startswith(f"{VENDOR}/"):
+            path = rel.removeprefix(f"{VENDOR}/")
+            ids = licence[path].split(" WITH ")
+            texts |= {f"{LICENCES}/{i}.txt" for i in ids if i != own[path.split("/")[0]]}
+    return tuple(sorted(texts))

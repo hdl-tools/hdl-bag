@@ -8,15 +8,17 @@ Everything hdl-bag ships that its authors did not write, and every Python packag
 
 Shipped in the package under `src/hdl_bag/`; `bag generate` copies the ones a design uses
 into its output. Each file's licence is read from its own header, not from `index.json`.
-Two files are not SHL-0.51 and have no licence text beside them; shipping those texts is
-tracked by #172.
+A package's own `LICENSE` is beside its files; the texts of the other licences are under
+`src/hdl_bag/rtl/vendor/licences/`, and a design that uses such a file gets them too. A
+`WITH` licence is a wraparound, read together with the licence it wraps, so it has both
+texts.
 
 | Package | Version | Commit | Licence | Files | Licence text | Source |
 |---|---|---|---|---|---|---|
 | axi | 0.39.11 | `42ca270ebd8bbbc1c64ddc0ca712e722eb9e3f06` | SHL-0.51 | 36 | `src/hdl_bag/rtl/vendor/pulp/axi/LICENSE` | <https://github.com/pulp-platform/axi> |
 | common_cells | 1.39.0 | `9ca8a7655f741e7dd5736669a20a301325194c28` | SHL-0.51 | 19 | `src/hdl_bag/rtl/vendor/pulp/common_cells/LICENSE` | <https://github.com/pulp-platform/common_cells> |
-| common_cells | 1.39.0 | `9ca8a7655f741e7dd5736669a20a301325194c28` | Apache-2.0 | 1 | not beside the file | <https://github.com/pulp-platform/common_cells> |
-| common_cells | 1.39.0 | `9ca8a7655f741e7dd5736669a20a301325194c28` | Apache-2.0 WITH SHL-2.1 | 1 | not beside the file | <https://github.com/pulp-platform/common_cells> |
+| common_cells | 1.39.0 | `9ca8a7655f741e7dd5736669a20a301325194c28` | Apache-2.0 | 1 | `src/hdl_bag/rtl/vendor/licences/Apache-2.0.txt` | <https://github.com/pulp-platform/common_cells> |
+| common_cells | 1.39.0 | `9ca8a7655f741e7dd5736669a20a301325194c28` | Apache-2.0 WITH SHL-2.1 | 1 | `src/hdl_bag/rtl/vendor/licences/Apache-2.0.txt`, `src/hdl_bag/rtl/vendor/licences/SHL-2.1.txt` | <https://github.com/pulp-platform/common_cells> |
 | axi, modified (`scripts/derive_mux.py`) | 0.39.11 | `42ca270ebd8bbbc1c64ddc0ca712e722eb9e3f06` | SHL-0.51 | 2 | `src/hdl_bag/rtl/vendor/pulp/axi/LICENSE` | <https://github.com/pulp-platform/axi> |
 | wb2axip (`bench/formal/`) | none | `2e8d3bc2d26ddc33d1881022a2a2b9d3f0c16b9b` | Apache-2.0 | 4 | `src/hdl_bag/formal/vendor/zipcpu/LICENSE` | <https://github.com/ZipCPU/wb2axip> |
 
