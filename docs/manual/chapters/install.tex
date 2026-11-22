@@ -6,20 +6,22 @@ and generating need nothing else. Lint, simulation and formal need the EDA tools
 section~\ref{sec:eda}, and on macOS they run in the container image of
 section~\ref{sec:eda} rather than natively.
 
-BAG is not on a package index yet. Install it from its repository or from a checkout,
-in a virtual environment.
+BAG is on PyPI. Install it from there, or from its repository or a checkout, in a
+virtual environment.
 
 \section{Installing BAG}
 
 \begin{enumerate}
 \item Create and enter a virtual environment: \cmd{python -m venv .venv}, then
   activate it as your shell requires.
-\item Install BAG from the repository:\\
+\item Install BAG: \cmd{pip install hdl-bag}\\
+  or, for the unreleased main branch,
   \cmd{pip install git+https://github.com/hdl-tools/hdl-bag.git}\\
   or, from a checkout, go to the folder that holds \file{pyproject.toml} and run
   \cmd{pip install .}
 \item For \cmd{bag sim}, add the \code{sim} extra, which installs cocotb and
   cocotbext-axi at the versions the generated tests are written for:
+  \cmd{pip install "hdl-bag[sim]"}, or
   \cmd{pip install "hdl-bag[sim] @ git+https://github.com/hdl-tools/hdl-bag.git"},
   or \cmd{pip install ".[sim]"} from a checkout.
 \end{enumerate}

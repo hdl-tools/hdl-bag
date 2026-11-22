@@ -142,17 +142,17 @@ Stated so the record is complete; each was caught and corrected.
 
 ## Release
 
-Phase 6 does not include the release. `pyproject.toml` still says version `0.0.1` and `Development Status :: 2 - Pre-Alpha`, and `v1.0.0` is not tagged. The entries below are placeholders for the maintainer to fill in one pass; none is a real link.
+Phase 6 does not include the release; the release is Phase 7, and the entries below are its artifacts. The version and the classifier were set by #181, the wheel's licensing documents by #179, and the release page and the tools image's version tag by #180. Two rows are run links, which are written here only after the runs have been read.
 
 | Item | Link |
 |---|---|
-| Tag `v1.0.0` | _pending: v1.0.0 is not tagged (see #66)_ |
-| GitHub release page | _pending: v1.0.0 is not tagged (see #66)_ |
-| PyPI project and release | _pending: v1.0.0 is not tagged (see #66)_ |
-| Tools image tag on GHCR | _pending: v1.0.0 is not tagged (see #66)_ |
-| `CHANGELOG.md` entry for 1.0.0 | _pending: v1.0.0 is not tagged (see #66); draft is PR #174_ |
-| Release workflow run that published it | _pending: v1.0.0 is not tagged (see #66)_ |
-| CI run on the tagged commit | _pending: v1.0.0 is not tagged (see #66)_ |
+| Tag `v1.0.0` | [v1.0.0](https://github.com/hdl-tools/hdl-bag/tree/v1.0.0) |
+| GitHub release page | [releases/tag/v1.0.0](https://github.com/hdl-tools/hdl-bag/releases/tag/v1.0.0) |
+| PyPI project and release | [hdl-bag 1.0.0](https://pypi.org/project/hdl-bag/1.0.0/) |
+| Tools image tag on GHCR | `ghcr.io/hdl-tools/hdl-bag-tools:v1.0.0` |
+| `CHANGELOG.md` entry for 1.0.0 | [CHANGELOG.md](../CHANGELOG.md) |
+| Release workflow run that published it | _fill in: the `release` workflow run on the tag_ |
+| CI run on the tagged commit | _fill in: the `pr` workflow run on the tagged commit_ |
 
 ## Effect on later phases
 
