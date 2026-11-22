@@ -194,6 +194,6 @@ wrapper:
       exposed: true
       prefix: null
 provenance:
-  bag_version: 0.0.1
+  bag_version: 1.0.0
   source: lite_ss.xlsx
   sha256: ddb73e45ab878cc94250d938526f537dd2340a965333b52628139280e40e2f23
