@@ -3,7 +3,8 @@
 
 This chapter takes the sample design of BAG from an empty folder to generated RTL. Then
 it runs lint, simulation and formal on a smaller design. Run the commands in an empty
-folder.
+folder. The terms fabric, master, slave, bridge and clock-domain crossing (CDC) are
+defined in the list in section~\ref{sec:wb-terms}.
 
 \section{The sample workbook}
 
@@ -72,6 +73,36 @@ what errors look like: each names the sheet, the row and the rule ID. With an er
 
 Fill in the sheets in the order of chapter~\ref{ch:workbook}, and run \cmd{bag check}
 after each sheet.
+
+\subsection{The least a design needs}
+
+A design with one fabric needs these rows. Take $N$ masters and $M$ slaves, all on one
+AXI4 crossbar in one clock domain:
+
+\begin{itemize}
+\item \sheet{Project}: the project name, the output directory and the five
+  \code{Generate} settings, \code{Y} or \code{N}. These are the first errors above.
+\item \sheet{Clocks} and \sheet{Resets}: one clock and one reset in one domain.
+\item \sheet{Fabrics}: one row.
+\item \sheet{Masters}: $N$ rows. \sheet{Slaves}: $M$ rows.
+\item \sheet{Topology}: $N+M$ rows. Each master links to the fabric and the fabric
+  links to each slave, with a \col{Port index} that counts from 0 on each side.
+\item \sheet{Memory_Map}: at least one region for each slave, $M$ rows. A slave with
+  no region is unreachable (\ruleid{MM-PATH-NO-REGION}, a warning).
+\item \sheet{Address_Decode}: one row for each master, $N$ rows, with a miss response
+  (\code{DECERR} on AXI4). A missing row is an error (\ruleid{DEC-MISSING-ROW}).
+\item \sheet{Wrapper}: the top module name, the parameter package, and one row of
+  \code{Exposed ports} for each master and slave, $N+M$ rows, all \code{Y}.
+\end{itemize}
+
+\sheet{Bridges}, \sheet{Access_Rules}, \sheet{Port_Options}, \sheet{User_Ports} and
+\sheet{Hierarchy} may stay empty. \sheet{Hierarchy} keeps the one row for the top
+wrapper that the template gives it. A workbook like this one, with two masters and two
+slaves, checks with no finding and generates 60 files.
+
+For the crossbar, \code{bag_axi_xbar} with \col{Latency mode} \code{NO_LATENCY} is a safe
+default: it adds no spill register, and the example workbooks use it. Choose another mode
+only to fix timing. Chapter~\ref{ch:workbook} explains every column.
 
 The repository also holds three finished workbooks in its top-level \file{examples/}
 directory (not the manual's \file{docs/manual/examples/}, and not part of a \code{pip install}).

@@ -105,6 +105,16 @@ bind-mounted at \path{/work}, and give the container its own virtual environment
 named volume and \code{UV\_PROJECT\_ENVIRONMENT}, so it does not share the host's
 \path{.venv}. \code{UV\_LINK\_MODE=copy} avoids hard links across the mount.
 
+Run this from your checkout, after \cmd{bag generate} has written \file{out/}. It lints
+the design with the pinned tools. Replace \cmd{uv run bag lint out/} with any other
+\cmd{bag} command that needs the tools:
+
+\lstinputlisting{examples/files/docker-lint.sh}
+
+Only the checkout is visible in the container. A spec or an output directory outside it
+needs its own mount, for example \code{-v /data/specs:/specs}, and you then name it
+by its path in the container, \path{/specs}.
+
 The reason the flows are not run natively is Verilator. It publishes no macOS binary and
 cannot be built from source at the pinned version on macOS~27: the system
 \cmd{flex} emits a \code{yy\_create\_buffer} that does not match Verilator's

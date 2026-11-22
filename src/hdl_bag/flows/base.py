@@ -101,6 +101,14 @@ def relative(path: str, root: Path) -> str:
     return p.as_posix()
 
 
+def tool_missing_message(executable: str) -> str:
+    """The TOOL-MISSING text: the program, and where to get it (the tools image or the manual)."""
+    return (
+        f"'{executable}' not found on PATH: install it with scripts/install_tools.py, or run in "
+        "the tools image (manual, section 'The EDA tools')"
+    )
+
+
 def run_backend(
     backend: Backend, files: list[Path], top: str, root: Path, incdirs: list[Path] | None = None
 ) -> list[Finding]:
@@ -109,7 +117,7 @@ def run_backend(
     if exe is None:
         return [
             Finding(backend.name, "", 0, "TOOL-MISSING", "error",
-                    f"'{backend.executable}' not found on PATH")
+                    tool_missing_message(backend.executable))
         ]  # fmt: skip
     cmd = [exe, *backend.command(files, top, incdirs or [])[1:]]
     proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True, check=False)

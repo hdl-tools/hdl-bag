@@ -6,6 +6,7 @@ Each case is the demo_ss sample plus one mutation, and asserts the exact message
 """
 
 import dataclasses
+import re
 import shutil
 from pathlib import Path
 
@@ -586,6 +587,17 @@ def test_every_rule_has_a_broken_workbook() -> None:
     covered = {msg.rsplit("(", 1)[1].rstrip(")") for _, _, exp in CASES for msg in exp}
     assert set(RULES) - covered == set()
     assert len(RULES) >= 40
+
+
+def test_the_readme_states_the_number_of_checks() -> None:
+    """The README's status table says how many checks there are; it rotted once, so it is pinned."""
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    found = re.search(r"(\d+) validation checks", readme.read_text(encoding="utf-8"))
+    assert found, f"{readme} no longer says 'N validation checks'; restore the phrase"
+    assert int(found.group(1)) == len(RULES), (
+        f"README.md says {found.group(1)} validation checks but RULES has {len(RULES)}: "
+        f"edit the number in {readme}"
+    )
 
 
 def test_findings_are_sorted_and_deterministic(tmp_path: Path) -> None:

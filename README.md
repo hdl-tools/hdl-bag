@@ -15,7 +15,7 @@ nightly runs are not yet green), and Phase 6 is under way.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 96 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
+| Spec workbook template, reader and 97 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
 | Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 6) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
@@ -44,6 +44,8 @@ Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.
 ```sh
 # Until v1.0 is on PyPI, install from the repository:
 pip install git+https://github.com/hdl-tools/hdl-bag.git
+# or, from a checkout (needs uv), and put `uv run` in front of every `bag` below:
+uv sync
 
 bag template --sample -o spec.xlsx      # the demo_ss sample and its header.txt (omit --sample for a blank one)
 bag check spec.xlsx                     # every check; exit 1 on any error
@@ -117,6 +119,21 @@ a bridge) and `soc_4x8.xlsx` (an AXI4 crossbar with 4 masters and 8 slaves). Try
   versions are in [tools.lock](tools.lock), and the container image
   `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile)) has all of
   them for `linux/amd64` and `linux/arm64`.
+- **To lint (or sim, or formal) in that image**, run it from your checkout, after
+  `bag generate` has written `out/`. A spec or output directory outside the checkout needs
+  its own `-v` mount:
+
+  ```sh
+  docker run --rm \
+    -v "$PWD:/work" \
+    -v hdl-bag-venv:/venv \
+    -e UV_PROJECT_ENVIRONMENT=/venv \
+    -e UV_LINK_MODE=copy \
+    -w /work \
+    ghcr.io/hdl-tools/hdl-bag-tools:main \
+    sh -c 'uv run bag lint out/'
+  ```
+
 - **On macOS the EDA flows run in that image**, which is native on Apple Silicon. The
   pinned Verilator cannot be built on macOS itself, so there is no supported native EDA
   path there; `scripts/install_tools.py` installs the pinned tools on a Linux or macOS
