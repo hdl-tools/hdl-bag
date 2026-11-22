@@ -5,8 +5,8 @@
     uv run --no-project python scripts/bom.py          # rewrite docs/bom.md
     uv run --no-project python scripts/bom.py --check  # fail if it differs
 
-Licences of vendored files are read from each file's own header, never from index.json, whose
-licence field is a constant. Python licences are hand-kept in LICENCES because installed
+Licences of vendored files are read from each file's own header, never from index.json, which
+tests/vendor/test_vendor.py keeps equal to them. Python licences are hand-kept in LICENCES because installed
 metadata is missing or partial for some packages; tests/vendor/test_bom.py keeps the keys equal
 to the uv.lock closure. Platform markers are ignored so the output is machine-independent.
 """
@@ -26,6 +26,7 @@ PULP, DERIVED, ZIPCPU = (
     PKG / "rtl/vendor/derived",
     PKG / "formal/vendor/zipcpu",
 )
+LICENCES_DIR = PKG / "rtl/vendor/licences"
 OUT = REPO / "docs" / "bom.md"
 NOT_BESIDE = "not beside the file"
 
@@ -46,7 +47,11 @@ _NOTICES = (
     ("solderpad.org/licenses/SHL-0.51", "SHL-0.51"),
     ("Apache License, Version 2.0", "Apache-2.0"),
 )
-_TEXTS = (("SOLDERPAD HARDWARE LICENSE version 0.51", "SHL-0.51"), ("Apache License", "Apache-2.0"))
+_TEXTS = (
+    ("SOLDERPAD HARDWARE LICENSE version 0.51", "SHL-0.51"),
+    ("SOLDERPAD HARDWARE LICENSE VERSION 2.1", "SHL-2.1"),
+    ("Apache License", "Apache-2.0"),
+)
 
 
 class FileSet(NamedTuple):
@@ -56,7 +61,7 @@ class FileSet(NamedTuple):
     url: str
     licence: str
     paths: list[str]
-    text: str | None  # LICENSE beside the files that really is this licence, else None
+    texts: tuple[str, ...]  # the text of each licence id, in id order; empty if one is missing
 
 
 class PyRow(NamedTuple):
@@ -93,10 +98,20 @@ def _sets(
     by: dict[str, list[str]] = {}
     for p in sorted(paths):
         by.setdefault(licence_of(p), []).append(p.relative_to(REPO).as_posix())
-    text = licdir / "LICENSE"
-    shown = text.relative_to(REPO).as_posix()
+    own = licdir / "LICENSE"
+
+    def text_of(lic: str) -> Path | None:
+        if licence_of_text(own) == lic:
+            return own
+        shared = LICENCES_DIR / f"{lic}.txt"
+        return shared if shared.is_file() else None
+
+    def texts(lic: str) -> tuple[str, ...]:
+        found = [text_of(i) for i in lic.split(" WITH ")]
+        return () if None in found else tuple(p.relative_to(REPO).as_posix() for p in found if p)
+
     return [
-        FileSet(name, ver, rev, url, lic, ps, shown if licence_of_text(text) == lic else None)
+        FileSet(name, ver, rev, url, lic, ps, texts(lic))
         for lic, ps in sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     ]
 
@@ -183,14 +198,16 @@ def render() -> str:
         "",
         "Shipped in the package under `src/hdl_bag/`; `bag generate` copies the ones a design uses",
         "into its output. Each file's licence is read from its own header, not from `index.json`.",
-        "Two files are not SHL-0.51 and have no licence text beside them; shipping those texts is",
-        "tracked by #172.",
+        "A package's own `LICENSE` is beside its files; the texts of the other licences are under",
+        "`src/hdl_bag/rtl/vendor/licences/`, and a design that uses such a file gets them too. A",
+        "`WITH` licence is a wraparound, read together with the licence it wraps, so it has both",
+        "texts.",
         "",
         "| Package | Version | Commit | Licence | Files | Licence text | Source |",
         "|---|---|---|---|---|---|---|",
     ]
     for s in sets:
-        text = f"`{s.text}`" if s.text else NOT_BESIDE
+        text = ", ".join(f"`{t}`" for t in s.texts) if s.texts else NOT_BESIDE
         L.append(
             f"| {s.name} | {s.version or 'none'} | `{s.commit}` | {s.licence} | {len(s.paths)} |"
             f" {text} | <{s.url}> |"

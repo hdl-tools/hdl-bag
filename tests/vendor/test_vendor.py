@@ -7,6 +7,7 @@ These tests prove the tree is usable and that every PULP name BAG relies on exis
 pinned commit. A failure in the API tests is a stop-and-ask (design/plan.md §10).
 """
 
+import hashlib
 import json
 import re
 import sys
@@ -61,6 +62,28 @@ def test_every_index_entry_records_the_licence_of_its_own_header() -> None:
         "common_cells/include/common_cells/assertions.svh",
         "common_cells/src/read.sv",
     ]
+
+
+SHL_2_1_SHA256 = "6fa7fc99563ae8b86d910c33820be9af08052b7c527bd61d5661b0c2cbd623e9"
+
+
+def test_the_licence_directory_holds_exactly_the_two_texts_and_they_are_the_real_ones() -> None:
+    """Apache-2.0 is the repository's own LICENSE (as for the zipcpu tree); SHL-2.1 is the SPDX
+    text at a pinned tag (docs/third-party.md), so a changed byte is a stop-and-check."""
+    directory = files("hdl_bag") / "rtl" / "vendor" / "licences"
+    assert sorted(p.name for p in directory.iterdir()) == ["Apache-2.0.txt", "SHL-2.1.txt"]
+    assert (directory / "Apache-2.0.txt").read_bytes() == (REPO / "LICENSE").read_bytes()
+    assert hashlib.sha256((directory / "SHL-2.1.txt").read_bytes()).hexdigest() == SHL_2_1_SHA256
+
+
+def test_every_licence_in_the_index_has_a_text() -> None:
+    """Each id (split at WITH) is the package's own LICENSE or a text under licences/."""
+    shared = files("hdl_bag") / "rtl" / "vendor" / "licences"
+    for e in INDEX["files"] + INDEX["headers"]:
+        package = INDEX["packages"][e["path"].split("/")[0]]["licence"]
+        for lic in e["licence"].split(" WITH "):
+            if lic != package:
+                assert (shared / f"{lic}.txt").is_file(), (e["path"], lic)
 
 
 def test_every_bender_source_resolves() -> None:
