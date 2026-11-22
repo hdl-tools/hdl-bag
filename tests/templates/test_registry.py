@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
+from typing import get_args
+
 import pytest
 
 from hdl_bag.protocols import AXI_FAMILY, DATA_WIDTHS, PROTO_TOKEN, Protocol, port_signals
@@ -41,8 +43,8 @@ def test_bridge_catalogue() -> None:
 
 def test_manifest_validation() -> None:
     with pytest.raises(ValueError, match="fabric needs"):
-        Manifest(name="x", kind="fabric", api_version=1, description="", licence="MIT")
-    m = Manifest(name="x", kind="adapter", api_version=1, description="", licence="MIT",
+        Manifest(name="x", kind="fabric", api_version=1, description="")
+    m = Manifest(name="x", kind="adapter", api_version=1, description="",
                  protocols=(Protocol.AXI4,), adapter_type="cut")  # fmt: skip
     with pytest.raises(ValueError, match="duplicate"):
         Registry([m, m])
@@ -57,3 +59,20 @@ def test_protocol_tables() -> None:
     assert "hsel" not in port_signals(Protocol.AHB_LITE, is_slave=False)
     axi = port_signals(Protocol.AXI4, is_slave=False, has_id=False, removed=frozenset({"awqos"}))
     assert "awid" not in axi and "awuser" not in axi and "awqos" not in axi and "arqos" in axi
+
+
+@pytest.mark.parametrize("key", ["licence", "data_widths", "param_map", "port_map"])
+def test_a_key_no_code_reads_is_refused_rather_than_ignored(key: str) -> None:
+    """These four were once accepted and read by nothing; the licence lives in docs/bom.md."""
+    with pytest.raises(ValueError, match=key):
+        Manifest.model_validate({
+            "name": "x", "kind": "adapter", "api_version": 1, "description": "",
+            "protocols": ["AXI4"], "adapter_type": "cut", key: "x"})  # fmt: skip
+
+
+def test_qualification_is_a_value_the_schema_allows() -> None:
+    """`qualification` is documentation for a human, so its shape is the only thing to keep."""
+    allowed = set(get_args(Manifest.model_fields["qualification"].annotation))
+    reg = builtin_registry()
+    used = {m.qualification for n in reg.names() if (m := reg.get(n))}
+    assert used and used <= allowed

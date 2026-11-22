@@ -19,6 +19,5 @@ arbitration:
   - round-robin
   - fixed-priority
   - single-master
-licence: NOASSERTION
 qualification: unqualified
 opaque: true

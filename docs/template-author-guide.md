@@ -4,14 +4,12 @@ This guide is for someone who wants to add a fabric, adapter or bridge template 
 replace a vendored PULP block with their own RTL. It describes what the code does today
 (api_version 1) and where v2 is headed.
 
-**The plug-in format is unpublished until v2.** Today a template is a directory inside the
-`hdl_bag` package, and `bag generate` reads templates from nowhere else. Adding one means
-changing hdl-bag itself, through a pull request. The manifest format below is the one the
-built-in templates use, and the docstring of `src/hdl_bag/templates/manifest.py` says v2
-plug-ins will use the same format, but nothing here is a promise to plug-in authors: how a
-plug-in is found, packaged and trusted is not decided in a form this guide can state (see
-[The plug-in direction](#the-plug-in-direction-d46)). The code is the authority where this guide
-and it disagree.
+**The plug-in format is unpublished until v2.** Today a template is a directory inside the `hdl_bag`
+package, and `bag generate` reads templates from nowhere else. Adding one means changing hdl-bag
+itself, through a pull request. The manifest format below is the one the built-in templates use, and
+v2 plug-ins may use the same format, but nothing here is a promise to plug-in authors: how a plug-in
+is found, packaged and trusted is not decided in a form this guide can state (see [The plug-in
+direction](#the-plug-in-direction-d46)). The code is the authority where this guide and it disagree.
 
 Three block quotes below are gaps: each is a question about a settled decision whose reasoning is
 not in the repository. They all start with a bold marker and can be found with one search:
@@ -58,7 +56,6 @@ sources:
   - bender:axi:axi_dw_converter
   - rtl/inhouse/bag_axi2apb.sv
   - rtl/inhouse/bag_axi_from_flat.sv
-licence: SHL-0.51
 qualification: unqualified
 rtl: true
 ```
@@ -71,7 +68,6 @@ rtl: true
 | `kind` | `fabric`, `bridge` or `adapter` | yes | See above |
 | `api_version` | `1` | yes | The only legal value is the integer 1 (`Literal[1]`). See below |
 | `description` | string | yes | Free text. No generator or check reads it. Built-in manifests also use it to record the template's limits, for example the PULP burst restrictions of `bag_axi2apb` |
-| `licence` | string | yes | SPDX identifier of the backing implementation: `Apache-2.0` for in-house RTL, `SHL-0.51` for PULP, `NOASSERTION` for `bag_external`. Recorded only |
 | `protocols` | list of protocols | fabric and adapter | Fabric: the protocols it can implement. Adapter: the protocols it works on. Not used by a bridge |
 | `topologies` | list | fabric | Any of `crossbar`, `shared-bus`, `single-layer`, `decoder-mux` |
 | `arbitration` | list | fabric | Any of `round-robin`, `fixed-priority`, `single-master` |
@@ -82,13 +78,14 @@ rtl: true
 | `opaque` | bool, default `false` | no | The user supplies the RTL. See below |
 | `fifo_depth` | bool, default `true` | no | `false` for a bridge that handles one transfer at a time: `bag check` then warns (`BRIDGE-FIFO-IGNORED`) when the workbook sets a FIFO depth above zero for it |
 | `down_id_width` | int | no | Bridge only: the AXI ID width the bridge drives on an AXI4 downstream bus, where it is a master. `build_netlist` uses it for the bridge's downstream bus, and the checks' ID-width derivation assumes the same value. `bag_ahb2axi` and `bag_apb2axi` set it to 1 |
-| `qualification` | `unqualified` (default) or `qualified` | no | Recorded only. Every built-in template is `unqualified` |
-| `data_widths` | list of ints | no | The model's comment says "empty = the protocol's legal widths". No code reads it and no built-in manifest sets it |
-| `param_map`, `port_map` | maps of strings | no | BAG parameter to backing-IP parameter, and standard bus signal to backing-IP port. No code reads either, and only `bag_axi_xbar` sets one (`param_map`, for example `n_master_ports: Cfg.NoSlvPorts`). Treat them as documentation, not as an interface |
+| `qualification` | `unqualified` (default) or `qualified` | no | Provenance for a human reader; no code reads it. Every built-in template is `unqualified` |
 
-The keys that no code reads are listed so that you do not rely on them. The keys that gate
-behaviour are `kind`, `protocols`, `topologies`, `arbitration`, `upstream`, `downstream`,
-`adapter_type`, `sources`, `rtl`, `opaque`, `fifo_depth` and `down_id_width`.
+A manifest key the model does not name is refused when the file is loaded (`extra="forbid"`).
+`licence`, `data_widths`, `param_map` and `port_map` were removed because no code read them and they
+implied behaviour that does not exist. Licence information is not in the manifest: it lives in
+`docs/bom.md`, generated from each file's SPDX header. The keys that gate behaviour are `kind`,
+`protocols`, `topologies`, `arbitration`, `upstream`, `downstream`, `adapter_type`, `sources`,
+`rtl`, `opaque`, `fifo_depth` and `down_id_width`.
 
 ### What each kind must have
 
@@ -410,7 +407,7 @@ protocol versions. The Phase 3 report lists "plug-ins" among the v2 items withou
 
 What exists today that a plug-in could build on, from the code:
 
-- the manifest format, which `manifest.py` says is the one v2 plug-ins will use;
+- the manifest format, which a v2 plug-in could reuse;
 - `Registry`, which takes a list of `Manifest` objects and so does not depend on where they come
   from. `run_checks` takes a `registry` argument for the same reason;
 - a template interface that is already the contract between generator and block: `ctx`, `Bus`
@@ -468,7 +465,7 @@ for such a design (D8), so the user owns the fabric's verification.
 
 1. Directory `src/hdl_bag/templates/builtin/<name>/` with `manifest.yaml` and `instance.sv.j2`;
    `name` equals the directory.
-2. SPDX header on every file; `licence` is the backing implementation's.
+2. SPDX header on every file; `docs/bom.md` takes the licence from it.
 3. RTL in `rtl/inhouse/`, lint-clean under slang, Verilator and Verible, with a negative
    elaboration case per `$error` and `$fatal`.
 4. `sources` lists every in-house file and every `bender:` module; a new vendored module goes

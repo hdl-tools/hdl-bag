@@ -17,6 +17,5 @@ sources:
   - rtl/inhouse/bag_axil_cut.sv
   - rtl/inhouse/bag_axil_from_flat.sv
   - rtl/inhouse/bag_axil_to_flat.sv
-licence: SHL-0.51
 qualification: unqualified
 rtl: true
