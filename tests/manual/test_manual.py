@@ -57,6 +57,10 @@ M11 `.github/workflows/manual.yml` builds the PDF on pull requests and pushes to
     log reports an undefined or multiply defined reference, and uploading `hdl-bag.pdf` as
     the artifact `hdl-bag-manual`. Only actions/checkout and actions/upload-artifact. LaTeX
     build products are ignored by git.
+M12 Tool versions. The version table of chapters/install.tex names the versions `tools.lock`
+    installs. A bump there already fails the pins in `flows/backends.py` and the ARG defaults
+    in `tools/Dockerfile`, which is where a bumper looks; nothing read this table, so it was
+    the one place a bump could leave stale, in a document published as a PDF.
 
 WHAT THE TESTS CANNOT CHECK (the reviewer does)
 
@@ -354,3 +358,31 @@ def test_ci_builds_the_pdf() -> None:
     ignore = (transcript.REPO / ".gitignore").read_text(encoding="utf-8")
     for product in ("aux", "log", "pdf", "toc", "out", "fls", "fdb_latexmk"):
         assert f"docs/manual/*.{product}" in ignore, product
+
+
+def test_the_manuals_tool_table_names_the_versions_tools_lock_installs() -> None:
+    """M12: a bump in tools.lock fails the pins in flows/backends.py and the Dockerfile's ARG
+    defaults, and a bumper fixes those two files. Nothing read the manual's table, so it was
+    the one place a bump could leave stale, and the manual is a published PDF."""
+    lock = dict(
+        line.split("=", 1)
+        for line in (transcript.REPO / "tools.lock").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+    table = (CHAPTERS / "install.tex").read_text(encoding="utf-8")
+    rows = {
+        label.strip(): value.strip()
+        for label, value in re.findall(r"^(.+?) & (.+?) \\\\$", table, re.MULTILINE)
+    }
+    for label, key in (("Verilator", "VERILATOR_VERSION"), ("slang", "SLANG_VERSION"),
+                       ("Verible", "VERIBLE_VERSION")):  # fmt: skip
+        assert rows.get(label) == lock[key], (
+            f"install.tex says {label} is {rows.get(label)!r}; tools.lock installs "
+            f"{lock[key]!r}. Update the version table in chapters/install.tex."
+        )
+    suite = next((v for k, v in rows.items() if k.startswith("OSS CAD Suite")), None)
+    assert suite and lock["OSS_CAD_SUITE_DATE"] in suite, (
+        f"install.tex says the OSS CAD Suite row is {suite!r}; tools.lock installs the build "
+        f"of {lock['OSS_CAD_SUITE_DATE']}. Update that row, and the not-pinned example below "
+        f"it if the SymbiYosys version moved."
+    )
