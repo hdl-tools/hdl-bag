@@ -4,6 +4,7 @@
 the workbook is written, read, checked, resolved and generated from the `multi` corpus config."""
 
 import copy
+import os
 from pathlib import Path
 from typing import Any
 
@@ -232,14 +233,26 @@ def test_build_returns_the_reason_a_candidate_was_invalid(
         assert build(multi(), tmp_path / "w", SPEC_DIR) == "crash"
 
 
+@pytest.mark.parametrize("form", ["absolute", "relative"])
 def test_a_project_name_cannot_choose_where_the_candidate_workbook_is_written(
-    tmp_path: Path,
+    tmp_path: Path, form: str
 ) -> None:
     """build() writes the candidate workbook before run_checks can reject its name, so the name
-    must reach no path. A name that named an existing file overwrote it."""
+    must reach no path. A name that named an existing file overwrote it.
+
+    Both forms, because a fix that refused only absolute names would still be escaped by a
+    relative one. This is the place to test that: the work directory is known here, while the
+    CLI builds its workbook in a TemporaryDirectory whose path no test can predict.
+    """
     victim = tmp_path / "victim.xlsx"
     victim.write_bytes(b"a workbook of the user's own")
+    work = tmp_path / "w"
+    name = (
+        str(tmp_path / "victim")
+        if form == "absolute"
+        else os.path.relpath(tmp_path / "victim", work)
+    )
     data = multi()
-    data.project["Project name"] = str(tmp_path / "victim")
-    assert build(data, tmp_path / "w", SPEC_DIR) == "check"
+    data.project["Project name"] = name
+    assert build(data, work, SPEC_DIR) == "check"
     assert victim.read_bytes() == b"a workbook of the user's own"
