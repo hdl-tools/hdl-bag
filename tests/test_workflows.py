@@ -153,3 +153,14 @@ def test_the_manuals_docker_command_names_the_image_ci_runs() -> None:
     ).read_text(encoding="utf-8")
     image = _load("eda-shards.yml")["jobs"]["shard"]["container"]["image"]
     assert image in script, f"docker-lint.sh should name {image}, the image the EDA jobs pull"
+
+
+def test_a_tag_publishes_a_github_release_only_after_pypi_has_published() -> None:
+    """The release page needs the changelog section, which the build job checks first: a
+    missing section must fail before PyPI, which cannot withdraw a release."""
+    jobs = _load("release.yml")["jobs"]
+    release = jobs["github-release"]
+    assert release["needs"] == ["publish"]
+    assert release["permissions"] == {"contents": "write"}
+    assert "gh release create" in _script(release)
+    assert "scripts/release_notes.py" in _script(jobs["build"])
