@@ -48,6 +48,21 @@ def test_every_package_has_a_permissive_licence_file() -> None:
         assert text.startswith("SOLDERPAD HARDWARE LICENSE version 0.51")
 
 
+def test_every_index_entry_records_the_licence_of_its_own_header() -> None:
+    """The package licence is not the file's: two vendored files are not Solderpad."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import bom
+
+    entries = INDEX["files"] + INDEX["headers"]
+    for e in entries:
+        assert e["licence"] == bom.licence_of(files("hdl_bag") / VENDOR / e["path"]), e["path"]
+        assert e["licence"] in PERMISSIVE, e["path"]
+    assert sorted(e["path"] for e in entries if e["licence"] != "SHL-0.51") == [
+        "common_cells/include/common_cells/assertions.svh",
+        "common_cells/src/read.sv",
+    ]
+
+
 def test_every_bender_source_resolves() -> None:
     reg = builtin_registry()
     refs = [s for n in reg.names() if (m := reg.get(n)) for s in m.sources if s[:7] == "bender:"]
