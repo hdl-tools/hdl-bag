@@ -316,6 +316,6 @@ wrapper:
       exposed: true
       prefix: wdt0_apb
 provenance:
-  bag_version: 0.0.1
+  bag_version: 1.0.0
   source: ahb2apb_nested.xlsx
   sha256: 4c0e0b5360839becc9513fe50bcfe18ba37494592c6b86bda56b0ca8d6f3ebc1
