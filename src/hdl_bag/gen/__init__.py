@@ -267,13 +267,23 @@ def load_outputs(root: Path) -> Outputs:
         raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
-    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
-            and isinstance(data.get("files"), dict | list)):  # fmt: skip
-        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     defaults = Outputs(root, (), "", "")
+    tools = data.get("lint_tools", defaults.lint_tools)
+    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
+            and isinstance(data.get("files"), dict | list)
+            and isinstance(tools, list | tuple)
+            and all(isinstance(t, str) for t in tools)):  # fmt: skip
+        # lint_tools included: tuple("slang") is five one-character tool names, which reached
+        # lint() as unknown tools and left bag lint showing the ValueError.
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
+    # Every flow reads the file list after this returns, so its absence belongs here too.
+    if not (root / data["filelist"]).is_file():
+        raise ValueError(
+            f"{root}: the file list {data['filelist']} is missing: run bag generate again"
+        )
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
-        tuple(data.get("lint_tools", defaults.lint_tools)),
+        tuple(tools),
         data.get("simulator", defaults.simulator), tuple(data.get("formal", ())),
     )  # fmt: skip
 

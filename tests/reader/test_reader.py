@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -143,3 +144,27 @@ def test_parse_yes_no_and_identifier() -> None:
     with pytest.raises(ValueError):
         parse_yes_no("y")
     assert is_identifier("main_xbar") and not is_identifier("Main") and not is_identifier("1a")
+
+
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        ("notzip.xlsx", b"not a workbook at all"),
+        ("spec.ir.yaml", b"project:\n  name: demo_ss\n"),
+        ("notcontent.xlsx", None),  # a zip without [Content_Types].xml
+    ],
+)
+def test_a_file_that_is_not_a_workbook_is_a_reader_error(
+    tmp_path: Path, name: str, data: bytes | None
+) -> None:
+    """openpyxl raises BadZipFile, InvalidFileException or KeyError for these, none of them
+    ours, and the CLI showed each as a traceback. The .ir.yaml case is the one users meet:
+    bag ir and bag generate take an IR file and bag check does not."""
+    path = tmp_path / name
+    if data is None:
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("not-a-workbook.txt", "hello")
+    else:
+        path.write_bytes(data)
+    with pytest.raises(ReaderError, match="READ-FILE"):
+        read_workbook(path)

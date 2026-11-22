@@ -7,11 +7,14 @@ insert columns. Derived (grey) columns are ignored: BAG recomputes everything.
 """
 
 import hashlib
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from xml.etree.ElementTree import ParseError
 
 import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.worksheet import Worksheet
 
 from hdl_bag.reader.model import Cell, RawSpec, RawValue, Row
@@ -172,9 +175,14 @@ def _read_kv(wb: openpyxl.Workbook, sheet: str) -> tuple[dict[str, Cell], int]:
 
 
 def read_workbook(path: Path) -> RawSpec:
-    data = path.read_bytes()
-    # Formulas, not cached values: the reader never trusts derived results.
-    wb = openpyxl.load_workbook(path, data_only=False)
+    try:
+        data = path.read_bytes()
+        # Formulas, not cached values: the reader never trusts derived results.
+        wb = openpyxl.load_workbook(path, data_only=False)
+    except (OSError, KeyError, zipfile.BadZipFile, InvalidFileException, ParseError) as exc:
+        # A spec is an .xlsx file. Anything else reaches openpyxl, which raises four unrelated
+        # exception types, none of them ours: the CLI showed them as a traceback.
+        raise ReaderError(f"{path.name}: not a readable .xlsx workbook: {exc} (READ-FILE)") from exc
     project, _ = _read_kv(wb, "Project")
     wrapper, wrapper_end = _read_kv(wb, "Wrapper")
 
