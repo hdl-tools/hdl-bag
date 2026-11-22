@@ -155,6 +155,20 @@ def test_the_manuals_docker_command_names_the_image_ci_runs() -> None:
     assert image in script, f"docker-lint.sh should name {image}, the image the EDA jobs pull"
 
 
+def test_the_wheel_smoke_test_checks_the_licensing_docs_reached_the_install() -> None:
+    """pyproject.toml lists docs/bom.md and docs/licensing.md in `license-files`, so PEP 639
+    puts them under dist-info/licenses/docs/. Only the release build's smoke test installs the
+    wheel, so it is the one place that proves they shipped; this pins that it checks both. It
+    does not build a wheel itself."""
+    root = Path(__file__).parents[1]
+    steps = _load("release.yml")["jobs"]["build"]["steps"]
+    script = next(s["run"] for s in steps if s.get("name") == "Smoke-test the wheel")
+    for doc in ("docs/bom.md", "docs/licensing.md"):
+        assert f'{doc}"' in script, f"the smoke test should check the installed {doc}"
+        assert (root / doc).is_file(), f"{doc} is listed for the wheel but is missing"
+        assert f'"{doc}"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+
+
 def test_a_tag_publishes_a_github_release_only_after_pypi_has_published() -> None:
     """The release page needs the changelog section, which the build job checks first: a
     missing section must fail before PyPI, which cannot withdraw a release."""

@@ -21,8 +21,11 @@ LAYOUT (all under `docs/manual`)
 
 RULES THE TESTS CHECK
 
-M1  Version. `version.tex` is exactly the line above. The manual prints the version only
-    through \\bagversion.
+M1  Version. `version.tex` is exactly the line above, and no other `.tex` file contains the
+    version. The manual prints the version through \\bagversion, except in the IR examples
+    under `examples/files/`, whose provenance records the version that produced them: those
+    carry `hdl_bag.__version__`, so a release bump cannot leave the IR chapter showing an
+    old one.
 M2  Every file named by \\input, \\include, \\lstinputlisting or \\includegraphics exists,
     with the same spelling (CI builds on Linux). Paths are relative to `docs/manual`.
 M3  No example is typed into the text: the environments lstlisting, verbatim, Verbatim,
@@ -136,6 +139,22 @@ def test_version_is_the_package_version() -> None:
     others = [q for q in _tex_files() if q.name != "version.tex"]
     assert not [q.name for q in others
                 if __version__ in _uncommented(q.read_text(encoding="utf-8"))]  # fmt: skip
+
+
+def test_the_example_ir_files_record_the_current_version() -> None:
+    """M1: chapters/ir.tex shows an example IR whole, provenance included, so these files print
+    the version to the reader. Nothing else catches them going stale, because the transcripts'
+    IR sha256 lines move only once these files do."""
+    want = f"bag_version: {__version__}"
+    seen = [
+        (p.name, line.strip())
+        for p in sorted((MANUAL / "examples" / "files").glob("*.ir.yaml"))
+        for line in p.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("bag_version:")
+    ]
+    assert len(seen) >= 6, f"one bag_version line per IR example was expected, found {seen}"
+    stale = {name: line for name, line in seen if line != want}
+    assert not stale, f"regenerate these with the current version ({__version__}): {stale}"
 
 
 def _referenced() -> list[str]:

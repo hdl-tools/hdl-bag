@@ -10,8 +10,9 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha. Phases 1 to 4 of 6 are done. Phase 5's gate and report are outstanding (its
-nightly runs are not yet green), and Phase 6 is closed, with the v1.0 release still to come.
+Version 1.0.0, not yet tagged or published. Phases 1 to 4 and 6 of 7 are done. Phase 5's gate
+and report are outstanding (its nightly runs are not yet green), and Phase 7 is the release
+itself.
 
 | Works today | Not yet |
 |---|---|
