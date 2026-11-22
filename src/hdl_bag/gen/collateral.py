@@ -98,7 +98,13 @@ def _md_table(columns: tuple[str, ...], rows: list[dict[str, str]]) -> list[str]
 
 
 def _banner(spec: Spec, user_header: str | None) -> str:
-    return header(spec, user_header)
+    """The banner for a document, which every caller wraps in an HTML comment.
+
+    A hand-written header may hold an ASCII arrow, and `-->` would close that comment early
+    and spill the rest of the banner into the document. The space keeps the text readable,
+    which an entity would not.
+    """
+    return header(spec, user_header).replace("-->", "-- >")
 
 
 def memmap_md(spec: Spec, user_header: str | None) -> str:
