@@ -34,6 +34,10 @@ jobs:
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke dist/*.whl
           /tmp/smoke/bin/bag --version
+          # PEP 639: the licensing docs the README and changelog link must reach the wheel.
+          licenses=$(/tmp/smoke/bin/python -c 'import importlib.metadata as m; print(m.distribution("hdl-bag")._path / "licenses")')
+          test -s "$licenses/docs/bom.md"
+          test -s "$licenses/docs/licensing.md"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
