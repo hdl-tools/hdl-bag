@@ -178,3 +178,22 @@ def test_a_tag_pins_the_tools_image_it_was_validated_against_only_after_pypi_has
     script = _script(pin)
     assert "docker buildx imagetools create" in script
     assert '--tag "$repo:${GITHUB_REF_NAME}" "$repo:main"' in script
+
+
+def test_a_tag_is_not_pinned_to_a_tools_image_built_from_a_different_tools_lock() -> None:
+    """:main is the image of main's tools.lock and tools/Dockerfile. A tag on a commit whose two
+    files differ would be pinned to the wrong image, so the job fails before it logs in. The
+    comparison is by path, so a tag on main's tip, or on a commit that differs elsewhere, passes."""
+    steps = _load("release.yml")["jobs"]["pin-tools-image"]["steps"]
+    assert steps[0].get("uses", "").startswith("actions/checkout@")
+    guard = next(s for s in steps if "diff --quiet" in str(s.get("run", "")))
+    login = next(
+        i for i, s in enumerate(steps) if s.get("uses", "").startswith("docker/login-action@")
+    )
+    assert steps.index(guard) < login
+    script = str(guard["run"])
+    assert "git fetch --depth=1 origin main" in script
+    assert "git diff --quiet HEAD FETCH_HEAD -- tools.lock tools/Dockerfile" in script
+    assert "::error::" in script
+    assert "tools-image.yml" in script
+    assert "exit 1" in script
