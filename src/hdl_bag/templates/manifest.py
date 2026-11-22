@@ -2,7 +2,9 @@
 # Copyright 2026 The hdl-bag Authors
 """Template manifest schema (api_version 1).
 
-Built-in templates use the same manifest format that v2 user plug-ins will use.
+Only the built-in templates are loaded: ``builtin_registry()`` reads ``templates/builtin/`` and
+nothing else, and there is no route for a user plug-in yet. Unknown keys are refused
+(``extra="forbid"``), so a key the model does not name cannot sit in a manifest unread.
 """
 
 from typing import Literal
@@ -31,16 +33,13 @@ class Manifest(BaseModel):
     topologies: tuple[Topology, ...] = ()
     arbitration: tuple[Arbitration, ...] = ()
     adapter_type: AdapterType | None = None
-    data_widths: tuple[int, ...] = ()  # empty = the protocol's legal widths
     # bridge: AXI ID width the bridge drives on an AXI4 downstream bus (it is a master
     # there); the checks' fabric ID-width derivation assumes the same value.
     down_id_width: int | None = None
     # bridge: False when it handles one transfer at a time and ignores Bridges > FIFO depth.
     fifo_depth: bool = True
-    param_map: dict[str, str] = {}  # BAG parameter -> backing-IP parameter
-    port_map: dict[str, str] = {}  # standard bus signal -> backing-IP port / struct field
     sources: tuple[str, ...] = ()  # Bender target "bender:<pkg>:<module>" or repo file paths
-    licence: str  # SPDX identifier of the backing implementation
+    # Provenance for a human reader; no code reads it.
     qualification: Literal["unqualified", "qualified"] = "unqualified"
     opaque: bool = False  # True: user supplies the RTL (bag_external)
     # Generation: a template with RTL has an instance.sv.j2 next to its manifest that

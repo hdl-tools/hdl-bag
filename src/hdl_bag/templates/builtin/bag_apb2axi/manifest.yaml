@@ -17,6 +17,5 @@ sources:
   - rtl/inhouse/bag_hs_apb_slv.sv
   - rtl/inhouse/bag_hs_axi_mst.sv
   - rtl/inhouse/bag_apb2axi.sv
-licence: Apache-2.0
 qualification: unqualified
 rtl: true

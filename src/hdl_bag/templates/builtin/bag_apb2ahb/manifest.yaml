@@ -14,6 +14,5 @@ sources:
   - rtl/inhouse/bag_sync.sv
   - rtl/inhouse/bag_hs_apb_slv.sv
   - rtl/inhouse/bag_apb2ahb.sv
-licence: Apache-2.0
 qualification: unqualified
 rtl: true

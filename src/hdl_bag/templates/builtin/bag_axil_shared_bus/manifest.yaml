@@ -27,6 +27,5 @@ sources:
   - bender:axi:axi_fifo
   - bender:axi:axi_cut
   - bender:axi:axi_multicut
-licence: SHL-0.51
 qualification: unqualified
 rtl: true
