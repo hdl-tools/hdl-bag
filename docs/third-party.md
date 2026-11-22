@@ -13,11 +13,16 @@ The Solderpad Hardware License v0.51 is permissive (Apache-2.0 style). Each
 package's `LICENSE` is kept next to its files, and almost every file keeps its
 upstream copyright header and is SHL-0.51. Two files in `common_cells` are not:
 `assertions.svh` is Apache-2.0 (lowRISC) and `read.sv` is Apache-2.0 WITH SHL-2.1
-(EPFL). Neither licence text is beside the file yet; the bill of materials
-says so, and #172 tracks adding them.
+(EPFL). Their texts are in `src/hdl_bag/rtl/vendor/licences/`: `Apache-2.0.txt` is a
+byte copy of the repository's `LICENSE`, and `SHL-2.1.txt` is the SPDX text from
+`spdx/license-list-data` at tag `v3.29.0` (sha256
+`6fa7fc99563ae8b86d910c33820be9af08052b7c527bd61d5661b0c2cbd623e9`, pinned by a test).
+SHL-2.1 is a wraparound licence, read together with the Apache text, so `read.sv` has both.
+`bag generate` copies the texts a design's files need to `rtl/vendor/licences/` of the output.
 `src/hdl_bag/rtl/vendor/pulp/index.json` is the machine-readable record of
 packages, and for every file the design units it defines and the files it needs.
-Its licence field is a constant, so the bill of materials does not rely on it.
+Each file entry records the licence its own header names, and a test keeps it equal to
+the header; the bill of materials still reads the headers themselves.
 
 ## How the tree is made
 
@@ -31,7 +36,9 @@ Its licence field is a constant, so the bill of materials does not rely on it.
   `ROOTS` list), with the headers they include.
 - The `vendor` CI job re-runs the script with `--check` and fails if the
   committed tree differs.
-- Never edit files under `rtl/vendor/` by hand. To bump a version, edit
+- Never edit the script-managed trees, `rtl/vendor/pulp/` and `rtl/vendor/derived/`, by hand:
+  they must stay byte-identical to what the scripts make, so that the `vendor` job can verify
+  them. `rtl/vendor/licences/` is BAG's own and is edited like any other file. To bump a version, edit
   `Bender.yml`, run `bender update` and the script in the tools image, and
   review the diff.
 

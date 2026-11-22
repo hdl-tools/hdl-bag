@@ -5,8 +5,8 @@
     uv run --no-project python scripts/bom.py          # rewrite docs/bom.md
     uv run --no-project python scripts/bom.py --check  # fail if it differs
 
-Licences of vendored files are read from each file's own header, never from index.json, which
-tests/vendor/test_vendor.py keeps equal to them. Python licences are hand-kept in LICENCES because installed
+Licences of vendored files are read from each file's own header, never from index.json (a test
+keeps the two equal). Python licences are hand-kept in LICENCES because installed
 metadata is missing or partial for some packages; tests/vendor/test_bom.py keeps the keys equal
 to the uv.lock closure. Platform markers are ignored so the output is machine-independent.
 """

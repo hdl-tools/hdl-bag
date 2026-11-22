@@ -1,7 +1,7 @@
 $ bag generate files/external_fabric.ir.yaml -o out
 warning: Masters row 5: WRAP bursts from cpu to ram get SLVERR: dw adapter cpu_dw_2_noc cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)
 external_fabric.ir.yaml (checked as the workbook it converts to): 0 error(s), 1 warning(s)
-wrote 62 file(s) to out (top external_fabric_top)
+wrote 63 file(s) to out (top external_fabric_top)
 no generated tests: BAG does not know how a user-supplied fabric behaves
 $ ls out
 bag_outputs.json

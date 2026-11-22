@@ -3,7 +3,7 @@ nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 wa
 wrote 39 file(s) to soc/soc1 (top demo_ss_bus_top)
 $ bag generate files/lite_soc2.ir.yaml -o soc/soc2
 lite_soc2.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
-wrote 54 file(s) to soc/soc2 (top lite_ss_top)
+wrote 55 file(s) to soc/soc2 (top lite_ss_top)
 $ ls soc/soc2/rtl/vendor/pulp/axi/include/axi
 soc2_assign.svh
 soc2_typedef.svh

@@ -66,6 +66,9 @@ Everything under \file{rtl/} is SystemVerilog (IEEE 1800-2017).
 \item[\file{rtl/vendor/pulp/}] Copies of the files of the PULP \code{axi} and
   \code{common_cells} libraries that the design uses, with the \file{LICENSE} file of
   each library. The include files are here too, under \file{include/}.
+\item[\file{rtl/vendor/licences/}] The texts of the other licences that some of these
+  files are under (\file{Apache-2.0.txt}, and \file{SHL-2.1.txt} for the one file that
+  names it). BAG copies only the texts that the design's files need.
 \item[\file{rtl/vendor/derived/}] Files that BAG derives from PULP files, such as
   \file{bag_axil_mux.sv}. Each one names its upstream file and commit, lists what was
   changed, and keeps the upstream licence notice.
@@ -181,7 +184,7 @@ compile two outputs together, resolve each list's paths from its own output dire
 
 \lstinputlisting[style=console]{examples/console/out-filelist.txt}
 
-The \file{LICENSE} files and the include files are not in the list: they are not
+The \file{LICENSE} files, the licence texts and the include files are not in the list: they are not
 compiled on their own.
 
 \section{The manifest}
