@@ -11,12 +11,12 @@ spec; every output is generated deterministically from it.
 ## Status
 
 Pre-alpha. Phases 1 to 4 of 6 are done. Phase 5's gate and report are outstanding (its
-nightly runs are not yet green), and Phase 6 is under way.
+nightly runs are not yet green), and Phase 6 is closed, with the v1.0 release still to come.
 
 | Works today | Not yet |
 |---|---|
 | Spec workbook template, reader and 97 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
-| Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 6) |
+| Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 7) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
 | Example workbooks in [examples](examples), each `bag check` clean and run end to end in CI | |
@@ -37,7 +37,7 @@ nightly runs are not yet green), and Phase 6 is under way.
 The user manual is LaTeX in [docs/manual](docs/manual) (`latexmk -pdf hdl-bag.tex` there);
 the `manual` workflow builds the PDF as the artifact `hdl-bag-manual`.
 
-Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
+Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md), [Phase 6](docs/phase-6-report.md).
 
 ## Quick start
 
