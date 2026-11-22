@@ -289,11 +289,26 @@ def include_dirs(out: Outputs) -> list[Path]:
     return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
 
 
-def _inside(root: Path, rel: str) -> bool:
-    """Whether ROOT/REL stays under ROOT, following `..` and symlinks to decide it."""
-    if Path(rel).is_absolute():
+def _deletable(root: Path, rel: str) -> bool:
+    """Whether ROOT/REL names a file inside ROOT that this run may delete.
+
+    A manifest is data, so REL may be anything: absolute, reaching out with `..`, the root
+    itself, a directory, or a name holding a NUL, which makes resolve() raise. Each of those
+    was a raw traceback or a refusal from a generate that was otherwise fine, so each is
+    simply not deletable. A symlink is judged by where the link sits rather than where it
+    points, because unlink removes the link and never its target -- resolving it first sent
+    every link out of the root and leaked it, since the new manifest no longer lists it.
+    """
+    if Path(rel).is_absolute():  # never written by BAG, and may still land inside ROOT
         return False
-    return (root / rel).resolve().is_relative_to(root.resolve())
+    path = root / rel
+    try:
+        if path.is_symlink():
+            return path.parent.resolve().is_relative_to(root.resolve())
+        resolved, top = path.resolve(), root.resolve()
+        return resolved != top and resolved.is_relative_to(top) and not resolved.is_dir()
+    except (OSError, ValueError):
+        return False
 
 
 def _manifest(
@@ -314,10 +329,10 @@ def _manifest(
     except (OSError, UnicodeDecodeError, ValueError, AttributeError):
         listed = {}  # an unreadable manifest lists nothing to clean up; this run replaces it
     for rel in listed if isinstance(listed, dict | list) else ():
-        # Inside ROOT only. These names come from a manifest in a directory this run did not
-        # necessarily write, and this is a delete: a name reaching out of ROOT is skipped, as
-        # an unreadable manifest is, rather than stopping a generate that is otherwise fine.
-        if isinstance(rel, str) and rel not in written and _inside(root, rel):
+        # These names come from a manifest in a directory this run did not necessarily write,
+        # and this is a delete. Anything not deletable is skipped, as an unreadable manifest
+        # is, rather than stopping a generate that is otherwise fine.
+        if isinstance(rel, str) and rel not in written and _deletable(root, rel):
             (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
     data = {

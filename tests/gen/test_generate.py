@@ -356,3 +356,47 @@ def test_generate_does_not_delete_a_file_outside_the_output_directory(
     _manifest_with(out, {escape: "x"})
     generate(load(CONFIG), out, CONFIG.parent)
     assert victim.read_text(encoding="utf-8") == "the user's own work\n"
+
+
+@pytest.mark.parametrize("junk", ["a\u0000b", "", ".", "rtl", "rtl/"])
+def test_a_manifest_name_that_is_not_a_file_to_delete_is_skipped(tmp_path: Path, junk: str) -> None:
+    """The prune loop promises a name it cannot use is skipped "rather than stopping a generate
+    that is otherwise fine". A NUL makes resolve() raise ValueError; the empty string, "." and a
+    directory each name something unlink refuses, and missing_ok covers only FileNotFoundError.
+    Every one of these made a generate that was otherwise fine exit 1."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    _manifest_with(out, {junk: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert (out / "rtl").is_dir()
+
+
+def test_an_absolute_manifest_name_inside_the_output_directory_is_skipped(tmp_path: Path) -> None:
+    """What the absolute-path guard is for. An absolute name landing outside the root is already
+    refused by the containment test, but one landing inside it passes, so without the guard this
+    file would be deleted -- and BAG never writes an absolute name into a manifest."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    keep = out / "keep.txt"
+    keep.write_text("not BAG's to delete\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {str(keep): "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert keep.read_text(encoding="utf-8") == "not BAG's to delete\n"
+
+
+def test_a_symlink_the_previous_run_listed_is_removed_but_its_target_is_not(
+    tmp_path: Path,
+) -> None:
+    """unlink removes a link, never what it points at, so a listed symlink inside the root is
+    safe to prune and was pruned before this containment check. Judging it by resolve() sent it
+    outside the root and skipped it, leaking it forever: the new manifest no longer lists it."""
+    out = tmp_path / "out"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("the user's own file\n", encoding="utf-8", newline="\n")
+    generate(load(CONFIG), out, CONFIG.parent)
+    link = out / "rtl" / "stale.sv"
+    link.symlink_to(outside)
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not link.is_symlink(), "the link was left behind"
+    assert outside.read_text(encoding="utf-8") == "the user's own file\n"
