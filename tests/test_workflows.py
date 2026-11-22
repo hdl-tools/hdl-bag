@@ -142,3 +142,14 @@ def test_a_dispatch_that_selects_tests_by_name_may_run_a_deep_or_alone_one() -> 
     timeout = str(with_["timeout-minutes"])
     assert "inputs.select != '') && 340" in timeout
     assert "&& 30 ||" in timeout  # the smoke subset (pull requests, suite=smoke)
+
+
+def test_the_manuals_docker_command_names_the_image_ci_runs() -> None:
+    """The manual's container lint command (docs/manual/examples/files/docker-lint.sh) is shown
+    to the reader but never replayed, because docker cannot run inside the test. Nothing else
+    would notice it going stale, so pin its image to the one the EDA jobs pull."""
+    script = (
+        Path(__file__).parents[1] / "docs" / "manual" / "examples" / "files" / "docker-lint.sh"
+    ).read_text(encoding="utf-8")
+    image = _load("eda-shards.yml")["jobs"]["shard"]["container"]["image"]
+    assert image in script, f"docker-lint.sh should name {image}, the image the EDA jobs pull"

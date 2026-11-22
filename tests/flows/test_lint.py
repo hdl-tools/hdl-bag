@@ -132,6 +132,10 @@ def test_missing_tool_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     report = lint([tmp_path / "a.sv"], "a", tmp_path, tools=["verilator"])
     assert not report.ok
     assert [f.rule for f in report.findings] == ["TOOL-MISSING"]
+    assert report.findings[0].message == (
+        "'verilator' not found on PATH: install it with scripts/install_tools.py, or run in "
+        "the tools image (manual, section 'The EDA tools')"
+    )
 
 
 def test_unknown_tool() -> None:

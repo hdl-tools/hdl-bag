@@ -63,6 +63,7 @@ The workbook has one sheet per topic, in this order:
 \end{tabular}
 \end{center}
 
+\label{sec:wb-terms}
 Some terms are used through the whole chapter:
 
 \begin{description}
@@ -477,6 +478,7 @@ bridge on this fabric and the reads through a \code{bag_axi2ahb} bridge, and it 
 the adapters on slave ports.
 
 \subsection{ID widths}
+\label{sec:wb-ids}
 
 On an AXI4 fabric, BAG works out two ID widths, shown in grey:
 
@@ -486,6 +488,9 @@ On an AXI4 fabric, BAG works out two ID widths, shown in grey:
 \item The \term{slave-side ID width} is the master-side width plus enough bits to
   number the master ports: $\lceil\log_2 n\rceil$ for $n$ master ports.
 \end{itemize}
+
+A width of 4 is a sensible start for an AXI4 master: it allows 16 IDs. Use 1 for a
+master that uses one ID. A wider width costs area, as the next paragraph shows.
 
 \cmd{bag check} warns when the slave-side width is above 16 bits
 (\ruleid{FAB-ID-GROWTH}). On \code{bag_axi_xbar} and \code{bag_axi_shared_bus}, a guard
@@ -511,7 +516,8 @@ that leaves the wrapper. The two sheets share most columns. \sheet{Masters} has
 \col{Addr width (bits)} & Yes & 1 to 64, not wider than its fabric & The address width
   of the port.\\
 \col{ID width (bits)} & AXI4 & integer, 1 or more; on \sheet{Slaves} also \code{auto};
-  blank for other protocols & The AXI ID width.\\
+  blank for other protocols & The AXI ID width. Start a master at 4, or at 1 if it uses a
+  single ID (section~\ref{sec:wb-ids}); a slave at \code{auto}.\\
 \col{User width (bits)} & No & integer, 0 or more; or \code{n/a} & The width of the
   AXI4 USER signals. Blank or 0: none.\\
 \col{Clock domain} & Yes & a domain of \sheet{Clocks} & The domain of the port.\\
@@ -1186,7 +1192,8 @@ lists every master, slave and bridge, one per row.
 \end{wbtable}
 
 In this release every master and slave is a port of the top wrapper, and every bridge is
-internal (\ruleid{WRAP-INTERNAL-PORT}). A \col{Top-level prefix} takes effect only when
+internal (\ruleid{WRAP-INTERNAL-PORT}). So a design with no
+bridges lists every master and every slave with \code{Y}, and nothing else. A \col{Top-level prefix} takes effect only when
 the pattern contains \code{{port}_{proto}}: then \code{cpu0_axi} gives
 \code{cpu0_axi_awaddr}, whatever the protocol token.
 

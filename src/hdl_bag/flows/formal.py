@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
 from hdl_bag.flows.backends import _same_version, _version
-from hdl_bag.flows.base import Finding, Report, tool_version
+from hdl_bag.flows.base import Finding, Report, tool_missing_message, tool_version
 
 if TYPE_CHECKING:
     from hdl_bag.gen import Outputs
@@ -280,7 +280,7 @@ def run_sby(job: Path, root: Path, *, timeout: float | None = None,
     exe = shutil.which(backend.executable)
     if exe is None:
         missing = Finding(backend.name, "", 0, "TOOL-MISSING", "error",
-                          f"'{backend.executable}' not found on PATH")  # fmt: skip
+                          tool_missing_message(backend.executable))  # fmt: skip
         return Report("formal", (missing,), (backend.name,))
     version = tool_version(backend)
     notes = () if backend.is_pinned(version) else (

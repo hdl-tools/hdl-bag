@@ -272,14 +272,18 @@ def test_prove_refuses_files_outside_the_run_directory(tmp_path: Path) -> None:
         prove([Path("../a.sv")], "a", tmp_path, properties=[], depth=5)
 
 
+MISSING_SBY = (
+    "'sby' not found on PATH: install it with scripts/install_tools.py, or run in the tools "
+    "image (manual, section 'The EDA tools')"
+)
+
+
 def test_a_missing_sby_is_a_finding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hdl_bag.flows.formal.shutil.which", lambda _: None)
     job = tmp_path / "x.sby"
     job.write_text("[files]\n", encoding="utf-8")
     report = run_sby(job, tmp_path)
-    assert [(f.rule, f.message) for f in report.findings] == [
-        ("TOOL-MISSING", "'sby' not found on PATH")
-    ]
+    assert [(f.rule, f.message) for f in report.findings] == [("TOOL-MISSING", MISSING_SBY)]
 
 
 def test_a_missing_job_is_a_clear_error(tmp_path: Path) -> None:
