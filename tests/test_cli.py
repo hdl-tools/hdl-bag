@@ -182,3 +182,20 @@ def test_generate_refuses_a_spec_with_no_fabric_and_writes_nothing(tmp_path: Pat
     assert result.exit_code == 1
     assert "(FAB-NONE)" in result.output
     assert not out.exists()
+
+
+def test_an_ir_project_name_cannot_choose_where_the_checked_workbook_is_written(
+    tmp_path: Path,
+) -> None:
+    """An IR is converted to a workbook so the checks can run on it. The project name is the
+    spec's own data, so it must reach no path: NAME-IDENT rejects it only after the file is
+    written, and a name pointing at an existing file destroyed it."""
+    victim = tmp_path / "victim.xlsx"
+    victim.write_bytes(b"a workbook of the user's own")
+    ir_path = _ir_copy(
+        tmp_path, "  name: demo_ss\n", f"  name: '{(tmp_path / 'victim').as_posix()}'\n"
+    )
+    result = CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(tmp_path / "out")])
+    assert result.exit_code == 1
+    assert "NAME-IDENT" in result.output
+    assert victim.read_bytes() == b"a workbook of the user's own"

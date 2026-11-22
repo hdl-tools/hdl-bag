@@ -98,7 +98,9 @@ def _load(spec: Path) -> tuple[ir.Spec, Path]:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
     with tempfile.TemporaryDirectory() as tmp:
-        workbook = Path(tmp) / f"{loaded.project.name}.xlsx"
+        # A fixed name: the project name is spec data, and NAME-IDENT rejects a name that is a
+        # path only after this write, which would already have overwritten whatever it named.
+        workbook = Path(tmp) / "spec.xlsx"
         to_workbook(loaded).save(workbook)
         _checked(spec, workbook, " (checked as the workbook it converts to)")
     return loaded, spec.parent

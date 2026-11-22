@@ -57,7 +57,9 @@ def build(data: SpecData, work: Path, spec_dir: Path) -> tuple[ir.Spec, Outputs]
     work.mkdir(parents=True)
     stage = "crash"
     try:
-        path = work / f"{data.project['Project name']}.xlsx"
+        # A fixed name, as in cli.py: the project name is spec data, and the checks that reject
+        # a name which is a path run after this write.
+        path = work / "spec.xlsx"
         build_workbook(data=data).save(path)
         checked = run_checks(read_workbook(path), spec_dir)
         stage = "check"

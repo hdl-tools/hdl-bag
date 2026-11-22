@@ -230,3 +230,16 @@ def test_build_returns_the_reason_a_candidate_was_invalid(
     with monkeypatch.context() as m:
         m.setattr(evaluate, "generate", raises(RuntimeError("x")))
         assert build(multi(), tmp_path / "w", SPEC_DIR) == "crash"
+
+
+def test_a_project_name_cannot_choose_where_the_candidate_workbook_is_written(
+    tmp_path: Path,
+) -> None:
+    """build() writes the candidate workbook before run_checks can reject its name, so the name
+    must reach no path. A name that named an existing file overwrote it."""
+    victim = tmp_path / "victim.xlsx"
+    victim.write_bytes(b"a workbook of the user's own")
+    data = multi()
+    data.project["Project name"] = str(tmp_path / "victim")
+    assert build(data, tmp_path / "w", SPEC_DIR) == "check"
+    assert victim.read_bytes() == b"a workbook of the user's own"
