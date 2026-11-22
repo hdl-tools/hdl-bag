@@ -34,6 +34,9 @@ jobs:
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke dist/*.whl
           /tmp/smoke/bin/bag --version
+          # PEP 639: the licensing docs the README and changelog link must reach the wheel.
+          # files() and locate_file() are public API; the dist-info layout is not.
+          /tmp/smoke/bin/python -c 'import importlib.metadata as m, sys; d = m.distribution("hdl-bag"); have = [str(p) for p in (d.files or [])]; want = ("licenses/docs/bom.md", "licenses/docs/licensing.md"); missing = [w for w in want if not any(h.endswith(w) and d.locate_file(h).stat().st_size for h in have)]; sys.exit("did not reach the installed wheel: " + ", ".join(missing) if missing else 0)'
       - uses: actions/upload-artifact@v4
         with:
           name: dist

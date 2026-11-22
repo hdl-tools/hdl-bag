@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "BAG - Bus Architecture Generator: spec-based AMBA bus-fabric RTL generator"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE", "AUTHORS"]
+license-files = ["LICENSE", "NOTICE", "AUTHORS", "docs/bom.md", "docs/licensing.md"]
 authors = [{ name = "The hdl-bag Authors" }]
 requires-python = ">=3.11"
 classifiers = [
