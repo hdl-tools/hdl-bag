@@ -461,7 +461,6 @@ def test_bag_formal_without_jobs_explains_why(tmp_path: Path) -> None:
     (tmp_path / "bag_outputs.json").write_text(
         '{"files": {}, "top": "t", "filelist": "t.f", "tests": null}\n', encoding="utf-8"
     )
-    (tmp_path / "t.f").write_text("", encoding="utf-8")  # the manifest promises it
     result = CliRunner().invoke(main, ["formal", str(tmp_path)])
     assert result.exit_code == 1
     assert "no generated formal (Generate formal (SymbiYosys) is N" in result.output

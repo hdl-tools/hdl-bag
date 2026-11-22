@@ -151,6 +151,7 @@ def test_parse_yes_no_and_identifier() -> None:
     [
         ("notzip.xlsx", b"not a workbook at all"),
         ("spec.ir.yaml", b"project:\n  name: demo_ss\n"),
+        ("empty.xlsx", b""),
         ("notcontent.xlsx", None),  # a zip without [Content_Types].xml
     ],
 )
@@ -168,3 +169,34 @@ def test_a_file_that_is_not_a_workbook_is_a_reader_error(
         path.write_bytes(data)
     with pytest.raises(ReaderError, match="READ-FILE"):
         read_workbook(path)
+
+
+@pytest.mark.parametrize(
+    ("member", "find", "replace"),
+    [
+        # openpyxl's documented catch-all ValueError for a damaged package.
+        ("xl/worksheets/sheet1.xml", b'<c r="A1"', b'<c r="ZZZZZZ"'),
+        # IndexError: a style id past the end of cellXfs.
+        ("xl/worksheets/sheet1.xml", b'<c r="A1"', b'<c s="9999" r="A1"'),
+        # The XML parser's own error, whichever parser the user's environment supplies.
+        ("xl/workbook.xml", b"<sheets", b"<sheets <<<"),
+        ("xl/styles.xml", b"<styleSheet", b"<<<not xml"),
+    ],
+)
+def test_a_damaged_workbook_package_is_a_reader_error(
+    tmp_path: Path, member: str, find: bytes, replace: bytes
+) -> None:
+    """Each of these escaped a catch list naming BadZipFile, InvalidFileException, KeyError and
+    ElementTree's ParseError, because openpyxl raises from several layers and lxml raises its
+    own type when the user has it installed. Enumerating them is unwinnable, so read_workbook
+    catches everything these two calls can raise."""
+    bad = tmp_path / "damaged.xlsx"
+    with zipfile.ZipFile(GOLDEN) as zin, zipfile.ZipFile(bad, "w") as zout:
+        for item in zin.infolist():
+            body = zin.read(item.filename)
+            if item.filename == member:
+                assert find in body, f"{member} no longer contains {find!r}"
+                body = body.replace(find, replace, 1)
+            zout.writestr(item, body)
+    with pytest.raises(ReaderError, match="READ-FILE"):
+        read_workbook(bad)

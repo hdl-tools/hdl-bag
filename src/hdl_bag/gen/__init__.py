@@ -276,11 +276,6 @@ def load_outputs(root: Path) -> Outputs:
         # lint_tools included: tuple("slang") is five one-character tool names, which reached
         # lint() as unknown tools and left bag lint showing the ValueError.
         raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
-    # Every flow reads the file list after this returns, so its absence belongs here too.
-    if not (root / data["filelist"]).is_file():
-        raise ValueError(
-            f"{root}: the file list {data['filelist']} is missing: run bag generate again"
-        )
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
         tuple(tools),
@@ -288,15 +283,32 @@ def load_outputs(root: Path) -> Outputs:
     )  # fmt: skip
 
 
+def _filelist(out: Outputs) -> list[str]:
+    """The whitespace-separated tokens of OUT's file list.
+
+    Raises ValueError, with a message for the user, when the manifest names a file list that
+    is not there: lint, sim and flow all read it and each gave a raw FileNotFoundError. The
+    check lives here, not in load_outputs, because `bag formal` never reads the file list --
+    each generated job carries its own sources -- so a missing one must not stop a design it
+    can still prove.
+    """
+    path = out.root / out.filelist
+    try:
+        return path.read_text().split()
+    except OSError as exc:
+        raise ValueError(
+            f"{out.root}: the file list {out.filelist} cannot be read: run bag generate again"
+        ) from exc
+
+
 def sources(out: Outputs) -> list[Path]:
     """OUT's file list, relative to its root, in compile order."""
-    return [Path(t) for t in (out.root / out.filelist).read_text().split() if t[0] != "+"]
+    return [Path(t) for t in _filelist(out) if t[0] != "+"]
 
 
 def include_dirs(out: Outputs) -> list[Path]:
     """OUT's include directories (``+incdir+`` lines of the file list), relative to its root."""
-    lines = (out.root / out.filelist).read_text().split()
-    return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
+    return [Path(t.removeprefix("+incdir+")) for t in _filelist(out) if t.startswith("+incdir+")]
 
 
 def _manifest(

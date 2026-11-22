@@ -7,14 +7,11 @@ insert columns. Derived (grey) columns are ignored: BAG recomputes everything.
 """
 
 import hashlib
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-from xml.etree.ElementTree import ParseError
 
 import openpyxl
-from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.worksheet import Worksheet
 
 from hdl_bag.reader.model import Cell, RawSpec, RawValue, Row
@@ -179,9 +176,14 @@ def read_workbook(path: Path) -> RawSpec:
         data = path.read_bytes()
         # Formulas, not cached values: the reader never trusts derived results.
         wb = openpyxl.load_workbook(path, data_only=False)
-    except (OSError, KeyError, zipfile.BadZipFile, InvalidFileException, ParseError) as exc:
-        # A spec is an .xlsx file. Anything else reaches openpyxl, which raises four unrelated
-        # exception types, none of them ours: the CLI showed them as a traceback.
+    except Exception as exc:
+        # Everything, deliberately. A spec is an .xlsx file, and anything else reaches openpyxl,
+        # which raises whatever its layers raise: BadZipFile, InvalidFileException, KeyError,
+        # IndexError, zlib.error, its own catch-all ValueError, and lxml's XMLSyntaxError when
+        # the user's environment has lxml, which this project's lock never does. Listing them
+        # was tried and four more were found at once; "the CLI never shows a raw traceback" is
+        # absolute, so the catch is too. Only read_bytes and load_workbook are inside the try,
+        # so no hdl-bag code can be masked, and `from exc` keeps the cause for a debugger.
         raise ReaderError(f"{path.name}: not a readable .xlsx workbook: {exc} (READ-FILE)") from exc
     project, _ = _read_kv(wb, "Project")
     wrapper, wrapper_end = _read_kv(wb, "Wrapper")
