@@ -164,3 +164,17 @@ def test_a_tag_publishes_a_github_release_only_after_pypi_has_published() -> Non
     assert release["permissions"] == {"contents": "write"}
     assert "gh release create" in _script(release)
     assert "scripts/release_notes.py" in _script(jobs["build"])
+
+
+def test_a_tag_pins_the_tools_image_it_was_validated_against_only_after_pypi_has_published() -> (
+    None
+):
+    """:main moves, so the release's image is the manifest behind :main re-tagged with the git
+    tag, server side (no rebuild). A tag that failed to publish must not pin an image."""
+    pin = _load("release.yml")["jobs"]["pin-tools-image"]
+    assert pin["needs"] == ["publish"]
+    assert pin["permissions"] == {"contents": "read", "packages": "write"}
+    assert any(s.get("uses", "").startswith("docker/login-action@") for s in pin["steps"])
+    script = _script(pin)
+    assert "docker buildx imagetools create" in script
+    assert '--tag "$repo:${GITHUB_REF_NAME}" "$repo:main"' in script
