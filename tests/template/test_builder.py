@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
 import io
+import re
 from pathlib import Path
 
 import openpyxl
@@ -174,3 +175,16 @@ def test_the_adapter_instances_formulas_read_the_naming_setting(tmp_path: Path) 
     formulas = [c.value for row in wb["Masters"].iter_rows() for c in row
                 if isinstance(c.value, str) and "SUBSTITUTE" in c.value]  # fmt: skip
     assert formulas and all(f"Wrapper!$B${WRAPPER_NAMING_ROW}" in f for f in formulas)
+
+
+def test_the_schema_changelog_documents_the_current_schema_version() -> None:
+    """AGENTS.md: a schema change bumps SCHEMA_VERSION and updates docs/schema-changelog.md.
+    Nothing held the two together: no test or script read that file, so a bump could ship with
+    the changelog describing only the version before it, and `bag check` points users at it."""
+    changelog = Path(__file__).parents[2] / "docs" / "schema-changelog.md"
+    headings = re.findall(r"^## (\S+)", changelog.read_text(encoding="utf-8"), re.MULTILINE)
+    assert headings, f"{changelog} has no '## <version>' section"
+    assert headings[0] == SCHEMA_VERSION, (
+        f"the newest section of docs/schema-changelog.md is {headings[0]}, but SCHEMA_VERSION "
+        f"is {SCHEMA_VERSION}: add that section, newest first."
+    )

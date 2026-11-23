@@ -57,6 +57,13 @@ M11 `.github/workflows/manual.yml` builds the PDF on pull requests and pushes to
     log reports an undefined or multiply defined reference, and uploading `hdl-bag.pdf` as
     the artifact `hdl-bag-manual`. Only actions/checkout and actions/upload-artifact. LaTeX
     build products are ignored by git.
+M12 Tool versions. Every version the manual prints is the pinned one: the table of
+    chapters/install.tex against `tools.lock`, and every SymbiYosys version any chapter states
+    against `SymbiYosys.pinned`, which is authoritative because the suite's SymbiYosys version
+    is not in the lock. A bump already fails the pins in `flows/backends.py` and the ARG
+    defaults in `tools/Dockerfile`, which is where a bumper looks, and `formal.py`'s comment
+    names install.tex -- but nothing read the manual, so each of these could be left stale in
+    a document published as a PDF, and flows.tex is named nowhere at all.
 
 WHAT THE TESTS CANNOT CHECK (the reviewer does)
 
@@ -101,6 +108,7 @@ import transcript
 
 from hdl_bag import __version__
 from hdl_bag.checks.core import RULES
+from hdl_bag.flows.formal import SymbiYosys
 from hdl_bag.reader.workbook import HDR_ROW, TABLES
 from hdl_bag.template.builder import build_workbook
 
@@ -354,3 +362,61 @@ def test_ci_builds_the_pdf() -> None:
     ignore = (transcript.REPO / ".gitignore").read_text(encoding="utf-8")
     for product in ("aux", "log", "pdf", "toc", "out", "fls", "fdb_latexmk"):
         assert f"docs/manual/*.{product}" in ignore, product
+
+
+def test_the_manuals_tool_table_names_the_versions_tools_lock_installs() -> None:
+    """M12: a bump in tools.lock fails the pins in flows/backends.py and the Dockerfile's ARG
+    defaults, which is where a bumper looks. Nothing read the manual, so every version it
+    prints could be left stale, in a document published as a PDF."""
+    lock = dict(
+        line.split("=", 1)
+        for line in (transcript.REPO / "tools.lock").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+    # Only the version table, not the whole chapter: a second table with a Verilator row, or
+    # a duplicate row anywhere in the file, would otherwise mask the printed one.
+    text = (CHAPTERS / "install.tex").read_text(encoding="utf-8")
+    table = text.split(r"\begin{tabular}{ll}", 1)[1].split(r"\end{tabular}", 1)[0]
+    found = [
+        (label.strip(), value.strip())
+        for label, value in re.findall(r"^(.+?) & (.+?) \\\\$", table, re.MULTILINE)
+    ]
+    rows = dict(found)
+    # A dict keeps the last of a repeated label, so a stale duplicate row above the right one
+    # would print in the PDF and pass unseen.
+    assert len(rows) == len(found), f"the version table repeats a tool: {found}"
+    for label, key in (("Verilator", "VERILATOR_VERSION"), ("slang", "SLANG_VERSION"),
+                       ("Verible", "VERIBLE_VERSION")):  # fmt: skip
+        assert rows.get(label) == lock[key], (
+            f"install.tex says {label} is {rows.get(label)!r}; tools.lock installs "
+            f"{lock[key]!r}. Update the version table in chapters/install.tex, or the row no "
+            f"longer reads `{label} & <version> \\\\` and this test cannot find it."
+        )
+    suite = next((v for k, v in rows.items() if k.startswith("OSS CAD Suite")), None)
+    assert suite and lock["OSS_CAD_SUITE_DATE"] in suite, (
+        f"install.tex says the OSS CAD Suite row is {suite!r}; tools.lock installs the build "
+        f"of {lock['OSS_CAD_SUITE_DATE']}. Update that row."
+    )
+
+
+def test_every_symbiyosys_version_the_manual_prints_is_the_pinned_one() -> None:
+    """M12: the suite's date is in tools.lock but its SymbiYosys version is not, so the pin in
+    flows/formal.py is authoritative. The manual states it four times -- the table row, the
+    not-pinned example under it, and twice in the flows chapter -- and none was checked: the
+    manual could name the wrong version in all four and the suite stayed green. formal.py's own
+    comment tells a bumper about the table and the example, and does not mention flows.tex."""
+    seen = {
+        (path.name, found.group(1))
+        for path in sorted(CHAPTERS.glob("*.tex"))
+        # `sby 0.70` in the worked example is a deliberately wrong version, so match only the
+        # forms that assert what the pin is.
+        for found in re.finditer(
+            r"(?:the pinned|is not|SymbiYosys) (v\d+\.\d+)", path.read_text(encoding="utf-8")
+        )
+    }
+    assert seen, "no chapter states a SymbiYosys version any more; drop this test or fix it"
+    wrong = {s for s in seen if s[1] != SymbiYosys.pinned}
+    assert not wrong, (
+        f"these name a SymbiYosys version that is not the pin {SymbiYosys.pinned!r}: "
+        f"{sorted(wrong)}. The pin is SymbiYosys.pinned in src/hdl_bag/flows/formal.py."
+    )
