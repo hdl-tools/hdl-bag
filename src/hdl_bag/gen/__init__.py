@@ -267,26 +267,48 @@ def load_outputs(root: Path) -> Outputs:
         raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
-    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
-            and isinstance(data.get("files"), dict | list)):  # fmt: skip
-        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     defaults = Outputs(root, (), "", "")
+    tools = data.get("lint_tools", defaults.lint_tools)
+    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
+            and isinstance(data.get("files"), dict | list)
+            and isinstance(tools, list | tuple)
+            and all(isinstance(t, str) for t in tools)):  # fmt: skip
+        # lint_tools included: tuple("slang") is five one-character tool names, which reached
+        # lint() as unknown tools and left bag lint showing the ValueError.
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
-        tuple(data.get("lint_tools", defaults.lint_tools)),
+        tuple(tools),
         data.get("simulator", defaults.simulator), tuple(data.get("formal", ())),
     )  # fmt: skip
 
 
+def _filelist(out: Outputs) -> list[str]:
+    """The whitespace-separated tokens of OUT's file list.
+
+    Raises ValueError, with a message for the user, when the manifest names a file list that
+    is not there: lint, sim and flow all read it and each gave a raw FileNotFoundError. The
+    check lives here, not in load_outputs, because `bag formal` never reads the file list --
+    each generated job carries its own sources -- so a missing one must not stop a design it
+    can still prove.
+    """
+    path = out.root / out.filelist
+    try:
+        return path.read_text().split()
+    except OSError as exc:
+        raise ValueError(
+            f"{out.root}: the file list {out.filelist} cannot be read: run bag generate again"
+        ) from exc
+
+
 def sources(out: Outputs) -> list[Path]:
     """OUT's file list, relative to its root, in compile order."""
-    return [Path(t) for t in (out.root / out.filelist).read_text().split() if t[0] != "+"]
+    return [Path(t) for t in _filelist(out) if t[0] != "+"]
 
 
 def include_dirs(out: Outputs) -> list[Path]:
     """OUT's include directories (``+incdir+`` lines of the file list), relative to its root."""
-    lines = (out.root / out.filelist).read_text().split()
-    return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
+    return [Path(t.removeprefix("+incdir+")) for t in _filelist(out) if t.startswith("+incdir+")]
 
 
 def _deletable(root: Path, rel: str) -> bool:

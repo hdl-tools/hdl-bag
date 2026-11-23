@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
 import dataclasses
+import json
 from pathlib import Path
 
 import openpyxl
@@ -159,6 +160,8 @@ def test_lint_uses_the_project_lint_tools(tmp_path: Path, monkeypatch: pytest.Mo
     ('{"top": null, "files": [], "filelist": ""}', "no RTL was generated (see bag_outputs.json)"),
     ('{"top": "x"}', "bag_outputs.json cannot be read: run bag generate again"),
     ('{"top": "x", "files": {}, "filelist": 3}', "bag_outputs.json cannot be read: run bag generate again"),
+    # tuple("slang") is five one-character tool names, which reached lint() as unknown tools.
+    ('{"top": "x", "files": {}, "filelist": "x.f", "lint_tools": "slang"}', "bag_outputs.json cannot be read: run bag generate again"),
 ])  # fmt: skip
 def test_a_folder_that_is_not_an_output_directory_is_an_error_not_a_traceback(
     tmp_path: Path, command: str, manifest: str | None, message: str
@@ -199,3 +202,57 @@ def test_an_ir_project_name_cannot_choose_where_the_checked_workbook_is_written(
     assert result.exit_code == 1
     assert "NAME-IDENT" in result.output
     assert victim.read_bytes() == b"a workbook of the user's own"
+
+
+def test_check_on_an_ir_file_is_an_error_not_a_traceback(tmp_path: Path) -> None:
+    """bag ir and bag generate take a .ir.yaml and bag check does not, so this is the mistake
+    users make. It showed openpyxl's InvalidFileException as a traceback."""
+    ir_path = _ir_copy(tmp_path)
+    result = CliRunner().invoke(main, ["check", str(ir_path)])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert result.output.startswith("error: demo_ss.ir.yaml: not a readable .xlsx workbook")
+    assert "READ-FILE" in result.output
+
+
+def test_a_lint_tool_this_release_does_not_know_is_an_error_not_a_traceback(tmp_path: Path) -> None:
+    """A manifest another hdl-bag wrote can name a tool this one has no backend for. lint()
+    raises ValueError for it, and bag lint had no handler, unlike bag sim."""
+    out = tmp_path / "out"
+    ir_path = _ir_copy(tmp_path)
+    assert CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(out)]).exit_code == 0
+    manifest = out / "bag_outputs.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["lint_tools"] = ["spyglass"]
+    manifest.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+    result = CliRunner().invoke(main, ["lint", str(out)])
+    assert (result.exit_code, result.output) == (1, "error: unknown lint tool(s): spyglass\n")
+    assert isinstance(result.exception, SystemExit)
+
+
+@pytest.mark.parametrize("command", ["lint", "sim"])
+def test_a_missing_file_list_is_an_error_not_a_traceback(tmp_path: Path, command: str) -> None:
+    """lint, sim and flow read the file list after load_outputs returns, and each gave a raw
+    FileNotFoundError when the manifest named one that is not there."""
+    out = tmp_path / "out"
+    ir_path = _ir_copy(tmp_path)
+    assert CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(out)]).exit_code == 0
+    (out / "demo_ss.f").unlink()
+    result = CliRunner().invoke(main, [command, str(out)])
+    assert (result.exit_code, result.output) == (
+        1, f"error: {out}: the file list demo_ss.f cannot be read: run bag generate again\n"
+    )  # fmt: skip
+    assert "Traceback" not in result.output
+
+
+def test_formal_still_runs_when_the_file_list_is_gone(tmp_path: Path) -> None:
+    """`bag formal` never reads the file list: each generated job carries its own sources. So
+    the check belongs where the list is consumed, not in load_outputs, which refused a design
+    formal could still prove -- and which forced a fixture in test_formal.py to be rewritten."""
+    out = tmp_path / "out"
+    ir_path = _ir_copy(tmp_path)
+    assert CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(out)]).exit_code == 0
+    (out / "demo_ss.f").unlink()
+    result = CliRunner().invoke(main, ["formal", str(out)])
+    assert "the file list" not in result.output
+    assert "Traceback" not in result.output

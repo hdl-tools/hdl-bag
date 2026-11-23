@@ -171,7 +171,13 @@ def generate_command(spec: Path, output: Path | None, style: str | None) -> None
 def lint_command(outdir: Path) -> None:
     """Lint a generated OUTDIR with Project > Lint tools; exit 1 on any unwaived finding."""
     out = _outputs(outdir)
-    _report(lint(sources(out), out.top, outdir, tools=out.lint_tools, incdirs=include_dirs(out)))
+    try:
+        _report(lint(sources(out), out.top, outdir, tools=out.lint_tools,
+                     incdirs=include_dirs(out)))  # fmt: skip
+    except ValueError as exc:
+        # A tool name this release does not know, from a manifest another one wrote.
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1) from exc
 
 
 def _sim(out: Outputs, test_filter: str | None = None, ready_shim: bool = False) -> None:

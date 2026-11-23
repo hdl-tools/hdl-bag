@@ -105,7 +105,8 @@ columns, and you can add columns of your own: BAG ignores a column whose header 
 not know. A header must be spelled exactly as in this chapter. A missing or repeated
 input column stops \cmd{bag check} with a message such as
 \code{Fabrics: missing column 'Topology' in row 4 (READ-COLUMN)}. A missing sheet
-gives \code{READ-SHEET}.
+gives \code{READ-SHEET}, and a file that is not a readable \file{.xlsx} workbook at all,
+an IR file among them, gives \code{READ-FILE}.
 
 BAG reads a row when at least one of its input cells has a value. Empty rows, and rows
 that only hold derived formulas, are skipped. BAG reads what is typed in a cell, not the

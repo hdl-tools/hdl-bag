@@ -104,7 +104,15 @@ def simulate(
         exit_code = exc.code
     if not results.is_file():
         raise RuntimeError(f"{module.name}: the simulation wrote no results (exit {exit_code})")
-    findings = _findings(list(ET.parse(results).iter("testcase")), expected, seed)
+    try:
+        cases = list(ET.parse(results).iter("testcase"))
+    except ET.ParseError as exc:
+        # A simulator killed part-way leaves the results truncated. ParseError is a SyntaxError,
+        # so it passed the CLI's except clause and reached the user as a traceback.
+        raise RuntimeError(
+            f"{module.name}: the simulation's results are unreadable (exit {exit_code}): {exc}"
+        ) from exc
+    findings = _findings(cases, expected, seed)
     if exit_code and not findings:
         # The results are written before the simulator stops, so they cannot show a fault
         # in its teardown.
