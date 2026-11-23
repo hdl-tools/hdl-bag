@@ -113,7 +113,7 @@ def save(path: Path) -> None:
     for (kind, key), n in sorted(counts.items()):
         merged.setdefault(kind, []).append([*key, n])
     tmp = path.with_suffix(".tmp")  # replaced whole, so a killed run never leaves half a file
-    tmp.write_text(json.dumps(merged, indent=1) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(merged, indent=1) + "\n", encoding="utf-8", newline="\n")
     os.replace(tmp, path)
 
 
