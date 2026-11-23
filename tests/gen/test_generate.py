@@ -321,3 +321,82 @@ def test_generate_over_a_corrupt_manifest_writes_a_fresh_one(tmp_path: Path) -> 
     (out / MANIFEST).write_text("{not json", encoding="utf-8")
     generate(load(CONFIG), out, CONFIG.parent)
     assert load_outputs(out).top
+
+
+def _manifest_with(root: Path, extra: dict[str, str]) -> None:
+    path = root / MANIFEST
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["files"] = {**data["files"], **extra}
+    path.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+
+
+def test_generate_removes_a_file_the_previous_run_wrote_and_this_one_did_not(
+    tmp_path: Path,
+) -> None:
+    """The pruning this guards: a file listed by the last run and not written by this one goes."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    stale = out / "rtl" / "stale.sv"
+    stale.write_text("// from a previous run\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not stale.exists()
+
+
+@pytest.mark.parametrize("escape", ["../victim.txt", "rtl/../../victim.txt"])
+def test_generate_does_not_delete_a_file_outside_the_output_directory(
+    tmp_path: Path, escape: str
+) -> None:
+    """The names pruned come from a manifest in a directory the user may not have written, and
+    pruning deletes whatever they name. An output tree from someone else took a file with it."""
+    out = tmp_path / "out"
+    victim = tmp_path / "victim.txt"
+    generate(load(CONFIG), out, CONFIG.parent)
+    victim.write_text("the user's own work\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {escape: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert victim.read_text(encoding="utf-8") == "the user's own work\n"
+
+
+@pytest.mark.parametrize("junk", ["a\u0000b", "", ".", "rtl", "rtl/"])
+def test_a_manifest_name_that_is_not_a_file_to_delete_is_skipped(tmp_path: Path, junk: str) -> None:
+    """The prune loop promises a name it cannot use is skipped "rather than stopping a generate
+    that is otherwise fine". A NUL makes resolve() raise ValueError; the empty string, "." and a
+    directory each name something unlink refuses, and missing_ok covers only FileNotFoundError.
+    Every one of these made a generate that was otherwise fine exit 1."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    _manifest_with(out, {junk: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert (out / "rtl").is_dir()
+
+
+def test_an_absolute_manifest_name_inside_the_output_directory_is_skipped(tmp_path: Path) -> None:
+    """What the absolute-path guard is for. An absolute name landing outside the root is already
+    refused by the containment test, but one landing inside it passes, so without the guard this
+    file would be deleted -- and BAG never writes an absolute name into a manifest."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    keep = out / "keep.txt"
+    keep.write_text("not BAG's to delete\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {str(keep): "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert keep.read_text(encoding="utf-8") == "not BAG's to delete\n"
+
+
+def test_a_symlink_the_previous_run_listed_is_removed_but_its_target_is_not(
+    tmp_path: Path,
+) -> None:
+    """unlink removes a link, never what it points at, so a listed symlink inside the root is
+    safe to prune and was pruned before this containment check. Judging it by resolve() sent it
+    outside the root and skipped it, leaking it forever: the new manifest no longer lists it."""
+    out = tmp_path / "out"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("the user's own file\n", encoding="utf-8", newline="\n")
+    generate(load(CONFIG), out, CONFIG.parent)
+    link = out / "rtl" / "stale.sv"
+    link.symlink_to(outside)
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not link.is_symlink(), "the link was left behind"
+    assert outside.read_text(encoding="utf-8") == "the user's own file\n"
