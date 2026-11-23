@@ -4,9 +4,7 @@ All notable changes to hdl-bag are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- DRAFT for the maintainer to edit: the release date below is a placeholder. -->
-
-## [1.0.0] - YYYY-MM-DD
+## [1.0.0] - 2026-11-23
 
 First release. hdl-bag (BAG, the Bus Architecture Generator) turns an Excel spec workbook into
 AMBA bus-fabric RTL (AXI4, AXI4-Lite, AHB-Lite, APB) inside a wrapper you define, with the
