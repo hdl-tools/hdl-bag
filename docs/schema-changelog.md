@@ -2,6 +2,16 @@
 
 The workbook's sheets, column order, dropdown lists and spare-row formulas are the schema. `bag check` refuses a workbook whose Project > Spec schema version differs from the release's.
 
+## 0.7 (2026-11-20, hdl-bag 0.0.x)
+
+Changes from 0.6, approved by the owner (issue 106):
+
+- **New setting Project > Module prefix** (optional, the last Project row, so no other row moves). When set, BAG puts it and an underscore in front of every design unit BAG emits (the in-house modules, the modules BAG derives from PULP, the vendored PULP units, BAG's formal checkers, the vendored ZipCPU checkers and the sub-wrapper modules it writes), and their file names. It also goes in front of every macro a packaged file defines (the include guards and the integrator knobs among them) and of the vendored header file names, with the include lines that name them. The note of Project name no longer says it prefixes module names.
+- Never renamed, six kinds in all: the top wrapper, the parameter package, the generated `<project>_<proto>_if` interfaces, the flat harness, a `bag_external` user module, and the generated formal modules, which carry the project name instead.
+- **New errors:** NAME-RESERVED (a Project name, Module prefix, Top module name or Parameter package under which a generated unit takes the name of a generated formal module), PROJ-MODULE-PREFIX (not a lowercase identifier, or ends with an underscore) and PROJ-PREFIX-COLLISION (a prefixed name equals the top wrapper, the flat harness, the package, an interface, a user module or an SV keyword, or a sub-wrapper named like a module, interface or package BAG can copy: PULP, in-house, derived or formal). **New warning:** PROJ-NAME-LENGTH (a generated name over 64 characters, only when a prefix is set).
+- **IR:** new field `module_prefix` on `project`.
+- No other sheet, column or dropdown-list changes. A 0.6 workbook is refused (PROJ-SCHEMA-VERSION); set the version to 0.7 and add the Module prefix row, left blank. The generated RTL is then unchanged.
+
 ## 0.6 (2026-11-05, hdl-bag 0.0.x)
 
 Changes from 0.5, approved by the owner (D45):

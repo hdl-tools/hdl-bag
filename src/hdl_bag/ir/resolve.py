@@ -8,6 +8,7 @@ never reports findings.
 """
 
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Literal
 
 from hdl_bag import __version__
@@ -16,7 +17,7 @@ from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
 from hdl_bag.checks.memory import access_rules
 from hdl_bag.ir import model as ir
-from hdl_bag.protocols import OPTIONAL_SIGNALS, signal_applies
+from hdl_bag.protocols import AXI_FAMILY, OPTIONAL_SIGNALS, Protocol, signal_applies
 from hdl_bag.reader.model import Cell, Row
 from hdl_bag.reader.values import parse_connection
 from hdl_bag.template import SCHEMA_VERSION
@@ -41,8 +42,11 @@ def _req(value: object) -> str:
     return value
 
 
-def _int(ctx: Context, cell: Cell, minimum: int = 0) -> int | None:
-    v = ctx.integer(cell, minimum, required=False)
+def _int(ctx: Context, cell: Cell, minimum: int = 0, tokens: Sequence[str] = ()) -> int | None:
+    """CELL as an integer, or None. TOKENS must be the same ones the check on CELL allows: a
+    reader with a narrower set refuses a value the check accepted (and reports, which resolve
+    must never do)."""
+    v = ctx.integer(cell, minimum, required=False, tokens=tokens)
     return v if isinstance(v, int) else None
 
 
@@ -63,6 +67,7 @@ def resolve(result: CheckResult) -> ir.Spec:
 
     project = ir.Project(
         name=_req(_s(ctx, p["Project name"])),
+        module_prefix=_s(ctx, p["Module prefix"]),
         revision=_s(ctx, p["Spec revision"]),
         author=_s(ctx, p["Author"]),
         sv_std=_req(_s(ctx, p["SystemVerilog standard"])),
@@ -102,7 +107,8 @@ def resolve(result: CheckResult) -> ir.Spec:
         masters.append(ir.Master(
             name=name, protocol=_req(ctx.text(r["Protocol"])), fabric=ctx.master_fabric[name],
             data_width=_req_int(ctx, r["Data width (bits)"], 1), addr_width=_req_int(ctx, r["Addr width (bits)"], 1),
-            id_width=_int(ctx, r["ID width (bits)"], 1), user_width=_int(ctx, r["User width (bits)"]) or 0,
+            id_width=_int(ctx, r["ID width (bits)"], 1),
+            user_width=_int(ctx, r["User width (bits)"], tokens=("n/a",)) or 0,
             domain=_req(ctx.text(r["Clock domain"])),
             max_outstanding_rd=_int(ctx, r["Max outstanding rd"], 1),
             max_outstanding_wr=_int(ctx, r["Max outstanding wr"], 1),
@@ -118,7 +124,8 @@ def resolve(result: CheckResult) -> ir.Spec:
             name=name, protocol=_req(ctx.text(r["Protocol"])), fabric=fabric,
             data_width=_req_int(ctx, r["Data width (bits)"], 1), addr_width=_req_int(ctx, r["Addr width (bits)"], 1),
             id_width=(ids[1] if ids else None) if id_raw == "auto" else (id_raw if isinstance(id_raw, int) else None),
-            id_width_auto=id_raw == "auto", user_width=_int(ctx, r["User width (bits)"]) or 0,
+            id_width_auto=id_raw == "auto",
+            user_width=_int(ctx, r["User width (bits)"], tokens=("n/a",)) or 0,
             domain=_req(ctx.text(r["Clock domain"])), error_response=_req(ctx.text(r["Error response"])),
             wait_states=wait,  # type: ignore[arg-type]
         ))  # fmt: skip
@@ -236,9 +243,19 @@ def _fabric(
     masters = [lk.end for lk in mports]
     ids = ctx.fabric_id_widths(name)
 
-    def opt_int(col: str, minimum: int) -> int | None:
+    def opt_int(col: str, minimum: int, applies: bool = True) -> int | None:
+        """COL as an integer: None when it is blank, n/a, or does not apply to this fabric.
+
+        A setting that does not apply is warned about (FAB-NA-SETTING) and never parsed by the
+        checks, so resolve must not parse it either. It would report VALUE-ILLEGAL from inside
+        resolve, after the checks had already found the spec free of errors (#156).
+        """
         v = r[col].value
-        return None if v in (None, "n/a") else _int(ctx, r[col], minimum)
+        if not applies or v in (None, "n/a"):
+            return None
+        return _int(ctx, r[col], minimum)
+
+    axi = Protocol(_req(ctx.text(r["Protocol"]))) in AXI_FAMILY
 
     midpoint = None
     if topology == "shared-bus":
@@ -270,8 +287,8 @@ def _fabric(
         latency_mode=None
         if r["Latency mode"].value in (None, "n/a")
         else ctx.text(r["Latency mode"]),
-        max_mst_trans=opt_int("Max mst trans", 1),
-        max_slv_trans=opt_int("Max slv trans", 1),
+        max_mst_trans=opt_int("Max mst trans", 1, axi),
+        max_slv_trans=opt_int("Max slv trans", 1, axi),
         midpoint=midpoint,
         template=_req(ctx.text(r["Backing template"])),
         backing_ip=ctx.text(r["Backing IP"]),

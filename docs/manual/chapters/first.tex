@@ -3,7 +3,8 @@
 
 This chapter takes the sample design of BAG from an empty folder to generated RTL. Then
 it runs lint, simulation and formal on a smaller design. Run the commands in an empty
-folder.
+folder. The terms fabric, master, slave, bridge and clock-domain crossing (CDC) are
+defined in the list in section~\ref{sec:wb-terms}.
 
 \section{The sample workbook}
 
@@ -42,7 +43,7 @@ fill often does), give it the width of the fabric, or have it send INCR bursts.
 
 \subsection{What was written}
 
-\cmd{bag generate} wrote 132 files. The top level of \file{out} holds:
+\cmd{bag generate} wrote 136 files. The top level of \file{out} holds:
 
 \begin{description}
 \item[\file{rtl/}] the SystemVerilog: the wrapper \code{demo_ss_bus_top} and its
@@ -50,6 +51,7 @@ fill often does), give it the width of the fabric, or have it send INCR bursts.
   \file{rtl/inhouse/}, and the PULP blocks in \file{rtl/vendor/}.
 \item[\file{demo_ss.f}] the file list, in compile order, for your own tools.
 \item[\file{sw/}] the C header with the address map.
+\item[\file{constraints/}] the clock and clock-domain-crossing constraints, in SDC and XDC.
 \item[\file{doc/}] the memory map (Markdown and HTML), the port map, the tie-off report
   and the reset sequence.
 \item[\file{tests/}] the generated cocotb tests and a copy of the IR they read.
@@ -71,6 +73,45 @@ what errors look like: each names the sheet, the row and the rule ID. With an er
 
 Fill in the sheets in the order of chapter~\ref{ch:workbook}, and run \cmd{bag check}
 after each sheet.
+
+\subsection{The least a design needs}
+
+A design with one fabric needs these rows. Take $N$ masters and $M$ slaves, all on one
+AXI4 crossbar in one clock domain:
+
+\begin{itemize}
+\item \sheet{Project}: the project name, the output directory and the five
+  \code{Generate} settings, \code{Y} or \code{N}. These are the first errors above.
+\item \sheet{Clocks} and \sheet{Resets}: one clock and one reset in one domain.
+\item \sheet{Fabrics}: one row.
+\item \sheet{Masters}: $N$ rows. \sheet{Slaves}: $M$ rows.
+\item \sheet{Topology}: $N+M$ rows. Each master links to the fabric and the fabric
+  links to each slave, with a \col{Port index} that counts from 0 on each side.
+\item \sheet{Memory_Map}: at least one region for each slave, $M$ rows. A slave with
+  no region is unreachable (\ruleid{MM-PATH-NO-REGION}, a warning).
+\item \sheet{Address_Decode}: one row for each master, $N$ rows, with a miss response
+  (\code{DECERR} on AXI4). A missing row is an error (\ruleid{DEC-MISSING-ROW}).
+\item \sheet{Wrapper}: the top module name, the parameter package, and one row of
+  \code{Exposed ports} for each master and slave, $N+M$ rows, all \code{Y}.
+\end{itemize}
+
+\sheet{Bridges}, \sheet{Access_Rules}, \sheet{Port_Options}, \sheet{User_Ports} and
+\sheet{Hierarchy} may stay empty. \sheet{Hierarchy} keeps the one row for the top
+wrapper that the template gives it. A workbook like this one, with two masters and two
+slaves, checks with no finding and generates 60 files.
+
+For the crossbar, \code{bag_axi_xbar} with \col{Latency mode} \code{NO_LATENCY} is a safe
+default: it adds no spill register, and the example workbooks use it. Choose another mode
+only to fix timing. Chapter~\ref{ch:workbook} explains every column.
+
+The repository also holds three finished workbooks in its top-level \file{examples/}
+directory (not the manual's \file{docs/manual/examples/}, and not part of a \code{pip install}).
+Each checks with zero findings, and \cmd{bag flow} takes each from workbook to passing tests.
+\file{apb_min.xlsx} is the smallest workbook that generates: one APB4 master and three slaves.
+\file{mcu_ahb.xlsx} is a microcontroller bus: an AHB-Lite processor, an SRAM, and an APB bus of
+three peripherals behind a \code{bag_ahb2apb} bridge. \file{soc_4x8.xlsx} is an AXI4 crossbar
+with four masters and eight slaves, with an APB bus of six peripherals behind a
+\code{bag_axi2apb} bridge; copy it as the start of a spec of your own.
 
 \section{Lint, simulation and formal}
 

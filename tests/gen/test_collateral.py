@@ -13,7 +13,14 @@ import pytest
 
 from hdl_bag import __version__
 from hdl_bag.gen import generate
-from hdl_bag.gen.collateral import c_header
+from hdl_bag.gen.collateral import (
+    c_header,
+    memmap_html,
+    memmap_md,
+    port_map_md,
+    reset_md,
+    tieoffs_md,
+)
 from hdl_bag.gen.render import GenerateError
 from hdl_bag.ir import Spec, load
 
@@ -28,7 +35,8 @@ CONFIGS = {
     "apb4_min": TESTS / "configs" / "p2" / "apb4_min.ir.yaml",  # a domain with nothing in it
 }
 FILES = ("sw/demo_ss_memmap.h", "doc/memmap.md", "doc/memmap.html", "doc/port_map.md",
-         "doc/tieoffs.md", "doc/reset.md")  # fmt: skip
+         "doc/tieoffs.md", "doc/reset.md", "constraints/demo_ss_cdc.sdc",
+         "constraints/demo_ss_cdc.xdc")  # fmt: skip
 
 
 def _generate(spec: Spec, src: Path, root: Path) -> Path:
@@ -311,3 +319,30 @@ def test_c_header_compiles(tmp_path: Path) -> None:
            "-I", str(root / "sw"), str(c)]  # fmt: skip
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("arrow", ["-->", "--!>"])
+def test_an_arrow_in_the_user_header_does_not_close_the_comment(arrow: str) -> None:
+    """Every document opens with the banner in an HTML comment, and `-->` is an ordinary ASCII
+    arrow in a hand-written header. It closed the comment, so the rest of the banner, the IR
+    sha256 and (in memmap.html) the <html> tag itself became body text. The html test's own
+    `text.split("-->", 1)[1]` assumes the first `-->` ends the banner."""
+    spec = load(GOLDEN_IR)
+    header = f"Acme SoC bus\ncpu {arrow} l2 {arrow} dram\n"
+    documents = {
+        "memmap.md": memmap_md(spec, header),
+        "memmap.html": memmap_html(spec, header),
+        "port_map.md": port_map_md(spec, header),
+        "tieoffs.md": tieoffs_md(spec, [], header),
+        "reset.md": reset_md(spec, header),
+    }
+    for name, text in documents.items():
+        # Whichever sequence ends the comment first, not just `-->`: partitioning on `-->`
+        # alone finds the banner's own close and passes while `--!>` has ended it earlier.
+        close = min(i for i in (text.find("-->"), text.find("--!>")) if i != -1)
+        banner = text[:close]
+        assert "DO NOT EDIT" in banner, f"{name}: the comment closes before the banner ends"
+        assert "IR sha256" in banner, f"{name}: the comment closes before the IR hash"
+        assert "cpu -" in banner, f"{name}: the header itself is not in the comment"
+    # The C header has no comment to close, so D4's verbatim header reaches it unaltered.
+    assert f"cpu {arrow} l2" in c_header(spec, header)

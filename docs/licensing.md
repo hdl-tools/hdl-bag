@@ -30,12 +30,14 @@ Each generated file starts with:
 
 Generated RTL may instantiate third-party IP (for example
 pulp-platform/axi). `bag generate` copies the files of that IP into
-`rtl/vendor/` of the output, with each package's `LICENSE` next to them. That
+`rtl/vendor/` of the output, with each package's `LICENSE` next to them and, for a file under
+another licence, that licence's text in `rtl/vendor/licences/`. That
 IP keeps its own licence and copyright headers, and it is not yours to
 relicense; see [third-party.md](third-party.md).
 
 ## Third-party components
 
 Only permissively licensed third-party RTL is used (Solderpad SHL-0.51,
-MIT, BSD, Apache-2.0). Reciprocal licences such as CERN-OHL-S are never
+MIT, BSD, Apache-2.0, Apache-2.0 WITH SHL-2.1). [bom.md](bom.md) lists every
+vendored file and Python package with its licence. Reciprocal licences such as CERN-OHL-S are never
 vendored.

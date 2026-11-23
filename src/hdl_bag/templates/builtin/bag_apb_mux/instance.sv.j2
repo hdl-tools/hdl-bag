@@ -4,7 +4,7 @@
 {% set m = inst.masters[0] %}
 {% set t = pkg ~ "::" ~ p %}
   // {{ fabric.name }}: {{ fabric.protocol }} decoder-mux
-  bag_apb_mux #(
+  {{ unit("bag_apb_mux") }} #(
       .AddrWidth    ({{ fabric.addr_width }}),
       .DataWidth    ({{ fabric.data_width }}),
       .NoSlaves     ({{ t }}NoSlaves),

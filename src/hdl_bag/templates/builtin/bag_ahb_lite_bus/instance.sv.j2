@@ -5,7 +5,7 @@
 {% set ms = inst.masters %}
 {% set ss = inst.slaves %}
   // {{ fabric.name }}: AHB-Lite single layer, {{ fabric.arbitration }}
-  bag_ahb_lite_bus #(
+  {{ unit("bag_ahb_lite_bus") }} #(
       .AddrWidth    ({{ fabric.addr_width }}),
       .DataWidth    ({{ fabric.data_width }}),
       .NoMasters    ({{ t }}NoMasters),

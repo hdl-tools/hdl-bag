@@ -5,7 +5,7 @@
 {% set ms = inst.masters %}
 {% set ss = inst.slaves %}
   // {{ fabric.name }}: AXI4-Lite crossbar, {{ fabric.arbitration }}
-  bag_axil_xbar #(
+  {{ unit("bag_axil_xbar") }} #(
       .AddrWidth    ({{ fabric.addr_width }}),
       .DataWidth    ({{ t }}DataWidth),
       .NoMasters    ({{ t }}NoMasters),

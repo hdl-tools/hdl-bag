@@ -44,7 +44,8 @@ from hdl_bag.formal_gen.units import (
 )
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
-from hdl_bag.ir import load, resolve
+from hdl_bag.ir import Spec, load, resolve
+from hdl_bag.naming import formal_name, formal_unit
 from hdl_bag.protocols import Protocol
 from hdl_bag.reader import read_workbook
 from hdl_bag.template.builder import build_workbook
@@ -224,7 +225,7 @@ def test_every_port_the_properties_bind_to_is_a_port_of_the_top(tmp_path: Path,
     name = spec.project.name
     modules = {
         f"{name}_reset": props_module(spec),
-        f"{name}_protocol": f"bag_{name}_protocol_props",
+        f"{name}_protocol": formal_name(name, "protocol_props"),
     }
     for style in ("flat", "sv-interface"):
         out = generate(spec, tmp_path / style, config.parent, style)
@@ -1521,3 +1522,89 @@ def test_a_route_job_covers_contention_only_where_two_masters_meet(tmp_path: Pat
     text = _route_text(tmp_path, c.access("m1", "s0", "RO"), "f")
     assert "cover_f_ar_contended: cover" in text
     assert "cover_f_aw_contended: cover" not in text
+
+
+# ---- Project > Module prefix (stage 3 of #106): the checkers and jobs follow the renamed units
+
+
+def _prefixed(config: Path) -> Spec:
+    spec = load(config)
+    project = spec.project.model_copy(update={"module_prefix": "zz9"})
+    return spec.model_copy(update={"project": project})
+
+
+def test_a_prefix_renames_the_step_registers_and_the_job_that_reads_them(tmp_path: Path) -> None:
+    generate(_prefixed(GOLDEN), tmp_path, GOLDEN.parent)
+    text = (tmp_path / "formal/demo_ss_reset.sv").read_text(encoding="utf-8")
+    assert "zz9_bag_step_ff0 u_bag_busy_cpu0_axi_bvalid (" in text
+    assert "zz9_bag_step_ff1 u_bag_init (" in text
+    assert not re.search(r"(?<!zz9_)\bbag_step_ff\d", re.sub(r"//[^\n]*", "", text))
+    job = (tmp_path / "formal/demo_ss_reset.sby").read_text(encoding="utf-8")
+    assert "\nread_verilog -formal zz9_bag_step.v\n" in job
+    assert job.endswith("[files]\nrtl ../rtl\nzz9_bag_step.v\ndemo_ss_reset.sv\n")
+    assert (tmp_path / "formal/zz9_bag_step.v").is_file()
+    assert not (tmp_path / "formal/bag_step.v").exists()
+
+
+def test_a_prefix_renames_the_zipcpu_copies_their_files_and_the_copy_lines(tmp_path: Path) -> None:
+    config = P2 / "apb3_wide.ir.yaml"
+    generate(_prefixed(config), tmp_path, P2)
+    job = (tmp_path / "formal/apb3_wide_protocol.sby").read_text(encoding="utf-8")
+    for line in [
+        "read_verilog -formal zz9_bag_step.v",
+        "read_verilog -formal zipcpu/zz9_fapb_master.v",
+        "copy zz9_fapb_master bag_apb3_wide_fapb_master_p3",
+    ]:
+        assert f"\n{line}\n" in job, line
+    assert job.endswith(
+        "[files]\nrtl ../rtl\nzz9_bag_step.v\nzipcpu vendor/zipcpu\napb3_wide_protocol.sv\n"
+    )
+    vendored = sorted(p.name for p in (tmp_path / "formal/vendor/zipcpu").iterdir())
+    assert vendored == ["LICENSE", "SOURCE.md", "zz9_fapb_master.v", "zz9_fapb_slave.v"]
+
+
+def test_a_prefix_renames_bags_own_axi4_checker_where_it_is_instantiated(tmp_path: Path) -> None:
+    config = P3 / "axi_xbar_rules.ir.yaml"
+    generate(_prefixed(config), tmp_path, P3)
+    proto = (tmp_path / "formal/axi_xbar_rules_protocol.sv").read_text(encoding="utf-8")
+    assert "  zz9_bag_faxi4 #(" in proto
+    route = (tmp_path / "formal/axi_xbar_rules_route_xbar.sv").read_text(encoding="utf-8")
+    assert "  zz9_bag_faxi4 #(" in route
+    for name in ("axi_xbar_rules_protocol.sby", "axi_xbar_rules_route_xbar.sby"):
+        job = (tmp_path / "formal" / name).read_text(encoding="utf-8")
+        assert "zz9_bag_faxi4.sv\n" in job and "\nbag_faxi4.sv\n" not in job
+    assert (tmp_path / "formal/zz9_bag_faxi4.sv").is_file()
+    assert not (tmp_path / "formal/bag_faxi4.sv").exists()
+
+
+def test_a_prefix_renames_bags_own_ahb_checker_and_the_route_job_copies(tmp_path: Path) -> None:
+    config = P3 / "mixed_apb_masters.ir.yaml"
+    generate(_prefixed(config), tmp_path, P3)
+    route = (tmp_path / "formal/mixed_apb_masters_route_ahb.sv").read_text(encoding="utf-8")
+    assert "  zz9_bag_fahb #(" in route
+    job = (tmp_path / "formal/mixed_apb_masters_route_dbg_apb.sby").read_text(encoding="utf-8")
+    assert "\nread_verilog -formal zipcpu/zz9_fapb_master.v\n" in job
+    assert "\ncopy zz9_fapb_slave bag_mixed_apb_masters_fapb_slave_dbg_apb_dbg\n" in job
+
+
+_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+_MODULE = re.compile(r"^\s*module\s+(\w+)", re.M)
+_COPY = re.compile(r"^copy\s+\S+\s+(\w+)", re.M)
+
+
+@pytest.mark.parametrize("config", [c for c in CONFIGS if not _opaque(c)], ids=lambda c: c.stem)
+def test_every_name_the_formal_generator_invents_is_reserved(tmp_path: Path, config: Path) -> None:
+    """Fails when a name site bypasses naming.formal_name: each module declared in
+    formal/<project>_* and each `copy` target in the jobs is one naming.formal_unit knows."""
+    spec = load(config)
+    project = spec.project.name
+    generate(spec, tmp_path, config.parent)
+    formal = tmp_path / "formal"
+    names = [
+        m
+        for f in sorted(formal.glob(f"{project}_*.sv"))
+        for m in _MODULE.findall(_COMMENT.sub("", f.read_text(encoding="utf-8")))
+    ]
+    names += [m for f in sorted(formal.glob("*.sby")) for m in _COPY.findall(f.read_text("utf-8"))]
+    assert names
+    assert [n for n in names if formal_unit(project, n) is None] == []

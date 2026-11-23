@@ -178,20 +178,23 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 \section{Clocks, resets and clock-domain crossings}
 
 \begin{itemize}
-\item \textbf{No timing constraints are generated.} \cmd{bag generate} writes no SDC
-  for the clock-domain crossings. You must write them yourself:
+\item \textbf{The CDC constraints are not verified by a tool.} \cmd{bag generate} writes
+  \file{constraints/<project>_cdc.sdc} and \file{.xdc} (section~\ref{sec:constraints}), but
+  BAG runs no synthesis or timing tool, so nothing proves that a tool accepts them or that
+  their names match its netlist. What remains yours:
   \begin{itemize}
-  \item a max-delay, data-path-only constraint on the gray-coded pointer and data paths
-    of each PULP \code{axi_cdc} (the \code{cdc} adapter, and the bridges from AXI);
-  \item the same on the payload paths of the four-phase handshake in the bridges from
-    AHB-Lite and APB;
-  \item a false path, or your tool's equivalent, into the first stage of each
-    \code{bag_sync}.
+  \item the files assume the fabric clocks are ports of the top wrapper
+    (\cmd{create_clock} is on \cmd{get_ports}); if your SoC derives them, constrain them in
+    your own file and drop these lines;
+  \item the register patterns assume the \code{_reg} suffix that synthesis gives a
+    register, and the pin patterns hold only while synthesis keeps the \code{bag_sync} and
+    \code{axi_cdc} boundaries; PULP asks for \cmd{set_ungroup false} for the same reason;
+  \item the paths from a reset port into \code{bag_rst_sync} are not constrained;
+  \item there is no hook for a technology synchronizer cell.
   \end{itemize}
-  The generation of these constraints is planned.
-\item \textbf{No synthesis attributes on the synchronizers.} \code{bag_sync} and
-  \code{bag_rst_sync} carry no \code{ASYNC_REG} or keep attributes, and there is no hook
-  for a technology cell. Mark them in your synthesis flow. Attributes are planned.
+  The synchronizer flops of \code{bag_sync} and \code{bag_rst_sync} carry
+  \code{ASYNC_REG} and \code{DONT_TOUCH}, one spelling for every tool; a tool that does not
+  know them ignores them.
 \item \textbf{Resets of a reset group assert together.} Domains joined by a chain of
   crossings form a reset group. All resets of a group must assert at the same moment.
   Resetting one domain of a group alone is not supported: the PULP CDC FIFOs need both
@@ -270,9 +273,20 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   were written for the pinned versions: with another version, a waiver that matches
   nothing is a note, not an error. \cmd{bag formal} notes a SymbiYosys that is not the
   pinned one.
-\item \textbf{Linux and the tools image.} The EDA flows are tested on Linux, in the tools
-  image (Ubuntu 24.04). Reading, checking and generating need no EDA tools and run on
-  Linux and Windows.
+\item \textbf{The EDA flows run in the tools image.} They are tested there, on
+  \code{linux/amd64} and \code{linux/arm64} (Ubuntu 24.04). Reading, checking,
+  generating and the collateral need no EDA tools and run on Linux, macOS and Windows.
+\item \textbf{No native EDA path on macOS.} The pinned Verilator publishes no macOS
+  binary and cannot be built from source on macOS~27 (section~\ref{sec:macos}), so the
+  flows are supported there only through the image, which is native on Apple Silicon.
+  \cmd{bag lint} and \cmd{bag formal} do in fact work with natively installed tools,
+  since slang, Verible and the OSS CAD Suite all publish macOS builds; that is not a
+  tested configuration and is not supported. Note also that without the pinned Verilator
+  on \code{PATH}, a native \cmd{bag lint} silently uses the OSS CAD Suite's own
+  Verilator, which is not the pinned one.
+\item \textbf{What is untested on arm64.} The full list (\code{eda and not deep})
+  passes on \code{linux/arm64}. The \emph{deep} formal proofs and \cmd{bag regress}
+  have not been run there.
 \item \textbf{One simulator.} \cmd{bag sim} runs Verilator with cocotb only.
   \setting{Simulator} accepts only \code{verilator} (\ruleid{VALUE-ILLEGAL}). Xcelium and
   VCS are not supported, and the bus models are not tested with them. \cmd{bag lint} runs
@@ -284,14 +298,29 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 \end{itemize}
 
 \section{Generated output}
+\label{sec:limits-output}
 
 \begin{itemize}
+\item \textbf{Two subsystems need different names that you choose.} The module prefix does
+  not rename \setting{Project name}, \setting{Top module name} or \setting{Parameter
+  package}, nor the generated interfaces and flat harness that carry them. Two subsystems
+  with the same ones declare the same units, and BAG cannot check that across runs
+  (section~\ref{sec:two-subsystems}). The joint compile of two prefixed subsystems and an
+  unmodified PULP copy is tested with slang and Verilator, against the same PULP version
+  only.
+\item \textbf{The environment's macros are shared by design.} The module prefix reaches
+  every macro that a packaged file defines, but not the macros that only the environment
+  defines and the files merely test: \code{VERILATOR}, \code{SYNTHESIS}, \code{UVM},
+  \code{QUESTA}, \code{VCS}, \code{XSIM}, \code{TARGET_GENUS}, \code{FPV_ON},
+  \code{ASSERTS_OFF}, \code{ASSERTS_OVERRIDE_ON} and \code{COMMON_CELLS_ASSERTS_OFF}.
+  The vendored assertion header declares the package \code{assert_rpt_pkg} inside
+  \code{`ifdef UVM}, and it is renamed like every other unit, so an SoC with a UVM
+  environment sees one package per subsystem. No BAG flow defines \code{UVM}, so BAG's own
+  flows never elaborate the renamed package.
 \item \textbf{Sub-wrappers have flat ports.} A sub-wrapper from the \sheet{Hierarchy}
   sheet has flat ports, also when \setting{Port style} is \code{sv-interface}. It receives
   the conditioned reset of each domain, not the raw reset.
-\item \textbf{\file{doc/tieoffs.md} is not complete.} It does not list constant alias
-  enables (\code{always}). Completing the report is planned.
-\item \textbf{Some columns are kept but not used.} BAG checks Clocks > \col{Freq (MHz)},
+\item \textbf{Some columns are kept but not used.} BAG checks
   Masters > \col{Max outstanding rd} and \col{Max outstanding wr}, Slaves >
   \col{Wait states} and \col{Error response}, and Fabrics > \col{Backing IP}, and keeps
   them in the IR, but no generated file depends on them yet.

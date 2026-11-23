@@ -1,0 +1,14 @@
+# SHA-256 of every pinned tool archive, checked before it is unpacked.
+# Refresh with: scripts/install_tools.py --write-digests --platform <key>
+# One line per asset, sha256sum format, sorted by filename.
+eee823f229f5451b420fb12d54320767b1358cbca1388e85b260a6f53fa186ec  bender-aarch64-apple-darwin.tar.xz
+6a5098954e0166938de67505006c7ebf3e4df23ce4f824104191a1e62fc68ae5  bender-aarch64-unknown-linux-gnu.tar.xz
+59a36723b056a06b266dc68d4ceedcd0aa17a1c096e8c2ea512af264ff6a13f6  bender-x86_64-unknown-linux-gnu.tar.xz
+722278c4d5e418c8792783102e27fb476ef08d46abbd948a876a79bbe2e96ed1  oss-cad-suite-darwin-arm64-20261002.tgz
+945f46bd415a46b277de37ad19504dc5764d0221906030abf1a495c2fbeb6fd6  oss-cad-suite-linux-arm64-20261002.tgz
+d5002d4af8de694302754edc1e26787ae4d731f6318d007a43223a5e4b7f0d85  oss-cad-suite-linux-x64-20261002.tgz
+d1f680e2c90b95daab3b812a6431055e3d8828fde281dbf89b72ee3eceb90dd5  slang-linux-x86_64.tar.gz
+9b5578750b4683e51053c32152ef28975d70c84fab0b065a0d96b2455c54883f  slang-macos-arm64.tar.gz
+e4a70e9920b6a24ce35045d4c9457d7d9185efc3c534a35ff55ef0262578b4e0  verible-v0.0-4296-g0f262651-linux-static-arm64.tar.gz
+8569defb891d2316067613ea00442af28a7a09d405d95b54c0c91f9942d26635  verible-v0.0-4296-g0f262651-linux-static-x86_64.tar.gz
+fc397ee02b144184a3cce6d26efb8b9d3e41528e63c95a57cd3bf37dec2b52a4  verible-v0.0-4296-g0f262651-macOS.tar.gz

@@ -2,6 +2,7 @@
 # Copyright 2026 The hdl-bag Authors
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -39,9 +40,10 @@ def golden() -> Spec:
 
 
 def test_golden_snapshot(golden: Spec) -> None:
-    # The BAG version is the only line expected to change between releases.
-    expected = SNAPSHOT.read_text(encoding="utf-8").replace(
-        "bag_version: 0.0.1", f"bag_version: {__version__}"
+    # The BAG version is the only line expected to change between releases. A pattern, not the
+    # old literal, so the test keeps biting after the next bump.
+    expected = re.sub(
+        r"bag_version: .*", f"bag_version: {__version__}", SNAPSHOT.read_text(encoding="utf-8")
     )
     assert dumps(golden) == expected
 
@@ -61,8 +63,8 @@ def test_byte_identical_across_processes(tmp_path: Path, seed: str) -> None:
         [sys.executable, "-m", "hdl_bag.cli", "ir", str(GOLDEN), "-o", str(out)],
         check=True, env=env, capture_output=True,
     )  # fmt: skip
-    assert out.read_bytes() == SNAPSHOT.read_bytes().replace(
-        b"bag_version: 0.0.1", f"bag_version: {__version__}".encode()
+    assert out.read_bytes() == re.sub(
+        rb"bag_version: .*", f"bag_version: {__version__}".encode(), SNAPSHOT.read_bytes()
     )
 
 

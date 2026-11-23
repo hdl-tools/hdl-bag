@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 from hdl_bag.checks.context import Context, Kind
 from hdl_bag.reader.model import Cell
+from hdl_bag.reader.values import is_identifier
 from hdl_bag.template import SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -76,6 +77,13 @@ def check_project(ctx: Context) -> None:
             )
     if c := get("Simulator"):
         ctx.enum(c, ["verilator"])
+    if (c := get("Module prefix")) and (v := ctx.text(c)):
+        if not is_identifier(v):
+            ctx.report("PROJ-MODULE-PREFIX", c,
+                       f"Module prefix {v!r} is not a lowercase SystemVerilog identifier")  # fmt: skip
+        elif v.endswith("_"):
+            ctx.report("PROJ-MODULE-PREFIX", c,
+                       f"Module prefix {v!r} must not end with an underscore: BAG adds one")  # fmt: skip
 
 
 def check_wrapper_settings(ctx: Context) -> None:

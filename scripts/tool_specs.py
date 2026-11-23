@@ -17,10 +17,15 @@ from pathlib import Path
 
 REPO = Path(__file__).parents[1]
 LOCK = REPO / "tools.lock"
+# Recorded SHA-256 of every pinned archive. A sidecar rather than more keys in tools.lock,
+# because the lock is passed verbatim to `docker build --build-arg` by tools-image.yml and
+# parsed as strict KEY=VALUE by tests/flows/test_lint.py; hashes there would break both.
+DIGESTS = REPO / "tools" / "tools.sha256"
 
 LINUX = "linux-x64"
+LINUX_ARM = "linux-arm64"
 DARWIN = "darwin-arm64"
-PLATFORMS = (LINUX, DARWIN)
+PLATFORMS = (LINUX, LINUX_ARM, DARWIN)
 
 # Where a Mac installs by default. Absolute and fixed, so Verilator's baked-in
 # ``configure --prefix`` is right and every machine's layout matches; the tools image
@@ -89,7 +94,9 @@ TOOLS: tuple[Tool, ...] = (
         assets={
             LINUX: Asset(f"{_SLANG}/slang-linux-x86_64.tar.gz", 0, "slang/bin"),
             DARWIN: Asset(f"{_SLANG}/slang-macos-arm64.tar.gz", 0, "slang/bin"),
+            # Nothing is published for linux-arm64, so it is built from source there.
         },
+        source="https://github.com/MikePopoloski/slang.git",
     ),
     Tool(
         name="verible",
@@ -100,6 +107,9 @@ TOOLS: tuple[Tool, ...] = (
         assets={
             LINUX: Asset(
                 f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-linux-static-x86_64.tar.gz", 1, "verible"
+            ),
+            LINUX_ARM: Asset(
+                f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-linux-static-arm64.tar.gz", 1, "verible"
             ),
             DARWIN: Asset(f"{_VERIBLE}/verible-{{VERIBLE_VERSION}}-macOS.tar.gz", 1, "verible"),
         },
@@ -112,6 +122,7 @@ TOOLS: tuple[Tool, ...] = (
         # One top-level directory holding the binary beside its licences.
         assets={
             LINUX: Asset(f"{_BENDER}/bender-x86_64-unknown-linux-gnu.tar.xz", 1, "bender/bin"),
+            LINUX_ARM: Asset(f"{_BENDER}/bender-aarch64-unknown-linux-gnu.tar.xz", 1, "bender/bin"),
             DARWIN: Asset(f"{_BENDER}/bender-aarch64-apple-darwin.tar.xz", 1, "bender/bin"),
         },
     ),
@@ -123,6 +134,9 @@ TOOLS: tuple[Tool, ...] = (
         # The archive carries its own oss-cad-suite/ directory, so nothing is stripped.
         assets={
             LINUX: Asset(f"{_SUITE}/oss-cad-suite-linux-x64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."),
+            LINUX_ARM: Asset(
+                f"{_SUITE}/oss-cad-suite-linux-arm64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."
+            ),
             DARWIN: Asset(
                 f"{_SUITE}/oss-cad-suite-darwin-arm64-{{OSS_CAD_SUITE_COMPACT}}.tgz", 0, "."
             ),
@@ -169,11 +183,47 @@ def read_lock(path: Path | None = LOCK, overrides: tuple[str, ...] = ()) -> dict
     return lock
 
 
+def asset_name(t: Tool, plat: str, lock: dict[str, str]) -> str:
+    """The filename of T's archive on PLAT, which is what a digest is recorded against."""
+    return asset_url(t, plat, lock).rsplit("/", 1)[-1]
+
+
+def read_digests(path: Path | None = DIGESTS) -> dict[str, str]:
+    """Recorded hashes as ``{filename: sha256}``, from ``<sha256>  <filename>`` lines.
+
+    The format is sha256sum's, so `sha256sum -c tools/tools.sha256` also works on a
+    directory of downloads. Missing file means nothing is recorded yet.
+    """
+    if path is None or not path.is_file():
+        return {}
+    out = {}
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2 or len(parts[0]) != 64:
+            raise ValueError(f"{path}:{n}: {line!r} is not '<sha256>  <filename>'")
+        out[parts[1]] = parts[0]
+    return out
+
+
+def format_digests(digests: dict[str, str]) -> str:
+    """DIGESTS as a sorted sha256sum-style file, so the diff of a pin bump is readable."""
+    body = "".join(f"{digests[name]}  {name}\n" for name in sorted(digests))
+    return (
+        "# SHA-256 of every pinned tool archive, checked before it is unpacked.\n"
+        "# Refresh with: scripts/install_tools.py --write-digests --platform <key>\n"
+        "# One line per asset, sha256sum format, sorted by filename.\n" + body
+    )
+
+
 def host_platform() -> str:
     """The platform key for this machine. Raises UnsupportedPlatform with what it saw."""
     system, machine = platform.system(), platform.machine()
     if system == "Linux" and machine in ("x86_64", "AMD64"):
         return LINUX
+    if system == "Linux" and machine in ("aarch64", "arm64"):
+        return LINUX_ARM
     if system == "Darwin" and machine == "arm64":
         return DARWIN
     raise UnsupportedPlatform(

@@ -21,6 +21,7 @@
   "files": [
     {
       "path": "common_cells/src/binary_to_gray.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "binary_to_gray"
       ],
@@ -28,6 +29,7 @@
     },
     {
       "path": "common_cells/src/cf_math_pkg.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "cf_math_pkg"
       ],
@@ -35,6 +37,7 @@
     },
     {
       "path": "common_cells/src/delta_counter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "delta_counter"
       ],
@@ -42,6 +45,7 @@
     },
     {
       "path": "common_cells/src/fifo_v3.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "fifo_v3"
       ],
@@ -51,6 +55,7 @@
     },
     {
       "path": "common_cells/src/gray_to_binary.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "gray_to_binary"
       ],
@@ -58,6 +63,7 @@
     },
     {
       "path": "common_cells/src/onehot_to_bin.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "onehot_to_bin"
       ],
@@ -67,6 +73,7 @@
     },
     {
       "path": "common_cells/src/rr_arb_tree.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "rr_arb_tree"
       ],
@@ -77,6 +84,7 @@
     },
     {
       "path": "common_cells/src/spill_register_flushable.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "spill_register_flushable"
       ],
@@ -86,6 +94,7 @@
     },
     {
       "path": "common_cells/src/sync.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "sync"
       ],
@@ -93,6 +102,7 @@
     },
     {
       "path": "common_cells/src/read.sv",
+      "licence": "Apache-2.0 WITH SHL-2.1",
       "defines": [
         "read"
       ],
@@ -100,6 +110,7 @@
     },
     {
       "path": "common_cells/src/addr_decode_dync.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "addr_decode_dync"
       ],
@@ -110,6 +121,7 @@
     },
     {
       "path": "common_cells/src/addr_decode.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "addr_decode"
       ],
@@ -120,6 +132,7 @@
     },
     {
       "path": "common_cells/src/counter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "counter"
       ],
@@ -129,6 +142,7 @@
     },
     {
       "path": "common_cells/src/lzc.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "lzc"
       ],
@@ -139,6 +153,7 @@
     },
     {
       "path": "common_cells/src/spill_register.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "spill_register"
       ],
@@ -148,6 +163,7 @@
     },
     {
       "path": "common_cells/src/cdc_fifo_gray.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "cdc_fifo_gray",
         "cdc_fifo_gray_dst",
@@ -164,6 +180,7 @@
     },
     {
       "path": "common_cells/src/fall_through_register.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "fall_through_register"
       ],
@@ -173,6 +190,7 @@
     },
     {
       "path": "common_cells/src/id_queue.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "id_queue"
       ],
@@ -185,6 +203,7 @@
     },
     {
       "path": "common_cells/src/stream_register.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "stream_register"
       ],
@@ -194,6 +213,7 @@
     },
     {
       "path": "axi/src/axi_pkg.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_pkg"
       ],
@@ -201,6 +221,7 @@
     },
     {
       "path": "axi/src/axi_demux_id_counters.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_demux_id_counters"
       ],
@@ -211,6 +232,7 @@
     },
     {
       "path": "axi/src/axi_intf.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "AXI_BUS",
         "AXI_BUS_ASYNC",
@@ -227,6 +249,7 @@
     },
     {
       "path": "axi/src/axi_atop_filter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_atop_filter",
         "axi_atop_filter_intf"
@@ -241,6 +264,7 @@
     },
     {
       "path": "axi/src/axi_burst_splitter_gran.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_burst_splitter_gran",
         "axi_burst_splitter_gran_ax_chan",
@@ -262,6 +286,7 @@
     },
     {
       "path": "axi/src/axi_cdc_dst.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_cdc_dst",
         "axi_cdc_dst_intf",
@@ -276,6 +301,7 @@
     },
     {
       "path": "axi/src/axi_cdc_src.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_cdc_src",
         "axi_cdc_src_intf",
@@ -290,6 +316,7 @@
     },
     {
       "path": "axi/src/axi_cut.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_cut",
         "axi_cut_intf",
@@ -304,6 +331,7 @@
     },
     {
       "path": "axi/src/axi_demux_simple.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_demux_simple"
       ],
@@ -320,6 +348,7 @@
     },
     {
       "path": "axi/src/axi_dw_downsizer.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_dw_downsizer"
       ],
@@ -337,6 +366,7 @@
     },
     {
       "path": "axi/src/axi_dw_upsizer.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_dw_upsizer"
       ],
@@ -352,6 +382,7 @@
     },
     {
       "path": "axi/src/axi_fifo.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_fifo",
         "axi_fifo_intf"
@@ -365,6 +396,7 @@
     },
     {
       "path": "axi/src/axi_id_remap.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_id_remap",
         "axi_id_remap_intf",
@@ -383,6 +415,7 @@
     },
     {
       "path": "axi/src/axi_id_prepend.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_id_prepend"
       ],
@@ -390,6 +423,7 @@
     },
     {
       "path": "axi/src/axi_lite_demux.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_demux",
         "axi_lite_demux_intf"
@@ -405,6 +439,7 @@
     },
     {
       "path": "axi/src/axi_lite_dw_converter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_dw_converter",
         "axi_lite_dw_converter_intf"
@@ -421,6 +456,7 @@
     },
     {
       "path": "axi/src/axi_lite_mux.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_mux",
         "axi_lite_mux_intf"
@@ -437,6 +473,7 @@
     },
     {
       "path": "axi/src/axi_lite_to_apb.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_to_apb",
         "axi_lite_to_apb_intf"
@@ -457,6 +494,7 @@
     },
     {
       "path": "axi/src/axi_lite_to_axi.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_to_axi",
         "axi_lite_to_axi_intf"
@@ -468,6 +506,7 @@
     },
     {
       "path": "axi/src/axi_modify_address.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_modify_address",
         "axi_modify_address_intf"
@@ -480,6 +519,7 @@
     },
     {
       "path": "axi/src/axi_mux.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_mux",
         "axi_mux_intf"
@@ -498,6 +538,7 @@
     },
     {
       "path": "axi/src/axi_serializer.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_serializer",
         "axi_serializer_intf"
@@ -514,6 +555,7 @@
     },
     {
       "path": "axi/src/axi_burst_splitter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_burst_splitter"
       ],
@@ -524,6 +566,7 @@
     },
     {
       "path": "axi/src/axi_cdc.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_cdc",
         "axi_cdc_intf",
@@ -539,6 +582,7 @@
     },
     {
       "path": "axi/src/axi_demux.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_demux",
         "axi_demux_intf"
@@ -555,6 +599,7 @@
     },
     {
       "path": "axi/src/axi_err_slv.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_err_slv"
       ],
@@ -567,6 +612,7 @@
     },
     {
       "path": "axi/src/axi_dw_converter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_dw_converter",
         "axi_dw_converter_intf"
@@ -581,6 +627,7 @@
     },
     {
       "path": "axi/src/axi_id_serialize.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_id_serialize",
         "axi_id_serialize_intf"
@@ -599,6 +646,7 @@
     },
     {
       "path": "axi/src/axi_multicut.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_multicut_intf",
         "axi_multicut",
@@ -613,6 +661,7 @@
     },
     {
       "path": "axi/src/axi_to_axi_lite.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_to_axi_lite",
         "axi_to_axi_lite_id_reflect",
@@ -629,6 +678,7 @@
     },
     {
       "path": "axi/src/axi_iw_converter.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_iw_converter",
         "axi_iw_converter_intf"
@@ -644,6 +694,7 @@
     },
     {
       "path": "axi/src/axi_lite_xbar.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_lite_xbar",
         "axi_lite_xbar_intf"
@@ -662,6 +713,7 @@
     },
     {
       "path": "axi/src/axi_xbar_unmuxed.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_xbar_unmuxed",
         "axi_xbar_unmuxed_intf"
@@ -680,6 +732,7 @@
     },
     {
       "path": "axi/src/axi_xbar.sv",
+      "licence": "SHL-0.51",
       "defines": [
         "axi_xbar",
         "axi_xbar_intf"
@@ -698,20 +751,24 @@
   "headers": [
     {
       "path": "axi/include/axi/assign.svh",
+      "licence": "SHL-0.51",
       "requires": []
     },
     {
       "path": "axi/include/axi/typedef.svh",
+      "licence": "SHL-0.51",
       "requires": [
         "axi/src/axi_pkg.sv"
       ]
     },
     {
       "path": "common_cells/include/common_cells/assertions.svh",
+      "licence": "Apache-2.0",
       "requires": []
     },
     {
       "path": "common_cells/include/common_cells/registers.svh",
+      "licence": "SHL-0.51",
       "requires": []
     }
   ]

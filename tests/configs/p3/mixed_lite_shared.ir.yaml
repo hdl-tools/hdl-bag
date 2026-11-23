@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_lite_shared
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -435,4 +436,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_lite_shared.xlsx
-  sha256: 496e07f920624d950e19c0eca774e85ba6c23249d28e37324be7f76f819384fe
+  sha256: c4c5a3b22c2a5d3d9342bcb2487e34240829afc8aecdb786517d3b8f33405106

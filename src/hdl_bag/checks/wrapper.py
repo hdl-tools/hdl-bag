@@ -3,14 +3,19 @@
 """Hierarchy (sub-wrappers, placement), Wrapper (exposed ports, name collisions) and
 User_Ports (extra ports of user-supplied fabrics, D41)."""
 
-import json
 import re
-from importlib.resources import files
 from typing import TYPE_CHECKING, Literal
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
-from hdl_bag.naming import SV_KEYWORDS, flat_signal_name
+from hdl_bag.naming import (
+    MAX_UNIT_NAME,
+    SV_KEYWORDS,
+    describe,
+    emitted_units,
+    flat_signal_name,
+    unit_name,
+)
 from hdl_bag.protocols import (
     OPTIONAL_SIGNAL_NAMES,
     OPTIONAL_SIGNALS,
@@ -227,7 +232,11 @@ def check_boundary_names(ctx: Context, result: "CheckResult") -> None:
     netlist = build_netlist(resolve(result))
     rows = {ctx.text(r["Sub-wrapper"]): r for r in ctx.raw.sub_wrappers}
     for prob in problems(netlist, plan(netlist)):
-        ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
+        if prob.setting is None:
+            ctx.report(prob.rule, rows[prob.wrapper]["Sub-wrapper"], prob.what)
+        else:
+            sheet = ctx.raw.project if prob.setting == "Project name" else ctx.raw.wrapper
+            ctx.report(prob.rule, sheet[prob.setting], prob.what)
 
 
 USER_DIRECTIONS = ("input", "output")
@@ -336,10 +345,7 @@ def _generated_modules(ctx: Context) -> set[str]:
     out = {ctx.text(r["Sub-wrapper"]) or "" for r in ctx.raw.sub_wrappers}
     out |= {top or "", package or "", f"{top}_flat"}
     out |= {f"{project}_{token}_if" for token in PROTO_TOKEN.values()}
-    index = json.loads(
-        (files("hdl_bag") / "rtl" / "vendor" / "pulp" / "index.json").read_text(encoding="utf-8")
-    )
-    out |= {unit for f in index["files"] for unit in f["defines"]}
+    out |= set(emitted_units())
     for row in ctx.raw.fabrics:
         template = ctx.text(row["Backing template"])
         manifest = ctx.registry.get(template) if template else None
@@ -406,3 +412,76 @@ def check_external_modules(ctx: Context) -> None:
             ctx.report("EXT-MODULE-SHARED", cell,
                        f"{name} and {first} share module {module} but differ in protocol, widths, "
                        "attachments or user ports")  # fmt: skip
+
+
+def _prefixed_units(ctx: Context) -> list[tuple[str, str]]:
+    """Units that take Module prefix: (base name, what it is): every unit BAG emits, PULP and
+    ZipCPU included, and the sub-wrappers. The top wrapper is not among them (it is instantiated
+    by the integrator under the name the user gave it). A sub-wrapper that shares a name with an
+    emitted unit is listed next to it, so the clash is reported."""
+    out = [(name, describe(unit)) for name, unit in emitted_units().items()]
+    # A repeated sub-wrapper name is NAME-UNIQUE's to report, not a clash with itself.
+    names = dict.fromkeys(n for r in ctx.raw.sub_wrappers[1:] if (n := ctx.text(r["Sub-wrapper"])))
+    return out + [(n, "sub-wrapper") for n in names]
+
+
+def _fixed_units(ctx: Context, prefixed: set[str]) -> dict[str, str]:
+    """Units that keep their name under a prefix: name -> what it is. Every unit BAG packages
+    takes the prefix, so these are the generated top wrapper, parameter package, flat harness and
+    interfaces, the default stub of an opaque fabric, and a user's External modules.
+
+    The generated formal units (``bag_<project>_decode`` and the rest, formal_gen) keep their
+    names too, and are deliberately not here: NAME-RESERVED owns them, which keeps it to one
+    message per mistake.
+    """
+    s = ctx.raw.wrapper
+    top = ctx.text(s["Top module name"]) if "Top module name" in s else None
+    package = ctx.text(s["Parameter package"]) if "Parameter package" in s else None
+    kept = _generated_modules(ctx) - prefixed
+    project = (
+        ctx.text(ctx.raw.project["Project name"]) if "Project name" in ctx.raw.project else None
+    )
+    out = dict.fromkeys(kept, "a module BAG generates")
+    out |= {f"{project}_{t}_if": "a generated interface" for t in PROTO_TOKEN.values()}
+    out |= {f"{top}_flat": "the generated flat harness", package or "": "the parameter package"}
+    out[top or ""] = "the top wrapper"
+    for row in ctx.raw.fabrics:
+        if (module := ctx.external_module(row)) is not None:
+            out[module] = "a user module"
+    return out
+
+
+def check_module_prefix(ctx: Context) -> None:
+    """Project > Module prefix (schema 0.7): no prefixed name may equal one that is not
+    prefixed (this is what keeps the top wrapper's name) or a SystemVerilog keyword; and a
+    warning when prefixed names grow past MAX_UNIT_NAME."""
+    cell = ctx.raw.project.get("Module prefix")
+    prefix = ctx.text(cell) if cell else None
+    if cell is None or not prefix or any(f.rule == "PROJ-MODULE-PREFIX" for f in ctx.findings):
+        return
+    units = _prefixed_units(ctx)
+    prefixed = {base for base, _ in units}
+    fixed = _fixed_units(ctx, prefixed)
+    seen: dict[str, str] = {}
+    for base, what in units:
+        name = unit_name(prefix, base)
+        if name in seen:
+            ctx.report("PROJ-PREFIX-COLLISION", cell,
+                       f"with Module prefix {prefix!r}, {what} {base} and {seen[name]} {base} "
+                       f"are both generated as {name}; rename the sub-wrapper")  # fmt: skip
+        seen.setdefault(name, what)
+        if name in fixed:
+            ctx.report("PROJ-PREFIX-COLLISION", cell,
+                       f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
+                       f"the name of {fixed[name]}; choose another Module prefix")  # fmt: skip
+        elif name in SV_KEYWORDS:
+            ctx.report("PROJ-PREFIX-COLLISION", cell,
+                       f"with Module prefix {prefix!r}, {what} {base} is generated as {name}, "
+                       "a SystemVerilog keyword; choose another Module prefix")  # fmt: skip
+    long = sorted(n for b in prefixed if len(n := unit_name(prefix, b)) > MAX_UNIT_NAME)
+    if long:
+        worst = max(long, key=len)
+        ctx.report("PROJ-NAME-LENGTH", cell,
+                   f"with Module prefix {prefix!r}, {len(long)} names BAG can generate are longer "
+                   f"than {MAX_UNIT_NAME} characters; the longest is {worst} ({len(worst)}); "
+                   "shorten the prefix")  # fmt: skip

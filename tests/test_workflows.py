@@ -155,3 +155,72 @@ def test_a_dispatch_that_selects_tests_by_name_may_run_a_deep_or_alone_one() -> 
     timeout = str(with_["timeout-minutes"])
     assert "inputs.select != '') && 340" in timeout
     assert "&& 30 ||" in timeout  # the smoke subset (pull requests, suite=smoke)
+
+
+def test_the_manuals_docker_command_names_the_image_ci_runs() -> None:
+    """The manual's container lint command (docs/manual/examples/files/docker-lint.sh) is shown
+    to the reader but never replayed, because docker cannot run inside the test. Nothing else
+    would notice it going stale, so pin its image to the one the EDA jobs pull."""
+    script = (
+        Path(__file__).parents[1] / "docs" / "manual" / "examples" / "files" / "docker-lint.sh"
+    ).read_text(encoding="utf-8")
+    image = _load("eda-shards.yml")["jobs"]["shard"]["container"]["image"]
+    assert image in script, f"docker-lint.sh should name {image}, the image the EDA jobs pull"
+
+
+def test_the_wheel_smoke_test_checks_the_licensing_docs_reached_the_install() -> None:
+    """pyproject.toml lists docs/bom.md and docs/licensing.md in `license-files`, so PEP 639
+    puts them under dist-info/licenses/docs/. Only the release build's smoke test installs the
+    wheel, so it is the one place that proves they shipped; this pins that it checks both. It
+    does not build a wheel itself."""
+    root = Path(__file__).parents[1]
+    steps = _load("release.yml")["jobs"]["build"]["steps"]
+    script = next(s["run"] for s in steps if s.get("name") == "Smoke-test the wheel")
+    for doc in ("docs/bom.md", "docs/licensing.md"):
+        assert f'{doc}"' in script, f"the smoke test should check the installed {doc}"
+        assert (root / doc).is_file(), f"{doc} is listed for the wheel but is missing"
+        assert f'"{doc}"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_a_tag_publishes_a_github_release_only_after_pypi_has_published() -> None:
+    """The release page needs the changelog section, which the build job checks first: a
+    missing section must fail before PyPI, which cannot withdraw a release."""
+    jobs = _load("release.yml")["jobs"]
+    release = jobs["github-release"]
+    assert release["needs"] == ["publish"]
+    assert release["permissions"] == {"contents": "write"}
+    assert "gh release create" in _script(release)
+    assert "scripts/release_notes.py" in _script(jobs["build"])
+
+
+def test_a_tag_pins_the_tools_image_it_was_validated_against_only_after_pypi_has_published() -> (
+    None
+):
+    """:main moves, so the release's image is the manifest behind :main re-tagged with the git
+    tag, server side (no rebuild). A tag that failed to publish must not pin an image."""
+    pin = _load("release.yml")["jobs"]["pin-tools-image"]
+    assert pin["needs"] == ["publish"]
+    assert pin["permissions"] == {"contents": "read", "packages": "write"}
+    assert any(s.get("uses", "").startswith("docker/login-action@") for s in pin["steps"])
+    script = _script(pin)
+    assert "docker buildx imagetools create" in script
+    assert '--tag "$repo:${GITHUB_REF_NAME}" "$repo:main"' in script
+
+
+def test_a_tag_is_not_pinned_to_a_tools_image_built_from_a_different_tools_lock() -> None:
+    """:main is the image of main's tools.lock and tools/Dockerfile. A tag on a commit whose two
+    files differ would be pinned to the wrong image, so the job fails before it logs in. The
+    comparison is by path, so a tag on main's tip, or on a commit that differs elsewhere, passes."""
+    steps = _load("release.yml")["jobs"]["pin-tools-image"]["steps"]
+    assert steps[0].get("uses", "").startswith("actions/checkout@")
+    guard = next(s for s in steps if "diff --quiet" in str(s.get("run", "")))
+    login = next(
+        i for i, s in enumerate(steps) if s.get("uses", "").startswith("docker/login-action@")
+    )
+    assert steps.index(guard) < login
+    script = str(guard["run"])
+    assert "git fetch --depth=1 origin main" in script
+    assert "git diff --quiet HEAD FETCH_HEAD -- tools.lock tools/Dockerfile" in script
+    assert "::error::" in script
+    assert "tools-image.yml" in script
+    assert "exit 1" in script

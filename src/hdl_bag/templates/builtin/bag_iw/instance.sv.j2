@@ -12,7 +12,7 @@
 {% set mid = [1, dn.id_width] | max %}
 
   // {{ adapter.name }}: iw {{ up.protocol }} -> {{ dn.protocol }}
-  bag_axi_iw #(
+  {{ unit("bag_axi_iw") }} #(
       .AddrWidth   ({{ aw }}),
       .SlvDataWidth({{ up.data_width }}),
       .MstDataWidth({{ dn.data_width }}),

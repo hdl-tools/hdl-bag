@@ -14,7 +14,8 @@
 // Integration notes:
 // * CDC (AsyncCdc): both domains must be reset together and leave reset in their own
 //   clocks (CLK-CDC-RESET checks the reset style). axi_cdc's gray-coded FIFOs need
-//   max-delay constraints on their pointer and data paths (no SDC is generated in v1).
+//   max-delay constraints on their pointer and data paths (bag generate writes them to
+//   constraints/<project>_cdc.sdc and .xdc).
 // * Without a FIFO or a CDC the path is combinational from the upstream request to the
 //   downstream port, and from the downstream response back upstream.
 // * One APB transfer at a time; PULP axi_lite_to_apb starts a transfer only with both

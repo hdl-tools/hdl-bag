@@ -112,7 +112,19 @@ def _spec(config: str) -> Spec:
     return load(CONFIGS / f"{config}.ir.yaml")
 
 
-def _failed(root: Path, spec: Spec, job: str, timeout: float = 1200) -> list[Finding]:
+# The sby budget of one route or decode job in a full run (#151). It was 1200 s in two
+# places -- here and the control path below -- and only the control path carried the
+# slow-job mitigation, so the mutation case running the identical job kept the old limit
+# and timed out under shard load. One constant, so they cannot drift again.
+#
+# axi_shared_fixed's route_bus measured 1027.94 s alone on a runner and over 1200 s while
+# sharing a shard with 73 tests, which is where it failed; its clean control was 983 s in
+# the nightly. The mutant is the harder problem: it has to find a counterexample, where the
+# control only has to stay clean. 1800 s is about 1.75x the alone measurement.
+ROUTE_TIMEOUT_S = 1800
+
+
+def _failed(root: Path, spec: Spec, job: str, timeout: float = ROUTE_TIMEOUT_S) -> list[Finding]:
     """JOB's (decode, or route_<unit>) findings on the output at ROOT."""
     name = spec.project.name
     return list(run_sby(root / "formal" / f"{name}_{job}.sby", root, timeout=timeout).findings)
@@ -214,7 +226,7 @@ def _deep(config: str, unit: str) -> bool:
     return route_depth(render_unit(spec, inst))[1] > ROUTE_DEPTH
 
 
-# D76: route jobs measured in CI near or past the 1200 s limit of the full runs.
+# D76: route jobs measured in CI near or past the budget of the full runs (ROUTE_TIMEOUT_S).
 SLOW_CONTROLS = {("p3/bridges_pulp", "br_per"), ("p3/axi_shared_fixed", "bus")}
 DEEP_CONTROLS = {(c, u) for c, u in ROUTE_CONTROL_CASES if _deep(c, u)} | SLOW_CONTROLS
 # CI may allow more to measure a deep test's cost (pr.yml suite=deep).
@@ -244,7 +256,7 @@ def test_the_route_job_holds_unmutated(tmp_path: Path, config: str, unit: str) -
     covers included. With the misroute targets this runs both crossbars' route jobs."""
     spec = _spec(config)
     generate(spec, tmp_path, (CONFIGS / config).parent)
-    timeout = DEEP_TIMEOUT_S if (config, unit) in DEEP_CONTROLS else 1200
+    timeout = DEEP_TIMEOUT_S if (config, unit) in DEEP_CONTROLS else ROUTE_TIMEOUT_S
     assert _failed(tmp_path, spec, f"route_{unit}", timeout) == []
 
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
 import io
+import re
 from pathlib import Path
 
 import openpyxl
@@ -69,13 +70,18 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
     0.3 -> 0.4 (the User_Ports sheet, D41: a README row and a Lists column), then 0.4 -> 0.5
     (notes, and br_ahb2main's FIFO depth, which its bridge ignores), then 0.5 -> 0.6 (D45: the
     External module column, last on Fabrics), then the Phase 6 cleanup (D103, PR 110): notes
-    and formulas that match the code."""
+    and formulas that match the code, then 0.6 -> 0.7 (issue 106: Module prefix, last on
+    Project)."""
     if isinstance(old, str) and isinstance(new, str):
         renamed = old.replace("BusGen", "BAG").replace("busgen_", "bag_")
         if renamed == new:
             return True
     if (sheet, coord) == ("Project", "B6"):
-        return (old, new) == ("0.2", "0.6")
+        return (old, new) == ("0.2", "0.7")
+    if sheet == "Project" and coord in {"A18", "B18", "C18"} and old is None:
+        return True  # 0.6 -> 0.7: the Module prefix row, last on Project
+    if (sheet, coord) == ("Project", "C5"):
+        return isinstance(new, str) and new.startswith("Names the project:")
     if sheet == "Fabrics" and coord == "U4" and old is None:
         return isinstance(new, str) and new.startswith(("External module", "bag_external only"))
     if (sheet, coord, old, new) == ("Bridges", "G7", 2, 0):
@@ -169,3 +175,16 @@ def test_the_adapter_instances_formulas_read_the_naming_setting(tmp_path: Path) 
     formulas = [c.value for row in wb["Masters"].iter_rows() for c in row
                 if isinstance(c.value, str) and "SUBSTITUTE" in c.value]  # fmt: skip
     assert formulas and all(f"Wrapper!$B${WRAPPER_NAMING_ROW}" in f for f in formulas)
+
+
+def test_the_schema_changelog_documents_the_current_schema_version() -> None:
+    """AGENTS.md: a schema change bumps SCHEMA_VERSION and updates docs/schema-changelog.md.
+    Nothing held the two together: no test or script read that file, so a bump could ship with
+    the changelog describing only the version before it, and `bag check` points users at it."""
+    changelog = Path(__file__).parents[2] / "docs" / "schema-changelog.md"
+    headings = re.findall(r"^## (\S+)", changelog.read_text(encoding="utf-8"), re.MULTILINE)
+    assert headings, f"{changelog} has no '## <version>' section"
+    assert headings[0] == SCHEMA_VERSION, (
+        f"the newest section of docs/schema-changelog.md is {headings[0]}, but SCHEMA_VERSION "
+        f"is {SCHEMA_VERSION}: add that section, newest first."
+    )

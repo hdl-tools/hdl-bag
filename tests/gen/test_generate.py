@@ -126,6 +126,49 @@ def test_vendored_files_come_with_their_licence(tmp_path: Path) -> None:
     assert not any(p.name == "LICENSE" for p in sources(out))
 
 
+_LICENCES = "rtl/vendor/licences"
+_ASSERTIONS = "rtl/vendor/pulp/common_cells/include/common_cells/assertions.svh"
+_READ = "rtl/vendor/pulp/common_cells/src/read.sv"
+
+
+@pytest.mark.parametrize(
+    ("config", "holds", "texts"),
+    [
+        ("golden/demo_ss.ir.yaml", [_ASSERTIONS, _READ], ["Apache-2.0.txt", "SHL-2.1.txt"]),
+        ("configs/p3/axi_xbar_pow2.ir.yaml", [_ASSERTIONS], ["Apache-2.0.txt"]),
+        ("configs/p2/apb4_min.ir.yaml", [], []),
+    ],
+)
+def test_a_vendored_file_under_another_licence_brings_that_licence_text(
+    tmp_path: Path, config: str, holds: list[str], texts: list[str]
+) -> None:
+    """assertions.svh is Apache-2.0 and read.sv is Apache-2.0 WITH SHL-2.1 (a wraparound, so it
+    needs both texts), but the package LICENSE beside them is Solderpad 0.51. A design ships the
+    texts of exactly the licences of the files it holds, and they are not sources to compile."""
+    from importlib.resources import files
+
+    ir = TESTS / config
+    out = generate(load(ir), tmp_path, ir.parent)
+    for rel in holds:  # the precondition, so the test cannot pass vacuously
+        assert rel in out.files, rel
+    assert not ({_ASSERTIONS, _READ} - set(holds)) & set(out.files)
+    assert sorted(f for f in out.files if f.startswith(f"{_LICENCES}/")) == [
+        f"{_LICENCES}/{t}" for t in texts
+    ]
+    for t in texts:
+        rel = f"{_LICENCES}/{t}"
+        assert (tmp_path / rel).read_bytes() == (files("hdl_bag") / rel).read_bytes()
+    assert not any(p.parent.as_posix() == _LICENCES for p in sources(out))
+
+
+@pytest.mark.parametrize("config", ["golden/demo_ss.ir.yaml", "configs/p3/axi_xbar_pow2.ir.yaml"])
+def test_derived_files_come_with_the_axi_licence(tmp_path: Path, config: str) -> None:
+    ir = TESTS / config
+    out = generate(load(ir), tmp_path, ir.parent)
+    if any(f.startswith("rtl/vendor/derived/") for f in out.files):
+        assert "rtl/vendor/pulp/axi/LICENSE" in out.files
+
+
 @pytest.fixture
 def no_apb_rtl(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every built-in template has RTL since Phase 3 PR 7; mark bag_apb_mux as having none
@@ -278,3 +321,82 @@ def test_generate_over_a_corrupt_manifest_writes_a_fresh_one(tmp_path: Path) -> 
     (out / MANIFEST).write_text("{not json", encoding="utf-8")
     generate(load(CONFIG), out, CONFIG.parent)
     assert load_outputs(out).top
+
+
+def _manifest_with(root: Path, extra: dict[str, str]) -> None:
+    path = root / MANIFEST
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["files"] = {**data["files"], **extra}
+    path.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+
+
+def test_generate_removes_a_file_the_previous_run_wrote_and_this_one_did_not(
+    tmp_path: Path,
+) -> None:
+    """The pruning this guards: a file listed by the last run and not written by this one goes."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    stale = out / "rtl" / "stale.sv"
+    stale.write_text("// from a previous run\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not stale.exists()
+
+
+@pytest.mark.parametrize("escape", ["../victim.txt", "rtl/../../victim.txt"])
+def test_generate_does_not_delete_a_file_outside_the_output_directory(
+    tmp_path: Path, escape: str
+) -> None:
+    """The names pruned come from a manifest in a directory the user may not have written, and
+    pruning deletes whatever they name. An output tree from someone else took a file with it."""
+    out = tmp_path / "out"
+    victim = tmp_path / "victim.txt"
+    generate(load(CONFIG), out, CONFIG.parent)
+    victim.write_text("the user's own work\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {escape: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert victim.read_text(encoding="utf-8") == "the user's own work\n"
+
+
+@pytest.mark.parametrize("junk", ["a\u0000b", "", ".", "rtl", "rtl/"])
+def test_a_manifest_name_that_is_not_a_file_to_delete_is_skipped(tmp_path: Path, junk: str) -> None:
+    """The prune loop promises a name it cannot use is skipped "rather than stopping a generate
+    that is otherwise fine". A NUL makes resolve() raise ValueError; the empty string, "." and a
+    directory each name something unlink refuses, and missing_ok covers only FileNotFoundError.
+    Every one of these made a generate that was otherwise fine exit 1."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    _manifest_with(out, {junk: "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert (out / "rtl").is_dir()
+
+
+def test_an_absolute_manifest_name_inside_the_output_directory_is_skipped(tmp_path: Path) -> None:
+    """What the absolute-path guard is for. An absolute name landing outside the root is already
+    refused by the containment test, but one landing inside it passes, so without the guard this
+    file would be deleted -- and BAG never writes an absolute name into a manifest."""
+    out = tmp_path / "out"
+    generate(load(CONFIG), out, CONFIG.parent)
+    keep = out / "keep.txt"
+    keep.write_text("not BAG's to delete\n", encoding="utf-8", newline="\n")
+    _manifest_with(out, {str(keep): "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert keep.read_text(encoding="utf-8") == "not BAG's to delete\n"
+
+
+def test_a_symlink_the_previous_run_listed_is_removed_but_its_target_is_not(
+    tmp_path: Path,
+) -> None:
+    """unlink removes a link, never what it points at, so a listed symlink inside the root is
+    safe to prune and was pruned before this containment check. Judging it by resolve() sent it
+    outside the root and skipped it, leaking it forever: the new manifest no longer lists it."""
+    out = tmp_path / "out"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("the user's own file\n", encoding="utf-8", newline="\n")
+    generate(load(CONFIG), out, CONFIG.parent)
+    link = out / "rtl" / "stale.sv"
+    link.symlink_to(outside)
+    _manifest_with(out, {"rtl/stale.sv": "x"})
+    generate(load(CONFIG), out, CONFIG.parent)
+    assert not link.is_symlink(), "the link was left behind"
+    assert outside.read_text(encoding="utf-8") == "the user's own file\n"

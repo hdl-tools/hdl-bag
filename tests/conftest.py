@@ -3,7 +3,9 @@
 """Shared test setup: the cocotb helpers in tests/rtl (BFMs, runner) and the config DSL in
 tests/configs, the mutation catalogue and controls in tests/mutation, and the formal tests in
 tests/flows are importable (the formal corpus reads which jobs those run), and so are the
-manual's transcript replayer and the broken-workbook cases it tabulates."""
+manual's transcript replayer and the broken-workbook cases it tabulates. The hierarchy oracle in
+tests/gen is importable too, so a test that imports it passes when run on its own and not only
+when pytest has collected a file from that directory first."""
 
 import sys
 from pathlib import Path
@@ -14,6 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent / "mutation"))
 sys.path.insert(0, str(Path(__file__).parent / "flows"))
 sys.path.insert(0, str(Path(__file__).parent / "manual"))  # the transcript replayer
 sys.path.insert(0, str(Path(__file__).parent / "checks"))  # the broken-workbook cases
+sys.path.insert(0, str(Path(__file__).parent / "examples"))  # the example workbooks' builder
+sys.path.insert(0, str(Path(__file__).parent / "golden"))  # the golden workbook's check columns
+sys.path.insert(0, str(Path(__file__).parent / "gen"))  # the hierarchy oracle
 sys.path.insert(0, str(Path(__file__).parent))
 
 

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: mixed_cdc_chain
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -481,4 +482,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: mixed_cdc_chain.xlsx
-  sha256: c68c65606c2aa7bd474422da1f18e292a715016555146b6792ad59b8feff2247
+  sha256: 25cf4084c94e5a3d17e88a708cfa3e09e46ec0e5ac20c0be5159a327d6f02cc3

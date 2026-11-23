@@ -42,6 +42,14 @@ on:
         description: Run the formal corpus's protocol bmc tasks on this SBY engine (D84; as generated if empty)
         type: string
         default: ""
+      runner:
+        description: The runner to shard on; ubuntu-24.04-arm runs the arm64 tools image
+        type: string
+        default: ubuntu-24.04
+      arch:
+        description: A short label for the runner's architecture, used in cache keys and artifact names
+        type: string
+        default: amd64
 
 permissions:
   contents: read
@@ -58,7 +66,9 @@ jobs:
 
   shard:
     needs: groups
-    runs-on: ubuntu-24.04
+    # The tools image is a multi-arch manifest, so the same tag resolves to the runner's
+    # architecture with no change here.
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     strategy:
       fail-fast: false
@@ -87,10 +97,10 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: /tmp/ccache
-          key: ccache-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
+          key: ccache-${{ inputs.arch }}-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
           restore-keys: |
-            ccache-v2-${{ matrix.group }}-
-            ccache-v2-
+            ccache-${{ inputs.arch }}-v2-${{ matrix.group }}-
+            ccache-${{ inputs.arch }}-v2-
       - run: uv sync --locked
       - run: ccache --zero-stats
       - run: >-
@@ -105,7 +115,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: formal-traces-${{ matrix.group }}
+          name: formal-traces-${{ inputs.arch }}-${{ matrix.group }}
           path: |
             /tmp/pytest-of-*/**/formal/*.sv
             /tmp/pytest-of-*/**/formal/*.sby
@@ -117,4 +127,4 @@ jobs:
         if: success() && inputs.save-cache
         with:
           path: /tmp/ccache
-          key: ccache-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}
+          key: ccache-${{ inputs.arch }}-v2-${{ matrix.group }}-${{ github.sha }}-${{ github.run_attempt }}

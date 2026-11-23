@@ -10,35 +10,43 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Pre-alpha. Phases 1 to 4 of 6 are done; Phase 5 is under way.
+Version 1.0.0, not yet tagged or published. Phases 1 to 4 and 6 of 7 are done. Phase 5's gate
+and report are outstanding (its nightly runs are not yet green), and Phase 7 is the release
+itself.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 92 validation checks | The nightly regression workflow, its shrinker and reports (Phase 5) |
-| Canonical YAML IR, byte-identical across runs | CDC constraints (SDC) and v1.0 release (Phase 6) |
+| Spec workbook template, reader and 97 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
+| Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 7) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
+| Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
+| Example workbooks in [examples](examples), each `bag check` clean and run end to end in CI | |
 | AXI4 and AXI4-Lite crossbars and shared buses (backed by [PULP axi](docs/third-party.md)), AHB-Lite single-layer bus, APB3/APB4 decoder-mux | |
 | Bridges: axi2apb, axi2ahb, ahb2axi, ahb2apb, apb2axi, apb2ahb, axi2axil | |
 | Per-port adapters: protocol, width, CDC, ID width, FIFO, register slice | |
 | User-supplied fabrics (`bag_external`), with declared extra ports | |
 | Wrapper in flat or SV-interface port style, nested sub-wrappers | |
 | C header, memory-map doc (Markdown and HTML), port map, tie-off report | |
+| CDC timing constraints (`constraints/<project>_cdc.sdc` and `.xdc`) and `ASYNC_REG` on the synchronizers; no tool checks them | |
 | Lint (slang, Verilator, Verible) and Verilator compile flows | |
 | Generated cocotb tests per config: byte-level routing, errors, arbitration, bursts, back-pressure, handshake orderings, reset during traffic, clock-ratio sweeps | |
 | Functional coverage report from `bag sim`, and a reset-sequence document per design | |
 | `bag formal`: SymbiYosys jobs per design: decode (a proof), quiet-in-reset (a proof), port protocol on every AXI4, AXI4-Lite, AHB-Lite and APB port, and routing per fabric and bridge (bounded) | |
+| Module prefix: every unit, macro and header name BAG emits, so two subsystems and an unmodified PULP copy compile together (slang and Verilator) | |
 | User manual (LaTeX, [docs/manual](docs/manual)) | |
 
 The user manual is LaTeX in [docs/manual](docs/manual) (`latexmk -pdf hdl-bag.tex` there);
 the `manual` workflow builds the PDF as the artifact `hdl-bag-manual`.
 
-Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md).
+Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.md), [Phase 3](docs/phase-3-report.md), [Phase 4](docs/phase-4-report.md), [Phase 6](docs/phase-6-report.md).
 
 ## Quick start
 
 ```sh
 # Until v1.0 is on PyPI, install from the repository:
 pip install git+https://github.com/hdl-tools/hdl-bag.git
+# or, from a checkout (needs uv), and put `uv run` in front of every `bag` below:
+uv sync
 
 bag template --sample -o spec.xlsx      # the demo_ss sample and its header.txt (omit --sample for a blank one)
 bag check spec.xlsx                     # every check; exit 1 on any error
@@ -76,8 +84,10 @@ Generated output (under the output directory):
 ```
 rtl/pkg/<package>.sv     parameter package (widths, decode tables)
 rtl/<top>.sv             top wrapper, plus one file per sub-wrapper
-rtl/inhouse/*.sv         the in-house IP the design uses
-rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files
+rtl/inhouse/*.sv         the in-house IP the design uses (names carry Module prefix, if set)
+rtl/vendor/**            the vendored PULP files the design uses, with their LICENSE files and
+                         the texts of any other licence they are under
+                         (unit, macro and file names, headers included, carry Module prefix, if set)
 rtl/ext/<module>.sv      stub of a user-supplied fabric: replace it with your RTL
 <project>.f              file list in compile order
 sw/<project>_memmap.h    C header
@@ -91,17 +101,45 @@ tests/<top>_ready_shim.sv  drives each AXI READY from its VALID, for bag sim --r
 formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job (prove and cover)
 formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (ZipCPU) and their job
 formal/bag_step.v, vendor/  the formal environment's step registers; the ZipCPU checkers, with LICENSE
+                         (these file names carry Module prefix, if set)
 sim/coverage.md          written by bag sim: what the tests exercised (paths, responses, secure, bursts); report only
 ```
 
+## Examples
+
+`examples/` in the repository holds three workbooks, each `bag check` clean: `apb_min.xlsx` (one
+APB4 master, three slaves), `mcu_ahb.xlsx` (an AHB-Lite microcontroller bus with an APB bus behind
+a bridge) and `soc_4x8.xlsx` (an AXI4 crossbar with 4 masters and 8 slaves). Try
+`bag flow examples/soc_4x8.xlsx -o out/`. See `examples/README.md`.
+
 ## Requirements
 
-- Python 3.11 or newer (tested on Linux and Windows).
-- For `bag lint` and `bag flow`: Verilator, slang and Verible; for `bag formal`,
-  SymbiYosys and Yosys with the yosys-slang plugin (OSS CAD Suite). The pinned
+- Python 3.11 or newer. Reading, checking, generating and the collateral need nothing
+  else, on Linux, macOS and Windows.
+- For `bag lint`, `bag flow`, `bag sim` and `bag formal`: Verilator, slang and Verible,
+  plus SymbiYosys and Yosys with the yosys-slang plugin (OSS CAD Suite). The pinned
   versions are in [tools.lock](tools.lock), and the container image
-  `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile))
-  has all of them. Reading, checking and generating need no EDA tools.
+  `ghcr.io/hdl-tools/hdl-bag-tools` ([tools/Dockerfile](tools/Dockerfile)) has all of
+  them for `linux/amd64` and `linux/arm64`.
+- **To lint (or sim, or formal) in that image**, run it from your checkout, after
+  `bag generate` has written `out/`. A spec or output directory outside the checkout needs
+  its own `-v` mount:
+
+  ```sh
+  docker run --rm \
+    -v "$PWD:/work" \
+    -v hdl-bag-venv:/venv \
+    -e UV_PROJECT_ENVIRONMENT=/venv \
+    -e UV_LINK_MODE=copy \
+    -w /work \
+    ghcr.io/hdl-tools/hdl-bag-tools:main \
+    sh -c 'uv run bag lint out/'
+  ```
+
+- **On macOS the EDA flows run in that image**, which is native on Apple Silicon. The
+  pinned Verilator cannot be built on macOS itself, so there is no supported native EDA
+  path there; `scripts/install_tools.py` installs the pinned tools on a Linux or macOS
+  host and says so if it cannot.
 
 ## Development
 

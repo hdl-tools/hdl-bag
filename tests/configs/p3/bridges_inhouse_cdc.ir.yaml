@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: bridges_inhouse_cdc
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -709,4 +710,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: bridges_inhouse_cdc.xlsx
-  sha256: cc3fa49e6c2290455f543256ce092fcfe0924c1b957bb1ce963fbfeaf9d955c1
+  sha256: 34c759e7b2b86134ceb98ad088d7544e22e2cd7051ed2e9d27905c52dfacd97f

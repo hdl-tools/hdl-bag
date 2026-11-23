@@ -13,7 +13,7 @@
 {% set offset = bridge_offset(bridge.name) %}
 
   // {{ bridge.name }}: {{ up.protocol }} -> {{ dn.protocol }}, window {{ '%#x' | format(bridge.window_base) }} (system address)
-  bag_axi2ahb #(
+  {{ unit("bag_axi2ahb") }} #(
       .UpAddrWidth  ({{ up.addr_width }}),
       .DownAddrWidth({{ dn.addr_width }}),
       .UpDataWidth  ({{ up.data_width }}),

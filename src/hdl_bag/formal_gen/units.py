@@ -41,10 +41,11 @@ from hdl_bag.formal_gen.decode import (
 )
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.package import CUT_STAGES
+from hdl_bag.gen.prefix import unit
 from hdl_bag.gen.render import GenerateError, lit
 from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, reset_net
 from hdl_bag.ir.model import Fabric, Spec
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
 from hdl_bag.tests_gen.route_model import window
 
@@ -284,7 +285,7 @@ class _Harness:
             conns += [(s, "1'b0" if s in ids and not bus.id_width else self.v(bus, s))
                       for s in sigs]  # fmt: skip
             conns += [(f"{e}_o", "") for e in ("multi_write", "w_first", "same_id", "full")]
-            head = (f"  bag_faxi4 #(.DesignIsSlave({int(a.unit_is_slave)}), "
+            head = (f"  {unit(self.spec, 'bag_faxi4')} #(.DesignIsSlave({int(a.unit_is_slave)}), "
                     f".AddrWidth({bus.addr_width}), .DataWidth({bus.data_width}), "
                     f".IdWidth({idw})) u_chk_{bus.name} (")  # fmt: skip
         elif p is Protocol.AHB_LITE:
@@ -298,7 +299,7 @@ class _Harness:
             conns += [("hreadyout", out), ("hresp", self.v(bus, "hresp")),
                       ("hrdata", self.v(bus, "hrdata"))]  # fmt: skip
             conns += [(f"{e}_o", "") for e in ("write_done", "read_done", "wait", "error", "seq")]
-            head = (f"  bag_fahb #(.DesignIsSlave({int(a.unit_is_slave)}), "
+            head = (f"  {unit(self.spec, 'bag_fahb')} #(.DesignIsSlave({int(a.unit_is_slave)}), "
                     f".AddrWidth({bus.addr_width}), .DataWidth({bus.data_width})) "
                     f"u_chk_{bus.name} (")  # fmt: skip
             if a.unit_is_slave and "hreadyout" in bus.signals:
@@ -320,7 +321,7 @@ class _Harness:
                                  f"{fabric}_{bus.name}_w_quiet: assert (!{wvalid});")  # fmt: skip
                 return
             vendor = _CHECKER[(family, not a.unit_is_slave)]
-            module = f"bag_{self.spec.project.name}_{vendor}_{self.inst.name}_{bus.name}"
+            module = formal_name(self.spec.project.name, vendor, self.inst.name, bus.name)
             self.zipcpu.append(
                 ZipChecker(vendor, module, zipcpu_params(bus, family, self.slave_can(a)))
             )
@@ -984,7 +985,7 @@ def render_unit(spec: Spec, inst: Instance, covers: Sequence["Checker"] = ()) ->
                 label, expr = line.removeprefix("  always_comb ").split(": cover ", 1)
                 h.body.append(f"  always @(posedge {h.domains()[d]}) {label}: cover "
                               f"(bag_live_{d} && {expr.removesuffix(';')});")  # fmt: skip
-    module = f"bag_{spec.project.name}_unit_{inst.name}"
+    module = formal_name(spec.project.name, "unit", inst.name)
     decl = _decls(ports)
     lines = [f"module {module} (", decl, ");", *scope.decls, *scope.assigns, text, *h.body,
              "endmodule", ""]  # fmt: skip

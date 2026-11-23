@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: apb4_min
+  module_prefix: null
   revision: p2
   author: BAG
   sv_std: IEEE 1800-2017
@@ -167,6 +168,6 @@ wrapper:
       exposed: true
       prefix: null
 provenance:
-  bag_version: 0.0.1
+  bag_version: 1.0.0
   source: apb4_min.xlsx
   sha256: 932113710f808ff8b87788a86f50e5e2e83d53ecfcf082de8352385e91f9f27d

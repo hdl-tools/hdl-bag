@@ -2,6 +2,155 @@
 # Copyright 2026 The hdl-bag Authors
 """Names shared by the checks and the generators, so both always agree."""
 
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from functools import cache
+from importlib.resources import files
+from types import MappingProxyType
+from typing import Final, Literal
+
+# Longest generated unit name that PROJ-NAME-LENGTH accepts without a warning.
+MAX_UNIT_NAME: Final = 64
+
+
+_DECL = re.compile(
+    r"^\s*(module|macromodule|interface|package)\s+(?:(?:static|automatic)\s+)?(?!class\b)(\w+)",
+    re.MULTILINE,
+)
+
+UnitKind = Literal["module", "interface", "package"]
+UnitOrigin = Literal["pulp", "inhouse", "derived", "formal", "zipcpu"]
+
+# (origin, package directory) of each source scanned on disk; the PULP tree comes from the index.
+_ORIGINS: Final[tuple[tuple[UnitOrigin, str], ...]] = (
+    ("inhouse", "rtl/inhouse"),
+    ("derived", "rtl/vendor/derived"),
+    ("formal", "formal"),
+    ("zipcpu", "formal/vendor/zipcpu"),
+)
+
+
+@dataclass(frozen=True)
+class Unit:
+    """One design unit BAG can copy into an output: where it lives and what it is."""
+
+    name: str
+    path: str  # package-relative, as importlib.resources takes it; one file may hold several
+    kind: UnitKind
+    origin: UnitOrigin
+
+
+def describe(unit: Unit) -> str:
+    """The unit as a noun phrase without an article, e.g. ``vendored PULP module``."""
+    return {
+        "pulp": f"vendored PULP {unit.kind}",
+        "inhouse": f"in-house {unit.kind}",
+        "derived": f"{unit.kind} BAG derives from PULP",
+        "formal": f"BAG formal checker {unit.kind}",
+        "zipcpu": f"vendored ZipCPU {unit.kind}",
+    }[unit.origin]
+
+
+def label(unit: Unit) -> str:
+    """The unit as a phrase for messages, e.g. ``a vendored PULP module``."""
+    noun = describe(unit)
+    return f"{'an' if noun[0] in 'aeiou' else 'a'} {noun}"
+
+
+def _declared(text: str) -> list[tuple[UnitKind, str]]:
+    return [
+        ("module" if kind == "macromodule" else kind, name) for kind, name in _DECL.findall(text)
+    ]
+
+
+@cache
+def emitted_units() -> Mapping[str, Unit]:
+    """Every design unit BAG can copy into an output, by name, in sorted order.
+
+    Static: the per-design units (wrappers, interfaces, the package) are not here. Interfaces and
+    packages share the design-unit namespace with modules, so each carries its kind. The vendored
+    headers are scanned too: the one unit they declare, ``assert_rpt_pkg``, sits inside
+    ``ifdef UVM``, which BAG's own flows never define, but an SoC with a UVM bench does, and two
+    subsystems would then declare one package. It is in the inventory with its header's path, so
+    it is reserved and renamed like every other unit.
+    """
+    from hdl_bag.templates.sources import VENDOR, vendored_includes, vendored_units
+
+    out: dict[str, Unit] = {}
+    vendored = vendored_units()
+    for path in sorted(set(vendored.values())):
+        text = (files("hdl_bag") / VENDOR / path).read_text(encoding="utf-8")
+        kinds = {name: kind for kind, name in _declared(text)}
+        for unit in sorted(u for u, p in vendored.items() if p == path):
+            out[unit] = Unit(unit, f"{VENDOR}/{path}", kinds.get(unit, "module"), "pulp")
+    for path in sorted(vendored_includes().values()):
+        for kind, name in _declared((files("hdl_bag") / path).read_text(encoding="utf-8")):
+            out[name] = Unit(name, path, kind, "pulp")
+    for origin, sub in _ORIGINS:
+        directory = files("hdl_bag") / sub
+        for f in sorted(directory.iterdir(), key=lambda t: t.name):
+            if f.name.endswith((".sv", ".v")):
+                for kind, name in _declared(f.read_text(encoding="utf-8")):
+                    out[name] = Unit(name, f"{sub}/{f.name}", kind, origin)
+    return MappingProxyType(dict(sorted(out.items())))
+
+
+_FORMAL_EXACT: Final = {
+    "decode": "the formal decode harness",
+    "reset_props": "the formal reset property module",
+    "protocol_props": "the formal protocol property module",
+}
+
+
+@cache
+def _formal_families() -> Mapping[str, str]:
+    """Stems of the formal names that carry instance and bus names after them."""
+    fams = {"unit": "a formal unit harness"}
+    fams |= {
+        n: "a formal protocol checker copy"
+        for n, u in emitted_units().items()
+        if u.origin == "zipcpu"
+    }
+    return MappingProxyType(fams)
+
+
+def formal_name(project: str, stem: str, *rest: str) -> str:
+    """The name of a generated formal unit: ``bag_<project>_<stem>[_<rest>...]``.
+
+    The one place these names are built, so ``formal_unit`` can recognise every one of them.
+    """
+    if stem in _FORMAL_EXACT and not rest:
+        return "_".join(("bag", project, stem))
+    if stem in _formal_families() and rest:
+        return "_".join(("bag", project, stem, *rest))
+    raise ValueError(f"{stem!r} with {len(rest)} trailing parts is not a formal unit name")
+
+
+def formal_unit(project: str, name: str) -> str | None:
+    """What NAME is, if it is a formal unit name generated for PROJECT, else None.
+
+    Only the formal stems are reserved, not all of ``bag_<project>_*``: a project named ``axi``
+    keeps ``bag_axi_xbar``.
+    """
+    head = f"bag_{project}_"
+    if not name.startswith(head):
+        return None
+    stem = name.removeprefix(head)
+    if stem in _FORMAL_EXACT:
+        return _FORMAL_EXACT[stem]
+    return next((w for f, w in _formal_families().items() if stem.startswith(f"{f}_")), None)
+
+
+def unit_name(prefix: str | None, name: str) -> str:
+    """NAME with Project > Module prefix in front, joined by an underscore; blank means NAME."""
+    return f"{prefix}_{name}" if prefix else name
+
+
+def emitted_name(prefix: str | None, unit: Unit) -> str:
+    """The name the generator writes for UNIT under PREFIX."""
+    return unit_name(prefix, unit.name)
+
 
 def flat_signal_name(pattern: str, port: str, proto: str, signal: str, prefix: str | None) -> str:
     """Wrapper port name of SIGNAL on PORT (Wrapper > Signal naming pattern).

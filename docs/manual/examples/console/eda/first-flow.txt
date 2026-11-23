@@ -2,7 +2,7 @@ $ cp files/apb4_min.ir.yaml apb4_min.ir.yaml
 $ cp files/header.txt header.txt
 $ bag flow apb4_min.ir.yaml -o out --formal
 apb4_min.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
-wrote 27 file(s) to out (top apb4_min_top)
+wrote 29 file(s) to out (top apb4_min_top)
 slang: rtl/pkg/apb4_min_pkg.sv:14: warning: unused package parameter 'ApbAddrWidth' [unused-package-parameter] (waived)
 slang: rtl/pkg/apb4_min_pkg.sv:15: warning: unused package parameter 'ApbNoMasters' [unused-package-parameter] (waived)
 slang: rtl/pkg/apb4_min_pkg.sv:30: warning: unused package parameter 'ApbPriority' [unused-package-parameter] (waived)

@@ -23,6 +23,7 @@ module bag_rst_sync #(
   // The last stage is both flopped data and the domain's asynchronous reset: that is
   // what a reset synchronizer is.
   /* verilator lint_off SYNCASYNCNET */
+  (* ASYNC_REG = "TRUE", DONT_TOUCH = "TRUE" *)
   logic [Stages-1:0] q;
   /* verilator lint_on SYNCASYNCNET */
 

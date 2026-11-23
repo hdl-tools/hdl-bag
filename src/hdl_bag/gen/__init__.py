@@ -6,25 +6,39 @@ Output layout (relative to the output directory)::
 
     rtl/pkg/<package>.sv       parameter package
     rtl/<top>.sv               wrapper (flat or sv-interface ports)
-    rtl/<sub-wrapper>.sv       one per Hierarchy sub-wrapper (flat boundary ports)
+    rtl/<prefix>_<sub-wrapper>.sv  one per Hierarchy sub-wrapper (flat boundary ports)
     rtl/<top>_flat.sv          sv-interface style only: flat harness, the lint/compile top
     rtl/<project>_<proto>_if.sv  sv-interface style only: one interface per protocol
-    rtl/inhouse/*.sv           copies of the in-house IP the design uses
-    rtl/vendor/pulp/...        copies of the vendored PULP files the design uses
+    rtl/inhouse/<prefix>_*.sv  copies of the in-house IP the design uses, with their modules
+                               renamed
+    rtl/vendor/derived/<prefix>_*.sv  the modules BAG derives from PULP, likewise
+    rtl/vendor/pulp/...        copies of the vendored PULP files the design uses, with their units
+                               and macros renamed; the headers are ``<prefix>_*.svh``
     rtl/vendor/pulp/<pkg>/LICENSE  the licence of each vendored package those files are from
+    rtl/vendor/licences/<id>.txt   the text of any other licence a vendored file is under
     <project>.f                ``+incdir+<dir>`` lines, then the file list in compile order
     sw/<project>_memmap.h      C header: <SLAVE>_<REGION>_BASE / _SIZE (Generate C header)
     doc/memmap.md, .html       memory-map document (Generate memory-map doc)
     doc/port_map.md            per-fabric port map (Generate memory-map doc)
     doc/reset.md               reset sequence: domains, crossings, reset groups (D51)
+    constraints/<project>_cdc.sdc, .xdc  clocks and CDC timing exceptions, one per crossing
+                               (hdl_bag.gen.constraints); only with RTL, they name its instances
     tests/<project>_tests.py   cocotb tests for this config (Generate cocotb unit tests)
     tests/<project>.ir.yaml    the IR those tests read
     tests/<top>_ready_shim.sv  drives AXI READY from VALID, for `bag sim --ready-shim` (D38)
     formal/<project>_reset.sv, .sby  quiet-in-reset properties and their SymbiYosys job
                                (Generate formal; see hdl_bag.formal_gen)
     formal/<project>_protocol.sv, .sby  AXI4-Lite and APB port-protocol checkers (D60)
-    formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE
+    formal/vendor/zipcpu/      the ZipCPU checkers they use, with their LICENSE and SOURCE.md
+    formal/<prefix>_bag_step.v, <prefix>_bag_faxi4.sv, <prefix>_bag_fahb.sv  BAG's own checkers
     bag_outputs.json           every file written (with sha256), the top and the file list
+
+With a blank Project > Module prefix the ``<prefix>_`` parts are absent and the copies are
+byte for byte the packaged files. The top wrapper, the parameter package, the flat harness, the
+generated interfaces and the generated formal files keep their names; every unit BAG packages,
+vendored PULP and ZipCPU included, takes the prefix, and so do the macros the packaged files
+define and the file names of the four vendored headers, with the include lines that name them
+(``gen.prefix``). Include directories keep their names.
 """
 
 import hashlib
@@ -41,16 +55,18 @@ from hdl_bag.gen.collateral import (
     reset_md,
     tieoffs_md,
 )
+from hdl_bag.gen.constraints import SDC, XDC, cdc_constraints, tcl_banner
 from hdl_bag.gen.external import opaque_declarations, opaque_module, render_stub
 from hdl_bag.gen.netlist import build_netlist
 from hdl_bag.gen.package import package
+from hdl_bag.gen.prefix import out_path, source_note, transform
 from hdl_bag.gen.render import GenerateError, header
 from hdl_bag.gen.wrapper import TieOff, render_harness, render_interface, render_modules
 from hdl_bag.ir import dumps
 from hdl_bag.ir.model import Spec
 from hdl_bag.protocols import PROTO_TOKEN
 from hdl_bag.templates import builtin_registry
-from hdl_bag.templates.sources import VENDOR, resolve_sources
+from hdl_bag.templates.sources import VENDOR, licence_texts, resolve_sources
 
 # In-house cells the wrapper itself may instantiate (reset conditioning).
 _WRAPPER_CELLS = ("rtl/inhouse/bag_rst_sync.sv",)
@@ -131,14 +147,19 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
         assert manifest is not None
         refs += [s for s in manifest.sources if s not in refs]
     src = resolve_sources(refs)
-    srcs = list(src.files)
+    prefix = spec.project.module_prefix
+    srcs = [out_path(rel, prefix) for rel in src.files]  # compile order is kept
     pkg_root = files("hdl_bag")
-    for rel in sorted([*srcs, *src.headers]):
-        _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+    for rel in sorted([*src.files, *src.headers]):
+        text = transform(rel, (pkg_root / rel).read_text(encoding="utf-8"), prefix)
+        _write(outdir, out_path(rel, prefix), text, written)
     # The licence of each vendored package travels with its files (not in the file list).
     vendored = {rel.split("/")[3] for rel in [*srcs, *src.headers] if rel.startswith(f"{VENDOR}/")}
     for name in sorted(vendored):
         rel = f"{VENDOR}/{name}/LICENSE"
+        _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+    # A file under another licence than its package's brings that text too (not a source).
+    for rel in licence_texts([*src.files, *src.headers]):
         _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
 
     # Stubs for opaque fabrics: the user replaces them with the fabric's RTL.
@@ -189,6 +210,11 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
     filelist = f"{spec.project.name}.f"
     incdirs = "".join(f"+incdir+{d}\n" for d in src.incdirs)
     _write(outdir, filelist, incdirs + "".join(f"{p}\n" for p in order), written)
+
+    banner = tcl_banner(spec, user_header)
+    for fmt in (SDC, XDC):
+        text = cdc_constraints(spec, netlist, fmt, banner)
+        _write(outdir, f"constraints/{spec.project.name}_cdc.{fmt}", text, written)
     # The tests drive the fabrics through the top, so a user-supplied fabric, whose behaviour
     # BAG does not know, has none (D8).
     opaque = any((m := registry.get(t)) and m.opaque for t in used)
@@ -212,7 +238,10 @@ def generate(spec: Spec, outdir: Path, spec_dir: Path, style: str | None = None)
                                        user_header):  # fmt: skip
             _write(outdir, rel, text, written)
         for rel in vendored_files(spec, netlist):  # the ZipCPU checkers, with their LICENSE
-            _write(outdir, rel, (pkg_root / rel).read_text(encoding="utf-8"), written)
+            text = transform(rel, (pkg_root / rel).read_text(encoding="utf-8"), prefix)
+            if rel.endswith("/SOURCE.md"):
+                text = source_note(text, prefix)
+            _write(outdir, out_path(rel, prefix), text, written)
         sby = tuple(sorted(r for r in written if r.startswith("formal/") and r.endswith(".sby")))
     _manifest(outdir, written, spec, lint_top, filelist, tests, sby)
     return Outputs(outdir, tuple(sorted(written)), lint_top, filelist, tests, p.lint_tools,
@@ -238,26 +267,70 @@ def load_outputs(root: Path) -> Outputs:
         raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     if not data.get("top"):
         raise ValueError(f"{root}: no RTL was generated (see {MANIFEST})")
-    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
-            and isinstance(data.get("files"), dict | list)):  # fmt: skip
-        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     defaults = Outputs(root, (), "", "")
+    tools = data.get("lint_tools", defaults.lint_tools)
+    if not (isinstance(data["top"], str) and isinstance(data.get("filelist"), str)
+            and isinstance(data.get("files"), dict | list)
+            and isinstance(tools, list | tuple)
+            and all(isinstance(t, str) for t in tools)):  # fmt: skip
+        # lint_tools included: tuple("slang") is five one-character tool names, which reached
+        # lint() as unknown tools and left bag lint showing the ValueError.
+        raise ValueError(f"{root}: {MANIFEST} cannot be read: run bag generate again")
     return Outputs(
         root, tuple(sorted(data["files"])), data["top"], data["filelist"], data.get("tests"),
-        tuple(data.get("lint_tools", defaults.lint_tools)),
+        tuple(tools),
         data.get("simulator", defaults.simulator), tuple(data.get("formal", ())),
     )  # fmt: skip
 
 
+def _filelist(out: Outputs) -> list[str]:
+    """The whitespace-separated tokens of OUT's file list.
+
+    Raises ValueError, with a message for the user, when the manifest names a file list that
+    is not there: lint, sim and flow all read it and each gave a raw FileNotFoundError. The
+    check lives here, not in load_outputs, because `bag formal` never reads the file list --
+    each generated job carries its own sources -- so a missing one must not stop a design it
+    can still prove.
+    """
+    path = out.root / out.filelist
+    try:
+        return path.read_text().split()
+    except OSError as exc:
+        raise ValueError(
+            f"{out.root}: the file list {out.filelist} cannot be read: run bag generate again"
+        ) from exc
+
+
 def sources(out: Outputs) -> list[Path]:
     """OUT's file list, relative to its root, in compile order."""
-    return [Path(t) for t in (out.root / out.filelist).read_text().split() if t[0] != "+"]
+    return [Path(t) for t in _filelist(out) if t[0] != "+"]
 
 
 def include_dirs(out: Outputs) -> list[Path]:
     """OUT's include directories (``+incdir+`` lines of the file list), relative to its root."""
-    lines = (out.root / out.filelist).read_text().split()
-    return [Path(t.removeprefix("+incdir+")) for t in lines if t.startswith("+incdir+")]
+    return [Path(t.removeprefix("+incdir+")) for t in _filelist(out) if t.startswith("+incdir+")]
+
+
+def _deletable(root: Path, rel: str) -> bool:
+    """Whether ROOT/REL names a file inside ROOT that this run may delete.
+
+    A manifest is data, so REL may be anything: absolute, reaching out with `..`, the root
+    itself, a directory, or a name holding a NUL, which makes resolve() raise. Each of those
+    was a raw traceback or a refusal from a generate that was otherwise fine, so each is
+    simply not deletable. A symlink is judged by where the link sits rather than where it
+    points, because unlink removes the link and never its target -- resolving it first sent
+    every link out of the root and leaked it, since the new manifest no longer lists it.
+    """
+    if Path(rel).is_absolute():  # never written by BAG, and may still land inside ROOT
+        return False
+    path = root / rel
+    try:
+        if path.is_symlink():
+            return path.parent.resolve().is_relative_to(root.resolve())
+        resolved, top = path.resolve(), root.resolve()
+        return resolved != top and resolved.is_relative_to(top) and not resolved.is_dir()
+    except (OSError, ValueError):
+        return False
 
 
 def _manifest(
@@ -278,7 +351,10 @@ def _manifest(
     except (OSError, UnicodeDecodeError, ValueError, AttributeError):
         listed = {}  # an unreadable manifest lists nothing to clean up; this run replaces it
     for rel in listed if isinstance(listed, dict | list) else ():
-        if isinstance(rel, str) and rel not in written:
+        # These names come from a manifest in a directory this run did not necessarily write,
+        # and this is a delete. Anything not deletable is skipped, as an unreadable manifest
+        # is, rather than stopping a generate that is otherwise fine.
+        if isinstance(rel, str) and rel not in written and _deletable(root, rel):
             (root / rel).unlink(missing_ok=True)
     entries = {r: hashlib.sha256((root / r).read_bytes()).hexdigest() for r in sorted(written)}
     data = {

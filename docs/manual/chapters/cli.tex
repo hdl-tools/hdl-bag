@@ -96,6 +96,33 @@ run EDA tools read its \file{bag_outputs.json} to find the files.
   formal work cut off by the budget is reported, not a failure.
 \end{entry}
 
+\begin{entry}{\cmd{bag shrink} IR [\opt{--step} STEP] [\opt{-o} FILE] [\opt{--budget} N] [\opt{--timeout} SECONDS]}
+\item[Does] Takes an IR that fails a step and removes whatever it can, one edit at a time,
+  keeping an edit only if the same step still fails with the same rules. The edits drop
+  fabrics, masters, slaves, sub-wrappers and rows, clear aliases and optional wrapper
+  settings, and narrow widths and memory regions. Every candidate is checked, resolved and
+  generated first, and one that is not a valid design is skipped without running the step.
+  It prints the failure it is reproducing, each edit it keeps, and the counts, then writes
+  the smaller IR and the command that reruns it. The step is run for every candidate, so
+  the command needs the EDA tools of that step (and \code{hdl-bag[sim]} for a simulation).
+  A candidate that passes \cmd{bag check} but cannot be resolved or generated is counted in
+  a note: it is a lead on a bug in BAG.
+\item[Argument] IR must be an IR file; give a workbook to \cmd{bag ir} first. The IR is
+  shrunk as the workbook it converts to, so an IR with several aliases per decode row
+  keeps the first.
+\item[Options] \opt{--step}: \code{lint}, \code{sim}, \code{formal} or
+  \code{test=}NAME, one simulation test. The default is the first of lint, sim and formal
+  that fails. \opt{--output} (\opt{-o}): the IR to write (default: IR with
+  \file{.shrunk.ir.yaml} in place of its ending). \opt{--budget}: the most step runs to
+  spend, at least 1 (default 200); when it is used up the result is reported as possibly
+  not minimal. \opt{--timeout}: the seconds allowed per formal task, at least 1.
+\item[Output] The written IR records the name and SHA-256 of IR as its source, so it does
+  not depend on where or when it was made.
+\item[Exit status] 0 when an IR was written, including when nothing could be removed.
+  1 when IR cannot be shrunk: it does not load or pass \cmd{bag check}, the step does not
+  fail, a tool is missing, or the only failure is a formal timeout.
+\end{entry}
+
 \section{Exit status}
 
 \begin{description}

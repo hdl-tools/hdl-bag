@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: axil_shared_rr
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -255,4 +256,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: axil_shared_rr.xlsx
-  sha256: 3584496eaa0343e2badd9acdb2d69f163680531135c03084b197dad0ed668df9
+  sha256: 26a42c82408f1908f696badc62cac01209582cee9fdba1a6e07e0b2184d5ceeb

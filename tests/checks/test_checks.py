@@ -5,6 +5,8 @@
 Each case is the demo_ss sample plus one mutation, and asserts the exact messages.
 """
 
+import dataclasses
+import re
 import shutil
 from pathlib import Path
 
@@ -15,6 +17,8 @@ from openpyxl import Workbook
 from hdl_bag.checks import RULES, run_checks
 from hdl_bag.reader import read_workbook
 from hdl_bag.template import build_workbook
+from hdl_bag.template.data import SpecData
+from hdl_bag.template.sample_demo_ss import SAMPLE as SAMPLE_SPEC
 
 GOLDEN_DIR = Path(__file__).parents[1] / "golden"
 HEADER_ROWS = {("Hierarchy", "placement"): 15, ("Wrapper", "exposed"): 17}
@@ -49,9 +53,13 @@ def _row(sheet: str, row: int, **values: Value) -> list[Edit]:
     return [(sheet, row, k.replace("_", " "), v) for k, v in values.items()]
 
 
-def _messages(tmp_path: Path, edits: list[Edit]) -> list[str]:
-    wb = build_workbook(sample=True)
-    _apply(wb, edits)
+def _messages(tmp_path: Path, edits: list[Edit] | SpecData) -> list[str]:
+    """Checks of the sample with EDITS applied, or of the whole workbook EDITS when it is a spec."""
+    if isinstance(edits, SpecData):
+        wb = build_workbook(data=edits)
+    else:
+        wb = build_workbook(sample=True)
+        _apply(wb, edits)
     path = tmp_path / "spec.xlsx"
     wb.save(path)
     shutil.copy(GOLDEN_DIR / "header.txt", tmp_path / "header.txt")
@@ -97,14 +105,61 @@ def _mm_row(row: int, target: str, region: str, base: str, size: str) -> list[Ed
     return [("Memory_Map", row, h, v) for h, v in zip(MM_COLS, vals, strict=True)]
 
 
-# (case id, edits, expected messages)
-CASES: list[tuple[str, list[Edit], list[str]]] = [
+def _freq_case(kind: str, value: Value) -> tuple[str, list[Edit], list[str]]:
+    """A Clocks > Freq (MHz) that is no positive number: every period is derived from it."""
+    return (
+        f"VALUE-ILLEGAL-freq-{kind}",
+        [("Clocks", 5, "Freq (MHz)", value)],
+        [f"Clocks row 5: Freq (MHz) {value!r} is not a positive number (VALUE-ILLEGAL)"],
+    )
+
+
+# A workbook with no bus at all: a case for a rule that edits of the sample cannot reach.
+NO_BUS = dataclasses.replace(
+    SAMPLE_SPEC, fabrics=[], masters=[], slaves=[], bridges=[], topology=[], access_rules=[],
+    memory_map=[], address_decode=[], port_options=[], user_ports=[], exposed_ports=[],
+    placement=[], sub_wrappers=[list(SAMPLE_SPEC.sub_wrappers[0])],
+)  # fmt: skip
+
+# (case id, edits or a whole spec, expected messages)
+CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
+    ("FAB-NONE", NO_BUS,
+     ["Fabrics: the spec lists no fabric, so there is no bus to generate. Add a row for each fabric (FAB-NONE)"]),
     ("VALUE-MISSING", [("Clocks", 5, "Freq (MHz)", None)],
      ["Clocks row 5: Freq (MHz) is required (VALUE-MISSING)"]),
     ("VALUE-ILLEGAL", [("Resets", 5, "Polarity", "low")],
      ["Resets row 5: Polarity 'low' is not one of active-low, active-high (VALUE-ILLEGAL)"]),
+    *[_freq_case(kind, value)
+      for kind, value in (("zero", 0), ("negative", -50), ("text", "fast"), ("bool", True))],
     ("PROJ-SCHEMA-VERSION", [("Project", 6, "Value", "0.2")],
-     ["Project row 6: Spec schema version '0.2' differs from '0.6' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+     ["Project row 6: Spec schema version '0.2' differs from '0.7' expected by this BAG release (PROJ-SCHEMA-VERSION)"]),
+    ("PROJ-MODULE-PREFIX", [("Project", 18, "Value", "Demo-SS")],
+     ["Project row 18: Module prefix 'Demo-SS' is not a lowercase SystemVerilog identifier (PROJ-MODULE-PREFIX)"]),
+    ("PROJ-MODULE-PREFIX-underscore", [("Project", 18, "Value", "demo_ss_")],
+     ["Project row 18: Module prefix 'demo_ss_' must not end with an underscore: BAG adds one (PROJ-MODULE-PREFIX)"]),
+    ("PROJ-PREFIX-COLLISION", [("Project", 18, "Value", "demo_ss"), ("Hierarchy", 9, "Sub-wrapper", "bus_top"),
+                               ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "bus_top")],
+     ["Project row 18: with Module prefix 'demo_ss', sub-wrapper bus_top is generated as demo_ss_bus_top, the name of the top wrapper; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-PREFIX-COLLISION-interface", [("Project", 18, "Value", "demo_ss"), ("Hierarchy", 9, "Sub-wrapper", "apb4_if"),
+                                         ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "apb4_if")],
+     ["Project row 18: with Module prefix 'demo_ss', sub-wrapper apb4_if is generated as demo_ss_apb4_if, the name of a generated interface; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-PREFIX-COLLISION-keyword", [("Project", 18, "Value", "always"), ("Hierarchy", 9, "Sub-wrapper", "comb"),
+                                       ("Hierarchy", 9, "Parent", "demo_ss_bus_top"), ("Hierarchy", 20, "Sub-wrapper", "comb")],
+     ["Project row 18: with Module prefix 'always', sub-wrapper comb is generated as always_comb, a SystemVerilog keyword; choose another Module prefix (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-NAME-LENGTH", [("Project", 18, "Value", "abcdefghij" * 4)],
+     ["Project row 18: with Module prefix 'abcdefghijabcdefghijabcdefghijabcdefghij', 5 names BAG can generate are longer than 64 characters; the longest is abcdefghijabcdefghijabcdefghijabcdefghij_axi_burst_splitter_gran_counters (73); shorten the prefix (PROJ-NAME-LENGTH)"]),
+    ("NAME-RESERVED", [("Project", 5, "Value", "addr")],
+     ["Project row 5: with Project name 'addr', the formal decode harness is named bag_addr_decode, which is also the name of the in-house module; choose another Project name (NAME-RESERVED)"]),
+    ("NAME-RESERVED-and-prefix", [("Project", 5, "Value", "addr"), ("Project", 18, "Value", "bag")],
+     ["Project row 5: with Project name 'addr', the formal decode harness is named bag_addr_decode, which is also how the vendored PULP module addr_decode is generated; choose another Project name or Module prefix (NAME-RESERVED)"]),
+    ("NAME-RESERVED-package", [("Wrapper", 9, "Value", "bag_demo_ss_reset_props")],
+     ["Wrapper row 9: the parameter package is named bag_demo_ss_reset_props, which is also the formal reset property module; choose another Parameter package (NAME-RESERVED)"]),
+    ("HIER-RESERVED-NAME-formal-unit", [("Hierarchy", 7, "Sub-wrapper", "bag_demo_ss_unit_x"), ("Hierarchy", 20, "Sub-wrapper", "bag_demo_ss_unit_x")],
+     ["Hierarchy row 7: sub-wrapper bag_demo_ss_unit_x has the name of a formal unit harness; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    # A setting that does not apply is warned about and ignored, never validated: one message,
+    # and not a VALUE-ILLEGAL from inside resolve (#156).
+    ("FAB-NA-SETTING-junk-value", [("Fabrics", 7, "Max mst trans", "abc")],
+     ["Fabrics row 7: Max mst trans 'abc' does not apply to a non-AXI fabric; set n/a (FAB-NA-SETTING)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
@@ -118,6 +173,21 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
      ["Memory_Map row 21: region mem of sram0 repeats row 5 (NAME-UNIQUE)"]),
     ("NAME-IDENT", [("Memory_Map", 20, "Region", "Regs")],
      ["Memory_Map row 20: Region 'Regs' is not a lowercase SystemVerilog identifier (NAME-IDENT)"]),
+    ("VALUE-ILLEGAL-master-id-width", [("Masters", 5, "ID width (bits)", "abc")],
+     ["Masters row 5: ID width (bits) 'abc' is not an integer >= 1 (VALUE-ILLEGAL)"]),
+    ("NAME-IDENT-reset-domain", [("Resets", 5, "Domain", "Foo-bar")],
+     ["Clocks row 5: domain D_CPU has no reset on Resets (CLK-DOMAIN-NO-RESET)",
+      "Resets row 5: Domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)"]),
+    # Fabrics row 9 is read by text() (the adapter derivation) before check_names validates
+    # it, so on a shared parse cache the first reader decided: a bad value was reported as
+    # REF-UNKNOWN rather than NAME-IDENT, and a blank one was never reported at all, which
+    # left bag check to fail an assertion in resolve (#149).
+    ("NAME-IDENT-fabric-domain", [("Fabrics", 9, "Clock domain", "Foo-bar")],
+     ["Fabrics row 9: Clock domain 'Foo-bar' is not an SystemVerilog identifier (NAME-IDENT)",
+      "Slaves row 12: wdt0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)",
+      "Slaves row 13: rtc0 must match the clock domain of fabric aon_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)"]),
+    ("VALUE-MISSING-fabric-domain", [("Fabrics", 9, "Clock domain", None)],
+     ["Fabrics row 9: Clock domain is required (VALUE-MISSING)"]),
     ("REF-UNKNOWN", [("Masters", 6, "Clock domain", "D_X")],
      ["Masters row 6: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
     ("CLK-DOMAIN-TWO-CLOCKS", [("Clocks", 9, h, v) for h, v in (
@@ -350,7 +420,19 @@ CASES: list[tuple[str, list[Edit], list[str]]] = [
     ("HIER-RTL-NAME-child", [("Hierarchy", 16, "RTL instance name", "u_per_wrapper")],
      ["Hierarchy row 6: instance name u_per_wrapper in main_wrapper is used by fabric main_xbar and sub-wrapper per_wrapper (HIER-RTL-NAME)"]),
     ("HIER-RESERVED-NAME", [("Hierarchy", 7, "Sub-wrapper", "bag_sync"), ("Hierarchy", 20, "Sub-wrapper", "bag_sync")],
-     ["Hierarchy row 7: sub-wrapper bag_sync has the name of an in-house module (HIER-RESERVED-NAME)"]),
+     ["Hierarchy row 7: sub-wrapper bag_sync has the name of an in-house module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    ("HIER-RESERVED-NAME-pulp", [("Hierarchy", 7, "Sub-wrapper", "axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "axi_mux")],
+     ["Hierarchy row 7: sub-wrapper axi_mux has the name of a vendored PULP module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    ("HIER-RESERVED-NAME-derived", [("Hierarchy", 7, "Sub-wrapper", "bag_axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "bag_axi_mux")],
+     ["Hierarchy row 7: sub-wrapper bag_axi_mux has the name of a module BAG derives from PULP; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    ("PROJ-PREFIX-COLLISION-sub-wrapper-and-derived", [("Project", 18, "Value", "p"), ("Hierarchy", 7, "Sub-wrapper", "bag_axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "bag_axi_mux")],
+     ["Project row 18: with Module prefix 'p', sub-wrapper bag_axi_mux and module BAG derives from PULP bag_axi_mux are both generated as p_bag_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
+    ("PROJ-PREFIX-COLLISION-sub-wrapper-and-pulp", [("Project", 18, "Value", "p"), ("Hierarchy", 7, "Sub-wrapper", "axi_mux"), ("Hierarchy", 20, "Sub-wrapper", "axi_mux")],
+     ["Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"]),
+    ("HIER-RESERVED-NAME-formal", [("Hierarchy", 7, "Sub-wrapper", "faxil_slave"), ("Hierarchy", 20, "Sub-wrapper", "faxil_slave")],
+     ["Hierarchy row 7: sub-wrapper faxil_slave has the name of a vendored ZipCPU module; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
+    ("HIER-RESERVED-NAME-header-package", [("Hierarchy", 7, "Sub-wrapper", "assert_rpt_pkg"), ("Hierarchy", 20, "Sub-wrapper", "assert_rpt_pkg")],
+     ["Hierarchy row 7: sub-wrapper assert_rpt_pkg has the name of a vendored PULP package; rename the sub-wrapper (HIER-RESERVED-NAME)"]),
     ("HIER-EMPTY", [("Hierarchy", 9, "Sub-wrapper", "spare_wrapper"), ("Hierarchy", 9, "Parent", "demo_ss_bus_top")],
      ["Hierarchy row 9: sub-wrapper spare_wrapper has no instances (HIER-EMPTY)"]),
     ("WRAP-PORT-NOT-LISTED", _clear("Wrapper", 31, ("Port", "Exposed at top", "Top-level prefix")),
@@ -408,7 +490,9 @@ def test_blank_template_reports_missing_settings(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("case", "edits", "expected"), CASES, ids=[c[0] for c in CASES])
-def test_broken_workbook(tmp_path: Path, case: str, edits: list[Edit], expected: list[str]) -> None:
+def test_broken_workbook(
+    tmp_path: Path, case: str, edits: list[Edit] | SpecData, expected: list[str]
+) -> None:
     assert _messages(tmp_path, edits) == expected
 
 
@@ -431,10 +515,89 @@ def test_legal_external_modules(tmp_path: Path, edits: list[Edit]) -> None:
     assert _messages(tmp_path, edits) == []
 
 
+@pytest.mark.parametrize(
+    "edits",
+    [
+        [("Masters", 5, "User width (bits)", "n/a")],
+        [("Slaves", 5, "User width (bits)", "n/a")],
+        [("Slaves", 7, "User width (bits)", "n/a")],
+    ],
+    ids=["axi4-master", "axi4-slave", "apb4-slave"],
+)
+def test_a_legal_token_passes_every_reader_of_its_cell(tmp_path: Path, edits: list[Edit]) -> None:
+    """n/a User width is accepted by the width check and read again by the wrapper check and by
+    resolve. Every reader of a cell must allow the same tokens: the parse cache no longer hides
+    a narrower reader behind whichever one ran first (#149). The sample already covers the other
+    two tokens, auto ID width and variable Wait states, on ddr0."""
+    assert _messages(tmp_path, edits) == []
+
+
+@pytest.mark.parametrize("name", ["foo", "Foo-bar"], ids=["legal", "illegal"])
+def test_a_repeated_sub_wrapper_name_is_not_a_prefix_collision_with_itself(
+    tmp_path: Path, name: str
+) -> None:
+    """NAME-UNIQUE (or NAME-IDENT) owns a repeated name; the prefix check must not add a
+    sub-wrapper-against-itself error on top, whether or not the name is a legal identifier."""
+    edits: list[Edit] = [
+        ("Project", 18, "Value", "p"),
+        ("Hierarchy", 8, "Sub-wrapper", name),
+        ("Hierarchy", 9, "Sub-wrapper", name),
+    ]
+    messages = _messages(tmp_path, edits)
+    assert not [m for m in messages if "PROJ-PREFIX-COLLISION" in m], messages
+    assert any("NAME-UNIQUE" in m or "NAME-IDENT" in m for m in messages)
+
+
+def test_a_sub_wrapper_named_like_a_pulp_unit_is_refused_for_the_prefixed_clash(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper axi_mux under prefix p is emitted as p_axi_mux, and so is PULP's axi_mux, now
+    that the prefix reaches the vendored units. One message, not two: the `fixed` arm does not
+    also fire, because p_axi_mux is not a name anything keeps.
+    """
+    edits: list[Edit] = [
+        ("Project", 18, "Value", "p"),
+        ("Hierarchy", 7, "Sub-wrapper", "axi_mux"),
+        ("Hierarchy", 20, "Sub-wrapper", "axi_mux"),
+    ]
+    assert _messages(tmp_path, edits) == [
+        "Project row 18: with Module prefix 'p', sub-wrapper axi_mux and vendored PULP module "
+        "axi_mux are both generated as p_axi_mux; rename the sub-wrapper (PROJ-PREFIX-COLLISION)"
+    ]
+
+
+def test_a_sub_wrapper_that_equals_the_prefix_joined_to_a_pulp_unit_is_legal(
+    tmp_path: Path,
+) -> None:
+    """Sub-wrapper cut under prefix axi is axi_cut, and PULP's axi_cut is axi_axi_cut: the
+    prefix reaches PULP's unit too, so nothing clashes and `bag check` stays silent."""
+    edits: list[Edit] = [
+        ("Project", 18, "Value", "axi"),
+        ("Hierarchy", 7, "Sub-wrapper", "cut"),
+        ("Hierarchy", 20, "Sub-wrapper", "cut"),
+    ]
+    assert _messages(tmp_path, edits) == []
+
+
+def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:
+    assert _messages(tmp_path, [("Project", 18, "Value", "demo_ss")]) == []
+
+
 def test_every_rule_has_a_broken_workbook() -> None:
     covered = {msg.rsplit("(", 1)[1].rstrip(")") for _, _, exp in CASES for msg in exp}
     assert set(RULES) - covered == set()
     assert len(RULES) >= 40
+
+
+def test_the_readme_states_the_number_of_checks() -> None:
+    """The README's status table says how many checks there are; it rotted once, so it is pinned."""
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    found = re.search(r"(\d+) validation checks", readme.read_text(encoding="utf-8"))
+    assert found, f"{readme} no longer says 'N validation checks'; restore the phrase"
+    assert int(found.group(1)) == len(RULES), (
+        f"README.md says {found.group(1)} validation checks but RULES has {len(RULES)}: "
+        f"edit the number in {readme}"
+    )
 
 
 def test_findings_are_sorted_and_deterministic(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: external_shared
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -447,4 +448,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_shared.xlsx
-  sha256: e460ce35a3b9fba137424477faf1b8345e20a0fd49cdfc134f4516b6d37736f7
+  sha256: 12394b5d933b764e98e351eec0be3ee4061e463b508ec7a66aeb5599fbe90684

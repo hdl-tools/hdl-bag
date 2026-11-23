@@ -8,9 +8,10 @@ Output layout (relative to the output directory)::
     formal/<project>_reset.sby    its SymbiYosys job: a prove task and a cover task
     formal/<project>_protocol.sv  port-protocol checkers, bound into the lint top (D60)
     formal/<project>_protocol.sby its job: a bmc task (bitwuzla, D67) and a cover task
-    formal/bag_faxi4.sv           BAG's AXI4 checker, where there is an AXI4 port (D64)
-    formal/bag_fahb.sv            BAG's AHB-Lite checker, where there is an AHB-Lite port
-    formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE
+    formal/<prefix>_bag_faxi4.sv  BAG's AXI4 checker, where there is an AXI4 port (D64)
+    formal/<prefix>_bag_fahb.sv   BAG's AHB-Lite checker, where there is an AHB-Lite port
+    formal/vendor/zipcpu/         the ZipCPU property files it uses, with their LICENSE and
+                                  SOURCE.md; their units take the prefix too
     formal/<project>_decode.sv    the decode harness: each in-house fabric's decoder against
                                   a reference from the IR (D69; formal_gen.decode)
     formal/<project>_decode.sby   its job: a prove task (the check is combinational)
@@ -25,7 +26,7 @@ wrapper. Its inputs are free; the property module assumes what the environment m
 Clocks are free too (multiclock), so any clock ratio and phase is covered; a protocol job
 of a design in one clock domain runs on one clock, each solver step an edge. Registers that
 must see every solver step, whatever the clocks do, are instances of ``bag_step_ff0/1``
-(``formal/bag_step.v``, registered on ``$global_clock`` and read by Yosys's own frontend):
+(``formal/<prefix>_bag_step.v``, registered on ``$global_clock``, read by Yosys's own frontend):
 yosys-slang has no global clock, and a register on a net marked ``(* gclk *)`` is clocked by
 an ordinary free net there.
 
@@ -87,9 +88,11 @@ from hdl_bag.flows.formal import SbyTask, sby_job
 from hdl_bag.formal_gen.decode import render_decode
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
+from hdl_bag.gen.prefix import out_path
+from hdl_bag.gen.prefix import unit as gen_unit
 from hdl_bag.gen.render import header, lit
 from hdl_bag.ir.model import Spec
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import AXI_FAMILY, PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, signal_width
 
 if TYPE_CHECKING:
@@ -124,7 +127,8 @@ DECODE_DEPTH = 1
 PROTOCOL_ENGINE = "bmc: smtbmc bitwuzla\ncover: smtbmc yices"
 
 # The solver-step registers (formal/bag_step.v), copied next to the jobs; BAG's own AXI4 and
-# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv).
+# AHB-Lite checkers (formal/bag_faxi4.sv, formal/bag_fahb.sv). Package names: what a job writes
+# is the prefixed unit (gen.prefix.unit) and the prefixed basename (gen.prefix.out_path).
 STEP = "bag_step.v"
 FAXI4 = "bag_faxi4.sv"
 FAHB = "bag_fahb.sv"
@@ -197,12 +201,18 @@ def _watches(spec: Spec, bus: Bus, active: dict[str, set[str]]) -> list[Watch]:
 
 
 def props_module(spec: Spec) -> str:
-    return f"bag_{spec.project.name}_reset_props"
+    return formal_name(spec.project.name, "reset_props")
 
 
-def _step(q: str, init: int, d: str) -> str:
+def _step(spec: Spec, q: str, init: int, d: str) -> str:
     """A register Q on the solver's own step, starting at INIT, loading D every step."""
-    return f"  bag_step_ff{init} u_{q} (.d({d}), .q({q}));"
+    return f"  {gen_unit(spec, f'bag_step_ff{init}')} u_{q} (.d({d}), .q({q}));"
+
+
+def written(spec: Spec, rel: str) -> str:
+    """The file name (inside formal/ or its zipcpu directory) that package file REL is written
+    under: Project > Module prefix goes on the basename (gen.prefix.out_path)."""
+    return out_path(rel, spec.project.module_prefix).rpartition("/")[2]
 
 
 def _asserted(spec: Spec, reset: str) -> str:
@@ -222,7 +232,7 @@ def _group(spec: Spec, k: int, group: list[str], names: list[str]) -> list[str]:
     for r in names:
         out += [
             f"  logic bag_was_{r};",
-            _step(f"bag_was_{r}", 1, _asserted(spec, r)),
+            _step(spec, f"bag_was_{r}", 1, _asserted(spec, r)),
             f"  always_comb if (bag_init) assume ({_asserted(spec, r)});",
         ]
         if len(names) > 1:
@@ -257,7 +267,7 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
         "  // Registers on the solver's own step (bag_step_ff*, formal/bag_step.v) see every",
         "  // step, whatever the clocks do. bag_init is high in the first step only.",
         "  logic bag_init;",
-        _step("bag_init", 1, "1'b0"),
+        _step(spec, "bag_init", 1, "1'b0"),
         "",
     ]
 
@@ -296,12 +306,12 @@ def _environment(spec: Spec, netlist: Netlist, port: "_Ports") -> Env:
                     f"{edges} == {bits}'d{stages} ? {edges} : {edges} + {bits}'d1;",
                     f"  wire {quiet} = {held} && {edges} == {bits}'d{stages};",
                     f"  logic bag_quiet_was_{d};",
-                    _step(f"bag_quiet_was_{d}", 0, quiet),
+                    _step(spec, f"bag_quiet_was_{d}", 0, quiet),
                     f"  always_comb if (bag_was_{rst.name} && !{held}) assume (bag_quiet_was_{d});",
                 ]
             else:
                 body.append(f"  wire {quiet} = {held};")
-            body.append(_step(f"bag_done_{d}", 0, f"bag_done_{d} || {quiet}"))
+            body.append(_step(spec, f"bag_done_{d}", 0, f"bag_done_{d} || {quiet}"))
             # In reset as the design sees it: before the first reset has taken effect the
             # design's state is not yet defined, so that counts as reset too.
             in_reset = f"bag_in_reset_{d}"
@@ -448,9 +458,9 @@ def _signals(spec: Spec, bus: Bus, active: dict[str, set[str]], dom: Domain,
         busy, hit = f"bag_busy_{w.name}", f"bag_hit_{w.name}"
         out += [
             f"  logic {busy};  // active in the last step, after a full reset",
-            _step(busy, 0, f"{done} && !{held} && {w.name} != {value}"),
+            _step(spec, busy, 0, f"{done} && !{held} && {w.name} != {value}"),
             f"  logic {hit};  // the reset came while it was active",
-            _step(hit, 0, f"{hit} || ({held} && {busy})"),
+            _step(spec, hit, 0, f"{hit} || ({held} && {busy})"),
             f"  always_comb reset_mid_{w.name}: cover ({quiet} && {hit});",
         ]
     return out
@@ -491,7 +501,7 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             if not can:
                 continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
         params = zipcpu_params(bus, family, can if bus.is_slave else None)
-        out.append(Checker(bus.name, vendor, f"bag_{spec.project.name}_{vendor}_{bus.name}",
+        out.append(Checker(bus.name, vendor, formal_name(spec.project.name, vendor, bus.name),
                            params, can))  # fmt: skip
     return out
 
@@ -746,7 +756,9 @@ def _axi4(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
               f"DataWidth({bus.data_width}), IdWidth({idw})")  # fmt: skip
     events = ("multi_write", "w_first", "same_id", "full")
     lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
-    lines.append(f"  bag_faxi4 #(.{params.replace(', ', ', .')}) u_{bus.name} (")
+    lines.append(
+        f"  {gen_unit(spec, 'bag_faxi4')} #(.{params.replace(', ', ', .')}) u_{bus.name} ("
+    )
     conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}")]
     conns += [(f".{s}", v(s)) for s in _FAXI4]
     conns += [(f".{e}_o", f"bag_{bus.name}_{e}") for e in events]
@@ -862,7 +874,7 @@ def _ahb(spec: Spec, bus: Bus, dom: Domain, port: "_Ports",
               f".DataWidth({bus.data_width})")  # fmt: skip
     events = ("write_done", "read_done", "wait", "error", "seq")
     lines = [f"  logic {', '.join(f'bag_{bus.name}_{e}' for e in events)};"]
-    lines.append(f"  bag_fahb #({params}) u_{bus.name} (")
+    lines.append(f"  {gen_unit(spec, 'bag_fahb')} #({params}) u_{bus.name} (")
     conns = [(".clk_i", dom.clock), (".rst_ni", f"!{dom.checker_reset}"),
              (".hsel", v("hsel") if bus.is_slave else "1'b1")]  # fmt: skip
     conns += [(f".{s}", v(s)) for s in _FAHB]
@@ -938,7 +950,7 @@ def render_protocol(spec: Spec, netlist: Netlist, top: str, hdr: str) -> str | N
             split |= {bus.name} if _both_ways(bus, lines) else set()
             body += [*_own_covers(bus, lines), ""]
     body += _idle(spec, netlist, ports, split)
-    name = f"bag_{spec.project.name}_protocol_props"
+    name = formal_name(spec.project.name, "protocol_props")
     return _module(name, top, hdr, "Port-protocol checkers", ports, body)
 
 
@@ -1126,10 +1138,11 @@ def render_sby(spec: Spec, top: str, files: list[str], incdirs: list[str], props
     """The SymbiYosys job for PROPS (a file in formal/) over the design FILES (relative to the
     output directory, in compile order) with TOP. It runs from formal/: SBY copies rtl/ and
     the property file into its work directory."""
+    step = written(spec, f"formal/{STEP}")
     job = sby_job(top=top, files=[*files, props], incdirs=incdirs,
                   depths={"prove": PROVE_DEPTH, "cover": COVER_DEPTH},
-                  copy=[("rtl", "../rtl"), (STEP, STEP), (props, props)], engine=ENGINE,
-                  prelude=[f"read_verilog -formal {STEP}"])  # fmt: skip
+                  copy=[("rtl", "../rtl"), (step, step), (props, props)], engine=ENGINE,
+                  prelude=[f"read_verilog -formal {step}"])  # fmt: skip
     return f"{_sby_header(spec, user_header)}\n{job}"
 
 
@@ -1145,15 +1158,16 @@ def render_protocol_sby(spec: Spec, netlist: Netlist, top: str, files: list[str]
     AHB-Lite checkers (where there are such ports) and PROPS."""
     found = checkers(spec, netlist)
     vendored = sorted({c.vendor for c in found})
+    step = written(spec, f"formal/{STEP}")
     prelude = [
-        f"read_verilog -formal {STEP}",
-        *(f"read_verilog -formal zipcpu/{v}.v" for v in vendored),
+        f"read_verilog -formal {step}",
+        *(f"read_verilog -formal zipcpu/{written(spec, f'{ZIPCPU}/{v}.v')}" for v in vendored),
     ]
     for c in found:
         sets = " ".join(f"-set {k} {v}" for k, v in c.params)
-        prelude += [f"copy {c.vendor} {c.module}", f"chparam {sets} {c.module}"]
-    own = own_checkers(netlist)
-    copy = [("rtl", "../rtl"), (STEP, STEP), *((f, f) for f in own)]
+        prelude += [f"copy {gen_unit(spec, c.vendor)} {c.module}", f"chparam {sets} {c.module}"]
+    own = [written(spec, f"formal/{f}") for f in own_checkers(netlist)]
+    copy = [("rtl", "../rtl"), (step, step), *((f, f) for f in own)]
     if found:
         copy.append(("zipcpu", "vendor/zipcpu"))
     # A design in one clock domain has no clock ratio to explore: one clock, so each solver
@@ -1210,11 +1224,12 @@ def render_route_sby(spec: Spec, unit: "Unit", files: list[str], incdirs: list[s
     from hdl_bag.formal_gen.units import ROUTE_COVER_MARGIN, route_depth
 
     zips = unit.zipcpu
-    prelude = [f"read_verilog -formal zipcpu/{v}.v" for v in sorted({z.vendor for z in zips})]
+    vendors = sorted({z.vendor for z in zips})
+    prelude = [f"read_verilog -formal zipcpu/{written(spec, f'{ZIPCPU}/{v}.v')}" for v in vendors]
     for z in zips:
         sets = " ".join(f"-set {k} {v}" for k, v in z.params)
-        prelude += [f"copy {z.vendor} {z.module}", f"chparam {sets} {z.module}"]
-    own = sorted(unit.own)
+        prelude += [f"copy {gen_unit(spec, z.vendor)} {z.module}", f"chparam {sets} {z.module}"]
+    own = [written(spec, f"formal/{f}") for f in sorted(unit.own)]
     copy = [("rtl", "../rtl"), *((f, f) for f in own)]
     if zips:
         copy.append(("zipcpu", "vendor/zipcpu"))
@@ -1232,7 +1247,7 @@ def render_decode_sby(spec: Spec, files: list[str], incdirs: list[str], props: s
                       user_header: str | None) -> str:  # fmt: skip
     """The decode job: the harness PROPS over the design files, proved outright (it is
     combinational, so one step covers every input)."""
-    top = f"bag_{spec.project.name}_decode"
+    top = formal_name(spec.project.name, "decode")
     job = sby_job(top=top, files=[*files, props], incdirs=incdirs, depths={"prove": DECODE_DEPTH},
                   copy=[("rtl", "../rtl"), (props, props)], engine=ENGINE,
                   multiclock=False)  # fmt: skip

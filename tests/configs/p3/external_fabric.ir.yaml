@@ -1,6 +1,7 @@
-schema: '0.6'
+schema: '0.7'
 project:
   name: external_fabric
+  module_prefix: null
   revision: p3
   author: BAG
   sv_std: IEEE 1800-2017
@@ -449,4 +450,4 @@ wrapper:
 provenance:
   bag_version: 0.0.1
   source: external_fabric.xlsx
-  sha256: 4f41916499ef9ea3ede7da897c42ad23e78d9e913f7715955d97e66e435e9faa
+  sha256: ea694ed2d1041a40c625352326f6baa42974088f2616f7bd0af910c7e29221c4

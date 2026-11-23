@@ -21,9 +21,10 @@ from hdl_bag.gen.decode import bridge_offset, decode_tables, fabric_offset
 from hdl_bag.gen.external import exposed_name, opaque_module, opaque_ports
 from hdl_bag.gen.hierarchy import Boundary, Plan, boundary_port, plan, problems
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
+from hdl_bag.gen.prefix import unit
 from hdl_bag.gen.render import GenerateError, camel, environment, lit
 from hdl_bag.ir.model import Spec, UserPort
-from hdl_bag.naming import flat_signal_name
+from hdl_bag.naming import flat_signal_name, unit_name
 from hdl_bag.protocols import (
     PROTO_TOKEN,
     TIE_WRITE_STROBE,
@@ -45,6 +46,8 @@ ABSENT = "not on this bus"
 NARROW = "bus narrower"
 WIDE = "bus wider"
 USER = "User_Ports"
+ALIAS_ON = "alias always on (Address_Decode)"
+NO_ALIAS = "no alias at this position (Address_Decode)"
 
 
 def builtin_root() -> Path:
@@ -322,9 +325,12 @@ class InstanceContext:
         fab = self.inst.fabric
         enables = decode_tables(fab, fabric_offset(self.scope.spec, fab)).alias_enables
         bits = []
-        for e in reversed(enables):
+        for i, e in reversed(list(enumerate(enables))):  # alias i is bit i
             if e in ("0", "1"):
                 bits.append(f"1'b{e}")
+                reason = ALIAS_ON if e == "1" else NO_ALIAS
+                tie = TieOff(self.inst.name, "-", f"alias_en_i[{i}]", "input", bits[-1], reason)
+                self.scope.tieoffs.add(tie)
             else:
                 self.scope.inputs_used.add(e)
                 bits.append(e)
@@ -354,6 +360,7 @@ def render_instance_ctx(scope: Scope, inst: Instance) -> tuple[str, InstanceCont
         bridge_offset=lambda name: bridge_offset(scope.spec, name),
         tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
+        unit=lambda n: unit(scope.spec, n),
         opaque_module=lambda f: opaque_module(scope.spec, f),
         opaque_ports=lambda i: opaque_ports(scope.spec, i),
         user_ports=lambda i: [u for u in scope.spec.user_ports if u.instance == i.name],
@@ -433,7 +440,7 @@ def _resets(scope: Scope) -> list[str]:
         out.append(f"  logic {net};")
         if r.deassertion == "sync":
             out += [
-                "  bag_rst_sync #(",
+                f"  {unit(spec, 'bag_rst_sync')} #(",
                 f"      .ActiveLow  (1'b{int(low)}),",
                 f"      .AsyncAssert(1'b{int(r.assertion == 'async')})",
                 f"  ) u_bag_rst_sync_{c.domain} (",
@@ -498,7 +505,8 @@ def _instantiate_child(parent: Scope, name: str, sub: _Sub, crossings: list[Boun
     conns += [(name, name) for _, _, name in sub.user]
     for b in crossings:
         conns += [(boundary_port(parent.spec, b.bus, s), parent.ref(b.bus, s)) for s in b.signals()]
-    lines = [f"  // sub-wrapper {name}", f"  {name} u_{name} ("]
+    module = unit_name(parent.spec.project.module_prefix, name)
+    lines = [f"  // sub-wrapper {name}", f"  {module} u_{name} ("]
     lines += [f"      .{port}({expr}){',' if n < len(conns) - 1 else ''}"
               for n, (port, expr) in enumerate(conns)]  # fmt: skip
     return "\n".join([*lines, "  );"])
@@ -556,7 +564,9 @@ def render_modules(netlist: Netlist, style: str, header: str,
                 _exposed_below(spec, p, w),
             )
             ports = _sub_rows(scope, subs[w], p.boundaries[w])
-            modules.append((w, _module(w, header, ports, scope, [*children, *bodies[w]])))
+            emitted = unit_name(spec.project.module_prefix, w)
+            text = _module(emitted, header, ports, scope, [*children, *bodies[w]])
+            modules.append((emitted, text))
             continue
         _tie_external_outputs(scope, netlist)
         for domain in sorted(scope.domains):

@@ -66,6 +66,53 @@ def test_the_installers_path_is_the_tools_images_path() -> None:
     assert s.path_line("/opt", s.LINUX, "${PATH}") == m[1]
 
 
+def test_every_tool_without_an_archive_can_be_built() -> None:
+    """A tool with no release archive on some platform must have both a source URL and a
+    builder, or the install reaches a platform it cannot satisfy. slang is the case that
+    matters: it publishes nothing for linux-arm64."""
+    s, inst = _specs(), _installer()
+    for t in s.TOOLS:
+        needs_source = [p for p in s.PLATFORMS if s.asset_for(t, p) is None]
+        if not needs_source:
+            continue
+        assert t.source, f"{t.name} has no archive for {needs_source} and no source"
+        assert t.name in inst._BUILDERS, f"{t.name} needs a source build and has no builder"
+
+
+def test_slang_is_built_from_source_only_where_nothing_is_published() -> None:
+    """Building when a tested binary exists would be a needless difference between
+    platforms, and the prebuilt one is what the lint waivers were written against."""
+    s = _specs()
+    slang = s.tool("slang")
+    built = sorted(p for p in s.PLATFORMS if s.asset_for(slang, p) is None)
+    assert built == [s.LINUX_ARM]
+
+
+def test_the_dockerfiles_arg_defaults_match_tools_lock() -> None:
+    """The Dockerfile says its defaults must match tools.lock, and CI always overrides them
+    with --build-arg, so a stale default breaks nothing until someone builds the image by
+    hand and gets a different tool. #119 left one behind exactly that way."""
+    s = _specs()
+    lock = s.read_lock()
+    dockerfile = (REPO / "tools" / "Dockerfile").read_text(encoding="utf-8")
+    defaults = dict(re.findall(r"^ARG (\w+)=(\S+)$", dockerfile, re.M))
+    shared = sorted(set(defaults) & set(lock))
+    assert shared, "no ARG in tools/Dockerfile names a tools.lock key"
+    assert {k: defaults[k] for k in shared} == {k: lock[k] for k in shared}
+
+
+def test_the_image_installs_every_tool_it_puts_on_path() -> None:
+    """Each tool needs its own installer invocation in the Dockerfile; a tool added to the
+    table but not to the image would sit on PATH as an empty directory, which is how the
+    pinned slang went missing (#130)."""
+    s = _specs()
+    dockerfile = (REPO / "tools" / "Dockerfile").read_text(encoding="utf-8")
+    for t in s.TOOLS:
+        assert re.search(
+            rf"install_tools\.py[^\n]*(\\\n[^\n]*)*\b{re.escape(t.name)}\b", dockerfile
+        ), f"tools/Dockerfile never installs {t.name}"
+
+
 def test_the_oss_cad_suite_comes_last_on_path() -> None:
     """Its bundled copies of the separately pinned tools must stay shadowed (the image's
     PATH order), so the pinned Verilator wins over the suite's."""
@@ -73,6 +120,40 @@ def test_the_oss_cad_suite_comes_last_on_path() -> None:
     head, tail = s.path_entries("/opt", s.LINUX)
     assert [p for p in tail] == ["/opt/oss-cad-suite/bin"]
     assert "/opt/verilator/bin" in head and "/opt/oss-cad-suite/bin" not in head
+
+
+def test_every_archive_has_a_recorded_digest() -> None:
+    """A pinned version does not pin the bytes, so every asset on every platform must have a
+    SHA-256 recorded. An entry with no asset means the table moved and the file did not."""
+    s = _specs()
+    lock = s.read_lock()
+    expected = {
+        s.asset_name(t, plat, lock)
+        for t in s.TOOLS
+        for plat in s.PLATFORMS
+        if s.asset_for(t, plat) is not None
+    }
+    recorded = set(s.read_digests())
+    assert sorted(expected - recorded) == [], "run install_tools.py --write-digests"
+    assert sorted(recorded - expected) == [], "stale entries in tools/tools.sha256"
+
+
+def test_digests_round_trip_through_the_sha256sum_format() -> None:
+    s = _specs()
+    digests = s.read_digests()
+    assert digests, "tools/tools.sha256 is empty"
+    assert all(len(h) == 64 and h.islower() for h in digests.values())
+    assert s.read_digests.__module__  # loaded by path, so this is the real module
+    text = s.format_digests(digests)
+    assert text.endswith("\n") and "\r" not in text
+
+
+def test_a_malformed_digest_line_names_the_file_and_line(tmp_path: Path) -> None:
+    s = _specs()
+    bad = tmp_path / "tools.sha256"
+    bad.write_text("# ok\ndeadbeef  short-hash.tar.gz\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"tools\.sha256:2"):
+        s.read_digests(bad)
 
 
 def test_only_the_suite_has_a_pin_that_is_not_a_version() -> None:
@@ -191,6 +272,26 @@ def test_unpack_refuses_an_archive_that_strips_to_nothing(tmp_path: Path) -> Non
     into.mkdir()
     with pytest.raises(RuntimeError, match="nothing left to extract"):
         inst._unpack(archive, into, 1, "slang")
+
+
+def test_a_wrong_digest_refuses_the_archive(tmp_path: Path) -> None:
+    """A retagged release, a bad mirror or a truncated download all give the right URL and
+    the wrong bytes, which is the whole reason the hashes are recorded."""
+    inst = _installer()
+    archive = _tar(tmp_path / "a.tar.gz", {"thing": b"payload"})
+    with pytest.raises(RuntimeError, match="does not match"):
+        inst._verify(archive, "a.tar.gz", {"a.tar.gz": "0" * 64}, False)
+    # The real hash passes.
+    inst._verify(archive, "a.tar.gz", {"a.tar.gz": inst._sha256(archive)}, False)
+
+
+def test_an_archive_with_no_digest_is_refused_unless_allowed(tmp_path: Path) -> None:
+    """Adding a tool must not quietly skip the check."""
+    inst = _installer()
+    archive = _tar(tmp_path / "a.tar.gz", {"thing": b"payload"})
+    with pytest.raises(RuntimeError, match="no SHA-256 recorded"):
+        inst._verify(archive, "a.tar.gz", {}, False)
+    inst._verify(archive, "a.tar.gz", {}, True)  # --allow-unpinned
 
 
 def test_a_missing_pin_is_a_message_not_a_traceback(tmp_path: Path) -> None:

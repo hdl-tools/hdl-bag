@@ -21,6 +21,7 @@ dependency is missing, it prints the exact command to run and stops.
 
 import argparse
 import copy
+import hashlib
 import http.client
 import lzma
 import os
@@ -37,6 +38,7 @@ from pathlib import Path
 from tool_specs import (
     DARWIN,
     DEFAULT_PREFIX,
+    DIGESTS,
     LOCK,
     NOT_INSTALLED,
     PLATFORMS,
@@ -45,9 +47,12 @@ from tool_specs import (
     Tool,
     UnsupportedPlatform,
     asset_for,
+    asset_name,
     asset_url,
+    format_digests,
     host_platform,
     path_line,
+    read_digests,
     read_lock,
     tool,
 )
@@ -94,6 +99,40 @@ def _fetch(url: str, dest: Path) -> None:
             shutil.copyfileobj(src, out)
     except (OSError, http.client.HTTPException) as exc:
         raise RuntimeError(f"cannot download {url}: {exc}") from exc
+
+
+def _sha256(path: Path) -> str:
+    """PATH's SHA-256, read in chunks: the OSS CAD Suite archive is half a gigabyte."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify(archive: Path, name: str, digests: dict[str, str], allow_unpinned: bool) -> None:
+    """Check ARCHIVE against the digest recorded for NAME.
+
+    A pinned version does not pin the bytes: a retagged release, a bad mirror or a truncated
+    download all give the right URL and the wrong content. An asset with no recorded digest
+    is refused rather than trusted, so adding a tool cannot quietly skip the check.
+    """
+    want = digests.get(name)
+    if want is None:
+        if allow_unpinned:
+            _say(f"    no digest recorded for {name}, allowed by --allow-unpinned")
+            return
+        raise RuntimeError(
+            f"no SHA-256 recorded for {name} in {DIGESTS.name}: record it with "
+            f"--write-digests, or pass --allow-unpinned to install without the check"
+        )
+    got = _sha256(archive)
+    if got != want:
+        raise RuntimeError(
+            f"{name} does not match {DIGESTS.name}:\n  expected {want}\n  got      {got}\n"
+            f"If the download was cut short, run this again; if upstream retagged the "
+            f"release, that is a change to review, not to paper over."
+        )
 
 
 def _members(tar: tarfile.TarFile, strip: int) -> Iterator[tarfile.TarInfo]:
@@ -167,7 +206,10 @@ def _swap_in(staged: Path, prefix: Path, dest: str) -> list[str]:
     return moved
 
 
-def _install_asset(t: Tool, a: Asset, url: str, prefix: Path, want: str) -> None:
+def _install_asset(
+    t: Tool, a: Asset, url: str, prefix: Path, want: str,
+    digests: dict[str, str], allow_unpinned: bool,
+) -> None:  # fmt: skip
     """Fetch and unpack T's archive into PREFIX, then record WANT.
 
     The staging directory lives inside the prefix, not in the system temporary directory, so
@@ -179,6 +221,7 @@ def _install_asset(t: Tool, a: Asset, url: str, prefix: Path, want: str) -> None
     with tempfile.TemporaryDirectory(prefix="hdl-bag-dl-") as dl:
         archive = Path(dl) / Path(url).name
         _fetch(url, archive)
+        _verify(archive, archive.name, digests, allow_unpinned)
         with tempfile.TemporaryDirectory(prefix=".hdl-bag-stage-", dir=prefix) as tmp:
             staged = Path(tmp) / "staged"
             staged.mkdir()
@@ -304,6 +347,55 @@ def _build_verilator(t: Tool, version: str, prefix: Path, plat: str, jobs: int) 
     _record(prefix, t, version)
 
 
+def _build_slang(t: Tool, version: str, prefix: Path, plat: str, jobs: int) -> None:
+    """Clone T at VERSION and install it under PREFIX with CMake.
+
+    Only linux-arm64 needs this: slang publishes binaries for linux-x64 and macos-arm64 and
+    nothing else. The OSS CAD Suite does ship a standalone slang that would be on PATH
+    anyway, but at whatever version the suite was built from, which is the drift #130 was
+    about -- so this builds the pinned one.
+
+    Note the build fetches its own dependencies (fmt and friends) through CMake at configure
+    time. Those are not covered by tools/tools.sha256, which pins release archives.
+    """
+    del plat  # only reached on linux-arm64 today, and the recipe is not platform-specific
+    for need in ("git", "cmake", "g++"):
+        if shutil.which(need) is None:
+            raise RuntimeError(
+                f"slang is built from source on this platform and {need} is not on PATH; "
+                f"it needs git, cmake and a C++20 compiler"
+            )
+    env = dict(os.environ)
+    with tempfile.TemporaryDirectory(prefix="hdl-bag-slang-") as tmp:
+        src, build = Path(tmp) / "src", Path(tmp) / "build"
+        _say(f"    cloning {t.source} at {version}")
+        _run(
+            ["git", "clone", "--depth", "1", "--branch", version, "--", t.source, str(src)],
+            Path(tmp), env, "slang clone",
+        )  # fmt: skip
+        target = (prefix / "slang").resolve()
+        _say(f"    building with -j{jobs} (this takes a while)")
+        configure = [
+            "cmake", "-S", str(src), "-B", str(build),
+            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={target}",
+            # The unit tests are a third of the build and nothing here runs them.
+            "-DSLANG_INCLUDE_TESTS=OFF",
+        ]  # fmt: skip
+        if shutil.which("ninja"):
+            configure += ["-G", "Ninja"]
+        _run(configure, src, env, "slang cmake configure")
+        _run(["cmake", "--build", str(build), "-j", str(jobs)], src, env, "slang cmake build")
+        if target.is_dir():
+            shutil.rmtree(target)
+        _run(["cmake", "--install", str(build)], src, env, "slang cmake install")
+    _say(f"    installed slang -> {prefix / 'slang'}")
+    _record(prefix, t, version)
+
+
+# A tool with no release archive on the chosen platform is built from source by one of these.
+_BUILDERS = {"verilator": _build_verilator, "slang": _build_slang}
+
+
 def _reported_version(t: Tool, prefix: Path) -> str | None:
     """What T's installed executable reports, or None when it is missing or silent."""
     exe = prefix / t.bin_dir / t.executable
@@ -351,6 +443,34 @@ def _check(chosen: list[Tool], prefix: Path, wants: dict[str, str]) -> int:
     return 1 if bad else 0
 
 
+def _write_digests(chosen: list[Tool], plat: str, lock: dict[str, str], path: Path) -> int:
+    """Download each archive, hash it, and merge the results into PATH.
+
+    It never installs, so one machine can record the digests for both platforms by running
+    it once per --platform. Existing entries for other assets are kept.
+    """
+    digests = read_digests(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for t in chosen:
+        if asset_for(t, plat) is None:
+            continue
+        url = asset_url(t, plat, lock)
+        name = asset_name(t, plat, lock)
+        with tempfile.TemporaryDirectory(prefix="hdl-bag-dl-") as dl:
+            archive = Path(dl) / name
+            _fetch(url, archive)
+            got = _sha256(archive)
+        if digests.get(name) not in (None, got):
+            _say(f"    {name}: digest CHANGED from {digests[name]} to {got}")
+        digests[name] = got
+        # Written after each archive, not at the end: these downloads total well over a
+        # gigabyte, and a connection that drops on the last one must not discard the rest.
+        path.write_text(format_digests(digests), encoding="utf-8", newline="\n")
+        _say(f"    {name} {got}")
+    _say(f"{path} now holds {len(digests)} digest(s)")
+    return 0
+
+
 def _writable(prefix: Path) -> bool:
     probe = prefix if prefix.is_dir() else prefix.parent
     return os.access(probe, os.W_OK)
@@ -373,6 +493,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--check", action="store_true", help="report versions; 1 if any drift")
     ap.add_argument("--print-path", action="store_true", help="print only the PATH line")
     ap.add_argument("--force", action="store_true", help="reinstall even if already at the pin")
+    ap.add_argument("--digests", default=str(DIGESTS), help="recorded SHA-256 file to check")
+    ap.add_argument("--write-digests", action="store_true",
+                    help="download and hash each archive; installs nothing")  # fmt: skip
+    ap.add_argument("--allow-unpinned", action="store_true",
+                    help="install an archive with no recorded digest")  # fmt: skip
     args = ap.parse_args(argv)
 
     try:
@@ -403,6 +528,19 @@ def main(argv: list[str]) -> int:
     if args.check:
         return _check(chosen, prefix, wants)
 
+    try:
+        digests = read_digests(Path(args.digests))
+    except (ValueError, OSError) as exc:
+        _say(str(exc))
+        return 2
+
+    if args.write_digests:
+        try:
+            return _write_digests(chosen, plat, lock, Path(args.digests))
+        except (RuntimeError, OSError, KeyError, ValueError) as exc:
+            _say(str(exc))
+            return 1
+
     if args.list:
         for t in chosen:
             a = asset_for(t, plat)
@@ -427,9 +565,14 @@ def main(argv: list[str]) -> int:
         try:
             a = asset_for(t, plat)
             if a is None:
-                _build_verilator(t, want, prefix, plat, args.jobs)
+                builder = _BUILDERS.get(t.name)
+                if builder is None:
+                    raise RuntimeError(f"{t.name} has no archive for {plat} and no way to build it")
+                builder(t, want, prefix, plat, args.jobs)
             else:
-                _install_asset(t, a, asset_url(t, plat, lock), prefix, want)
+                _install_asset(
+                    t, a, asset_url(t, plat, lock), prefix, want, digests, args.allow_unpinned
+                )
         except (RuntimeError, OSError, KeyError, ValueError) as exc:
             _say(f"  {t.name}: {exc}")
             return 1

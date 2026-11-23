@@ -29,7 +29,7 @@ def to_spec_data(spec: ir.Spec) -> SpecData:
         description="Written from the IR by bag; notes are not part of the IR.",
     )
     data.project.update({
-        "Project name": p.name, "Spec revision": p.revision, "Author": p.author,
+        "Project name": p.name, "Module prefix": p.module_prefix, "Spec revision": p.revision, "Author": p.author,
         "SystemVerilog standard": p.sv_std, "Output directory": p.output_dir,
         "Generate RTL": _yn(p.outputs.rtl), "Generate C header": _yn(p.outputs.c_header),
         "Generate memory-map doc": _yn(p.outputs.doc), "Generate cocotb unit tests": _yn(p.outputs.tests),
