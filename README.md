@@ -16,7 +16,7 @@ itself.
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 97 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
+| Spec workbook template, reader and 99 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
 | Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 7) |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |

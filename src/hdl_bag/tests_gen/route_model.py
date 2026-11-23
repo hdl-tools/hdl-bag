@@ -639,6 +639,23 @@ def _may_refuse(spec: Spec, master: str, bridges: tuple[str, ...], slave: str) -
                for k, _, _ in _splitters(spec, master, bridges, slave))  # fmt: skip
 
 
+def cache_tie_refusals(spec: Spec) -> dict[tuple[str, str], list[str]]:
+    """{(master, port with CACHE tied to 0 on its way): the slaves it reaches where a converter
+    can refuse its accesses (D104)}, over every region's base, both ways."""
+    out: dict[tuple[str, str], set[str]] = {}
+    for m in spec.masters:
+        for r in spec.memory_map:
+            if r.base >= 1 << m.addr_width:
+                continue
+            for write in (True, False):
+                e = route(spec, m.name, r.base, write, False, {})
+                tied = next((p for p in (m.name, *e.bridges) if _option(spec, p, "cache") == "tie-0"),
+                            None)  # fmt: skip
+                if e.slave is not None and e.may_refuse and tied is not None:
+                    out.setdefault((m.name, tied), set()).add(e.slave)
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
 def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, addr: int,
                    size: int, beats: int = 1) -> bool:  # fmt: skip
     """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104)."""

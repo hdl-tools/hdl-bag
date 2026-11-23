@@ -37,7 +37,8 @@ keep to it yourself.
   non-modifiable FIXED burst of more than one beat, and a non-modifiable INCR burst of 2 to
   17 beats. The two bridges also refuse a non-modifiable access that is wider than the
   downstream bus. \code{bag_axi2ahb} refuses a non-modifiable burst that its width
-  converter must split. No check reports this.
+  converter must split. \cmd{bag check} warns where CACHE is tied to 0 on the way
+  (\ruleid{AXI-SPLIT-REFUSED}): every access is then non-modifiable.
 
   What you can do: send modifiable bursts (\code{AxCACHE[1]} = 1) on these paths, or
   single beats.
@@ -124,7 +125,8 @@ the fabric, and the reads through \code{bag_axi2ahb}.
 \item \textbf{Partial writes into APB3.} APB3 has no PSTRB. A partial write reaches an
   APB3 slave that is wider than 8 bits as a full-word write: the bytes with a clear
   strobe are written too. The same happens on an APB4 slave whose PSTRB you tie in
-  \sheet{Port_Options}. What you can do: write whole words to such slaves.
+  \sheet{Port_Options}, and \cmd{bag check} warns about that tie (\ruleid{PORTOPT-PSTRB-WORD}).
+  What you can do: write whole words to such slaves.
 \item \textbf{Narrow APB slaves.} \code{bag_axi2apb} splits a beat that is wider than
   the APB bus into several APB transfers. An error on one of them does not stop the
   others. So a write can change some bytes of the slave while the master gets SLVERR.

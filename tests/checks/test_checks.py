@@ -68,9 +68,20 @@ def _messages(tmp_path: Path, edits: list[Edit] | SpecData) -> list[str]:
     )
 
 
+# The sample's own PSTRB-tie warnings (D106): wdt0 and rtc0 have PSTRB tied to the default.
+SAMPLE_PSTRB = [
+    "Port_Options row 16: PSTRB is tied on wdt0: a write of part of its 32-bit word overwrites "
+    "the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)",
+    "Port_Options row 17: PSTRB is tied on rtc0: a write of part of its 32-bit word overwrites "
+    "the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)",
+]
+
+
 def _without_sample_wrap(messages: list[str]) -> list[str]:
-    """MESSAGES without the sample's own WRAP warnings (SAMPLE_WRAP), when they are exactly
-    those; any other WRAP warning, or one of them missing, keeps every message."""
+    """MESSAGES without the sample's own warnings: its WRAP warnings (SAMPLE_WRAP) when they
+    are exactly those, and its PSTRB-tie warnings (SAMPLE_PSTRB). Any other WRAP warning, or
+    one of the sample's missing, keeps every WRAP message."""
+    messages = [m for m in messages if m not in SAMPLE_PSTRB]
     if sorted(wrap_refusals(messages)) != sorted(SAMPLE_WRAP):
         return messages
     return [m for m in messages if "(AXI-WRAP-REFUSED)" not in m]
@@ -324,6 +335,13 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
         ("Wrapper", 38, "Port", "br_per2main"), ("Wrapper", 38, "Exposed at top", "N"),
         ("Wrapper", 38, "If not exposed", "internal")],
      ["Topology row 17: bridges link fabrics in a loop: main_xbar -> br_main2per -> periph_apb -> br_per2main -> main_xbar (TOPO-BRIDGE-CYCLE)"]),
+    ("PORTOPT-PSTRB-WORD", [("Port_Options", 10, "PSTRB", "tie-default")],
+     ["Port_Options row 10: PSTRB is tied on uart0: a write of part of its 32-bit word "
+      "overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)"]),
+    ("AXI-SPLIT-REFUSED", [("Port_Options", 5, "CACHE", "tie-0")],
+     ["Masters row 5: accesses from cpu0 to clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR "
+      "where a converter must split them: CACHE is tied to 0 on cpu0, so they are non-modifiable. "
+      "Drive CACHE, or tie it to the default (AXI-SPLIT-REFUSED)"]),
     ("ACC-UNKNOWN-NAME", [("Access_Rules", 5, "Master", "dma9")],
      ["Access_Rules row 5: dma9 is not a connected master or bridge (ACC-UNKNOWN-NAME)"]),
     ("ACC-NOT-SAME-FABRIC", [("Access_Rules", 6, "Slave / bridge", "uart0")],
@@ -470,10 +488,11 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
 ]  # fmt: skip
 
 
-def test_golden_has_only_its_wrap_warnings() -> None:
+def test_golden_has_only_its_wrap_and_pstrb_warnings() -> None:
     path = GOLDEN_DIR / "demo_ss.xlsx"
     messages = [f.message for f in run_checks(read_workbook(path), GOLDEN_DIR).findings]
-    assert unexpected(messages, SAMPLE_WRAP) == []
+    assert messages[-2:] == SAMPLE_PSTRB
+    assert unexpected(messages[:-2], SAMPLE_WRAP) == []
     assert messages[1] == (
         "Masters row 6: WRAP bursts from dma0 to ddr0 get SLVERR: dw adapter main_xbar_dw_2_ddr0 "
         "cannot convert them. Send INCR bursts on this path, or keep it at one width and "

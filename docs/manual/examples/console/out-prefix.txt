@@ -1,5 +1,7 @@
 $ bag generate files/nested_prefix.ir.yaml -o out
-nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 0 warning(s)
+warning: Port_Options row 8: PSTRB is tied on rtc0: a write of part of its 32-bit word overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)
+warning: Port_Options row 9: PSTRB is tied on wdt0: a write of part of its 32-bit word overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)
+nested_prefix.ir.yaml (checked as the workbook it converts to): 0 error(s), 2 warning(s)
 wrote 39 file(s) to out (top demo_ss_bus_top)
 $ ls out/rtl
 demo_ss_bus_top.sv

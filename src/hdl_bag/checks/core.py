@@ -53,6 +53,8 @@ RULES: Final[dict[str, Severity]] = {
     "FAB-GUARD-ID-WIDTH": W,
     "PORT-ADAPTER": E,
     "AXI-WRAP-REFUSED": W,
+    "AXI-SPLIT-REFUSED": W,
+    "PORTOPT-PSTRB-WORD": W,
     # topology
     "TOPO-UNKNOWN-NAME": E,
     "TOPO-ILLEGAL-LINK": E,

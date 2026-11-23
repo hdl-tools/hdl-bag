@@ -30,16 +30,21 @@ The sample is a small subsystem with five fabrics:
 Open \file{spec.xlsx} in Excel or LibreOffice to see how each sheet describes this.
 Chapter~\ref{ch:workbook} explains every sheet.
 
-\subsection{The two warnings}
+\subsection{The four warnings}
 
-The check gives no error and two warnings, so generation goes ahead. A
+The check gives no error and four warnings, so generation goes ahead. A
 \term{warning} is a finding that does not stop BAG; an \term{error} does
-(chapter~\ref{ch:checks}). Both warnings say the same thing for one master each:
+(chapter~\ref{ch:checks}). The first two say the same thing for one master each:
 \code{cpu0} has a 128-bit data path and \code{main_xbar} has 64 bits, so BAG puts a
 width converter (\code{cpu0_dw_2_main_xbar}) between them. That converter cannot split a
 WRAP burst, so it answers one with the error response SLVERR. The warning lists every
 slave the master reaches through it. If your master sends WRAP bursts (a cache line
 fill often does), give it the width of the fabric, or have it send INCR bursts.
+
+The other two are about \code{wdt0} and \code{rtc0}, whose PSTRB the sample ties in
+\sheet{Port_Options}. With PSTRB tied, every write stores the whole 32-bit word, so a
+write of one byte overwrites the other three (\ruleid{PORTOPT-PSTRB-WORD}). Write whole
+words to these slaves, or drive PSTRB.
 
 \subsection{What was written}
 
