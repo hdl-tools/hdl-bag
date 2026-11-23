@@ -3,11 +3,15 @@
 """Memory_Map, bridge windows, Access_Rules, Address_Decode and secure regions."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
 from hdl_bag.protocols import AXI_FAMILY, MISS_RESPONSES, OPTIONAL_SIGNALS
 from hdl_bag.reader.model import Row
+
+if TYPE_CHECKING:
+    from hdl_bag.checks import CheckResult
 
 
 @dataclass(frozen=True)
@@ -277,6 +281,25 @@ def check_access_rules(ctx: Context) -> None:
                 link.row,
                 f"no master on {link.fabric} can reach {link.end}",
             )
+
+
+def check_unreachable_slaves(ctx: Context, result: "CheckResult") -> None:
+    """A slave no master can reach once Access_Rules, region access (RO, WO) and the bridges on
+    the way are combined (D105), beyond the fabric-level case check_access_rules reports."""
+    from hdl_bag.formal_gen.depth import unreachable_slaves
+    from hdl_bag.ir.resolve import resolve
+
+    # Already told: the fabric-level case, and a slave with no region (MM-PATH-NO-REGION).
+    told = {f.message.rsplit(" can reach ", 1)[-1].split(" (")[0] for f in ctx.findings
+            if f.rule == "ACC-UNREACHABLE-SLAVE"}  # fmt: skip
+    rows = {link.end: link.row for link in ctx.links if link.side == "slave"}
+    spec = resolve(result)
+    mapped = {r.slave for r in spec.memory_map}
+    for slave in unreachable_slaves(spec):
+        if slave not in told and slave in mapped:
+            ctx.report("ACC-UNREACHABLE-SLAVE", rows[slave],
+                       f"no master can reach {slave}: Access_Rules, region access and the bridges "
+                       "on the way allow no read or write")  # fmt: skip
 
 
 def check_address_decode(ctx: Context, regions: list[Region]) -> None:

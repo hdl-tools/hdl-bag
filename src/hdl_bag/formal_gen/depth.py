@@ -52,6 +52,14 @@ def reaching(spec: Spec) -> dict[tuple[str, str], set[str]]:
     return out
 
 
+def unreachable_slaves(spec: Spec) -> list[str]:
+    """The slaves no access of any master reaches (D105): Access_Rules, region access and the
+    bridges on the way together let nothing in. bag check warns about each (ACC-UNREACHABLE-SLAVE)
+    and the generated tests leave them out."""
+    reached = {s for _, s in reachable(spec)}
+    return sorted(s.name for s in spec.slaves if s.name not in reached)
+
+
 def reachable(spec: Spec) -> set[tuple[str, str]]:
     """The (master, slave) pairs where some access of the master reaches the slave."""
     return set(reaching(spec))

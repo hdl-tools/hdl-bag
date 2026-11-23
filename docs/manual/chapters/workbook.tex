@@ -797,7 +797,10 @@ the crossbar.
 The rules: both names must be connected ports (\ruleid{ACC-UNKNOWN-NAME}) on the same
 fabric (\ruleid{ACC-NOT-SAME-FABRIC}), and a pair may have one rule
 (\ruleid{ACC-DUPLICATE}). If every master of a fabric is blocked from a slave,
-\cmd{bag check} warns (\ruleid{ACC-UNREACHABLE-SLAVE}).
+\cmd{bag check} warns (\ruleid{ACC-UNREACHABLE-SLAVE}). It also warns when the rules,
+region access and the bridges on the way together leave a slave no read or write: a
+write-only region that every master may only read, or a slave behind a bridge that no
+master may use. The generated tests leave such a slave out.
 
 \section{Memory\_Map}
 

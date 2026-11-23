@@ -605,3 +605,36 @@ def test_findings_are_sorted_and_deterministic(tmp_path: Path) -> None:
     first = _messages(tmp_path, edits)
     assert first == _messages(tmp_path, edits)
     assert first[0].startswith("Clocks row 5")
+
+
+def _unreachable(messages: list[str]) -> list[str]:
+    return [m for m in messages if "(ACC-UNREACHABLE-SLAVE)" in m]
+
+
+def test_a_slave_that_rules_and_region_access_shut_together_is_unreachable(tmp_path: Path) -> None:
+    """D105 (seed 012): ddr0's only region is write-only and every master may only read it, so
+    neither a read nor a write gets in, though no rule denies it outright."""
+    edits = [
+        ("Memory_Map", 7, "Access", "WO"),
+        *_row("Access_Rules", 9, Master="cpu0", Access="RO"), ("Access_Rules", 9, "Slave / bridge", "ddr0"),
+        *_row("Access_Rules", 10, Master="dma0", Access="RO"), ("Access_Rules", 10, "Slave / bridge", "ddr0"),
+    ]  # fmt: skip
+    assert _unreachable(_messages(tmp_path, edits)) == [
+        "Topology row 9: no master can reach ddr0: Access_Rules, region access and the bridges "
+        "on the way allow no read or write (ACC-UNREACHABLE-SLAVE)"
+    ]
+
+
+def test_the_slaves_behind_a_bridge_no_master_may_use_are_unreachable(tmp_path: Path) -> None:
+    """D105 (seed 036): every master on main_xbar is denied br_main2per, so nothing reaches the
+    slaves behind it either."""
+    edits = [
+        *_row("Access_Rules", 9, Master="cpu0", Access="-"), ("Access_Rules", 9, "Slave / bridge", "br_main2per"),
+        *_row("Access_Rules", 10, Master="dbg0", Access="-"), ("Access_Rules", 10, "Slave / bridge", "br_main2per"),
+        *_row("Access_Rules", 11, Master="br_ahb2main", Access="-"), ("Access_Rules", 11, "Slave / bridge", "br_main2per"),
+    ]  # fmt: skip
+    found = _unreachable(_messages(tmp_path, edits))
+    assert any("no master on main_xbar can reach br_main2per" in m for m in found)
+    behind = sorted(m.split("no master can reach ")[1].split(":")[0] for m in found
+                    if "no master can reach " in m)  # fmt: skip
+    assert behind == ["gpio0", "spi0", "timer0", "uart0"]
