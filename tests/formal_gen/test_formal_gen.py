@@ -4,16 +4,21 @@
 environment, the SymbiYosys job, and that every port they bind to exists on the top."""
 
 import re
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag
+from hdl_bag.checks import run_checks
 from hdl_bag.flows.formal import job_tasks
 from hdl_bag.formal_gen import (
     COVER_DEPTH,
     PROTOCOL_DEPTH,
     PROVE_DEPTH,
+    _buffer_in_front,
     ahb_ports,
     axi4_ports,
     checkers,
@@ -21,8 +26,12 @@ from hdl_bag.formal_gen import (
     props_module,
     render_protocol,
 )
+from hdl_bag.formal_gen import (
+    depth as path_depth,
+)
 from hdl_bag.formal_gen.depth import PATH_EDGES, PATH_EDGES_PER_HOP
 from hdl_bag.formal_gen.units import (
+    ROUTE_COVER_MARGIN,
     ROUTE_CYCLES,
     ROUTE_CYCLES_PER_FIFO,
     ROUTE_CYCLES_PER_MIDPOINT_STAGE,
@@ -35,9 +44,11 @@ from hdl_bag.formal_gen.units import (
 )
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.gen.netlist import build_netlist
-from hdl_bag.ir import Spec, load
+from hdl_bag.ir import Spec, load, resolve
 from hdl_bag.naming import formal_name, formal_unit
 from hdl_bag.protocols import Protocol
+from hdl_bag.reader import read_workbook
+from hdl_bag.template.builder import build_workbook
 from hdl_bag.templates import builtin_registry
 
 TESTS = Path(__file__).parents[1]
@@ -274,6 +285,12 @@ def test_no_formal_for_a_user_supplied_fabric_or_when_not_asked(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------- port protocol (D60)
+def _route_options(depth: int, clocks: str) -> str:
+    """A route job's options for a bmc of DEPTH (its cover searches further, D108)."""
+    cover = depth * ROUTE_COVER_MARGIN
+    return f"bmc: depth {depth}\ncover: mode cover\ncover: depth {cover}\nmulticlock {clocks}\n"
+
+
 def _protocol(tmp_path: Path, config: Path) -> str:
     spec = load(config)
     generate(spec, tmp_path, config.parent)
@@ -1049,15 +1066,15 @@ def test_a_unit_in_one_clock_domain_runs_on_one_clock(tmp_path: Path) -> None:
     generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path / "bp", P3)
     formal = tmp_path / "bp" / "formal"
     xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
-    assert "bmc: depth 8\ncover: mode cover\ncover: depth 8\nmulticlock off\n" in xbar
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 16\nmulticlock off\n" in xbar
     cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")  # 64 to 32
-    assert "bmc: depth 24\ncover: mode cover\ncover: depth 24\nmulticlock on\n" in cdc
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 48\nmulticlock on\n" in cdc
     generate(load(P3 / "mixed_narrow_apb.ir.yaml"), tmp_path / "mn", P3)
     mn = tmp_path / "mn" / "formal"
     for unit, depth, clocks in (("br_c8", 36, "on"), ("br_l8", 12, "off"), ("br_l16", 10, "off"),
                                 ("br_lite", 8, "off")):  # fmt: skip
         job = (mn / f"mixed_narrow_apb_route_{unit}.sby").read_text(encoding="utf-8")
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock {clocks}\n"
+        want = _route_options(depth, clocks)
         assert want in job, unit
 
 
@@ -1079,7 +1096,7 @@ def test_a_bridge_with_a_fifo_in_one_clock_domain_gets_three_more_edges(tmp_path
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        want = _route_options(depth, "off")
         assert want in job, (config, unit)
 
 
@@ -1096,7 +1113,7 @@ def test_a_fabric_with_a_deep_mid_point_gets_an_edge_per_further_stage(tmp_path:
     for config, depth in cases:
         generate(load(P3 / f"{config}.ir.yaml"), tmp_path / config, P3)
         job = (tmp_path / config / "formal" / f"{config}_route_bus.sby").read_text(encoding="utf-8")
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock off\n"
+        want = _route_options(depth, "off")
         assert want in job, config
 
 
@@ -1116,7 +1133,7 @@ def test_a_bridge_across_domains_that_widens_the_data_gets_32_steps(tmp_path: Pa
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        want = _route_options(depth, "on")
         assert want in job, (config, unit)
 
 
@@ -1135,7 +1152,7 @@ def test_an_axi4_lite_bridge_with_a_fifo_across_domains_gets_34_steps(tmp_path: 
         job = (tmp_path / config / "formal" / f"{config}_route_{unit}.sby").read_text(
             encoding="utf-8"
         )
-        want = f"bmc: depth {depth}\ncover: mode cover\ncover: depth {depth}\nmulticlock on\n"
+        want = _route_options(depth, "on")
         assert want in job, (config, unit)
 
 
@@ -1277,7 +1294,7 @@ def test_the_route_harness_checks_each_fabric_and_bridge_alone(tmp_path: Path) -
     assert "\nprep -top bag_ahb_fixed_unit_ahb\n" in job
     # One clock domain: one clock, ROUTE_CYCLES edges.
     assert ROUTE_CYCLES == 8
-    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 8\n"
+    assert ("bmc: mode bmc\nbmc: depth 8\ncover: mode cover\ncover: depth 16\n"
             "multiclock off\n") in job  # fmt: skip
     # On an AXI4 crossbar, the master is the ID's top bits (dma, cpu, dbg: 2 of 6).
     generate(load(P3 / "axi_xbar_rules.ir.yaml"), tmp_path / "xr", P3)
@@ -1362,6 +1379,149 @@ def test_no_scoreboard_assumption_constrains_the_fabric(tmp_path: Path) -> None:
     assert "assume (!((m0_ahb_htrans[1]" not in text
     # A response never pays for the request taken in its own cycle (formal review 1).
     assert "ahb_m0_a_delivered: assert (sb_a0_due != '0);\n" in text
+
+
+def test_a_crossing_in_front_of_a_one_at_a_time_lite_converter_hides_its_limit(
+    tmp_path: Path,
+) -> None:
+    """Seed 011: the CDC in front of the converter takes reads of its own, so the port can open
+    two of one ID although the converter behind takes one at a time. How many the port can open
+    depends on the CDC's depth, so the job neither asserts these events absent nor covers them."""
+    c = Cfg("cdcpc", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n").domain("D1", "clk_1", "rst_1_n")
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin", max_trans=(2, 2))
+    c.master("m0", "AXI4", 32, 32, "D1").link("m0", "l", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert [a.type for a in spec.adapters if a.port == "m0"][:2] == ["cdc", "pc"]
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "cdcpc_protocol.sv").read_text(encoding="utf-8")
+    for event in ("same_id", "full"):
+        assert f"proto_no_{event}_m0: assert" not in text, event
+        assert f"proto_{event}_m0: cover" not in text, event
+        assert (f"  // proto_{event}_m0: neither asserted nor covered, the cdc adapter "
+                "m0_cdc_2_l in front of m0_pc_2_l takes reads of its own\n") in text  # fmt: skip
+    assert "proto_multi_write_m0: cover" in text
+
+
+def test_a_route_cover_searches_twice_as_deep_as_its_bmc(tmp_path: Path) -> None:
+    """Regress seeds 014 and 005 (D108): covers reachable at step 8 of an 8-edge job and at step
+    33 of a 24-step job were reported unreached. A cover search ends at the last cover reached,
+    so the margin costs nothing where every cover is reachable. The bmc keeps its depth, as the
+    protocol job's does (D79): a cover past it shows the check can fire there."""
+    assert ROUTE_COVER_MARGIN == 2
+    generate(load(P3 / "bridges_pulp.ir.yaml"), tmp_path, P3)
+    formal = tmp_path / "formal"
+    xbar = (formal / "bridges_pulp_route_xbar.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 8\ncover: mode cover\ncover: depth 16\nmulticlock off\n" in xbar
+    cdc = (formal / "bridges_pulp_route_br_per.sby").read_text(encoding="utf-8")
+    assert "bmc: depth 24\ncover: mode cover\ncover: depth 48\nmulticlock on\n" in cdc
+
+
+def _route_text(tmp_path: Path, c: Cfg, unit: str) -> str:
+    """The route harness of UNIT for CFG, whose Access_Rules may leave a port unreachable (a
+    warning, ACC-UNREACHABLE-SLAVE, that resolve_cfg would refuse)."""
+    path = tmp_path / f"{c.name}.xlsx"
+    build_workbook(data=c.data).save(path)
+    shutil.copy(GOLDEN.parent / "header.txt", tmp_path / "header.txt")
+    result = run_checks(read_workbook(path), tmp_path)
+    assert not [f.message for f in result.findings if f.severity == "error"]
+    generate(resolve(result), tmp_path / "out", tmp_path)
+    return (tmp_path / "out" / "formal" / f"{c.name}_route_{unit}.sv").read_text(encoding="utf-8")
+
+
+def _denied_port(protocol: str) -> Cfg:
+    """Master m0 reaches slave s0; Access_Rules deny it s1, the fabric's only other slave."""
+    c = Cfg(f"denied{protocol.replace('-', '').lower()}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    apb = protocol == "APB4"
+    na = APB4_NA if apb else AXIL_NA
+    c.fabric("f", protocol, 32, 32, "D0", "single-master" if apb else "round-robin")
+    c.master("m0", protocol, 32, 32, "D0").link("m0", "f", 0)
+    c.decode("m0", "PSLVERR" if apb else "DECERR").option("m0", **na)
+    for k in range(2):
+        c.slave(f"s{k}", protocol, 32, 32, "D0").link("f", f"s{k}", k).option(f"s{k}", **na)
+        c.region(f"s{k}", "regs", 0x4000_0000 + k * 0x1000, 0x1000)
+    return c.access("m0", "s1", "-")
+
+
+def test_a_route_job_covers_no_request_on_a_port_every_master_is_denied(tmp_path: Path) -> None:
+    """Seeds 015 and 049: the fabric must send nothing to such a port, which its assertion
+    checks, so a cover of a request there can never be reached."""
+    text = _route_text(tmp_path, _denied_port("APB4"), "f")
+    assert re.search(r"cover_f_\w*s0\w*_p_routed: cover", text)
+    assert not re.search(r"cover_f_\w*s1\w*_p_routed: cover", text)
+    assert re.search(r"f_\w*s1\w*_p_routed: assert", text)
+
+
+def test_a_route_job_has_no_lite_checker_on_a_port_every_master_is_denied(tmp_path: Path) -> None:
+    """Seed 011: the ZipCPU checker always covers a response, which such a port never sees. The
+    harness keeps the environment's responses quiet there instead."""
+    text = _route_text(tmp_path, _denied_port("AXI4-Lite"), "f")
+    assert "u_chk_s0 (" in text
+    assert "u_chk_s1 (" not in text
+    assert re.search(r"f_\w*s1\w*_aw_routed: assert", text)  # what replaces the checker
+    assert re.search(r"f_\w*s1\w*_w_quiet: assert \(!\w*s1\w*_wvalid\);", text)
+    for ch in ("bvalid", "rvalid"):
+        assert re.search(rf"assume \(\w*s1\w*_{ch} == 1'b0\);", text), ch
+
+
+def test_a_route_job_covers_no_contention_for_a_kind_no_slave_takes(tmp_path: Path) -> None:
+    """Seed 021: the crossbar's only slave is read-only, so two masters never contend to write."""
+    c = Cfg("rocontend", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    for k in range(2):
+        c.master(f"m{k}", "AXI4-Lite", 32, 32, "D0").link(f"m{k}", "f", k)
+        c.decode(f"m{k}", "DECERR").option(f"m{k}", **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000, access="RO")
+    text = _route_text(tmp_path, c, "f")
+    assert "cover_f_ar_contended: cover" in text
+    assert "cover_f_aw_contended: cover" not in text
+
+
+def test_a_port_is_as_deep_as_the_longest_kind_of_access_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seed 005: a near master only writes s3 and reads come from a far one, so s3's read cover
+    needs the far master's path."""
+    pairs = {("near", "s3"): {"write"}, ("far", "s3"): {"read"}}
+    costs = {"near": 20, "far": 44}
+    monkeypatch.setattr(path_depth, "reaching", lambda spec: pairs)
+    monkeypatch.setattr(path_depth, "_cost", lambda s, n, a, b: costs[b if a == "s3" else a])
+    assert path_depth.port_depths(None, None, ["s3"]) == {"s3": 44}  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("kinds", "place", "found"), [
+    (("cdc", "pc"), 1, "cdc"), (("fifo", "pc"), 1, "fifo"), (("cut", "pc"), 1, "cut"),
+    (("dw", "pc"), 1, None), (("iw", "pc"), 1, None), (("pc", "cdc"), 0, None),
+])  # fmt: skip
+def test_only_a_buffer_in_front_of_the_lite_converter_hides_its_limit(
+    kinds: tuple[str, str], place: int, found: str | None
+) -> None:
+    """Review: a register slice or FIFO takes reads of its own just as a CDC does."""
+    chain = [SimpleNamespace(adapter=SimpleNamespace(type=k)) for k in kinds]
+    got = _buffer_in_front(chain, place)  # type: ignore[arg-type]
+    assert (got.adapter.type if got and got.adapter else None) == found
+
+
+def test_a_route_job_covers_contention_only_where_two_masters_meet(tmp_path: Path) -> None:
+    """Review: m1 may only read s0, so m0 and m1 never contend to write though s0 takes writes."""
+    c = Cfg("onewriter", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    for k in range(2):
+        c.master(f"m{k}", "AXI4-Lite", 32, 32, "D0").link(f"m{k}", "f", k)
+        c.decode(f"m{k}", "DECERR").option(f"m{k}", **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    text = _route_text(tmp_path, c.access("m1", "s0", "RO"), "f")
+    assert "cover_f_ar_contended: cover" in text
+    assert "cover_f_aw_contended: cover" not in text
 
 
 # ---- Project > Module prefix (stage 3 of #106): the checkers and jobs follow the renamed units

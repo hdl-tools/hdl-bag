@@ -113,8 +113,21 @@ def test_the_night_is_green_only_when_every_part_is() -> None:
     gate = _load("nightly.yml")["jobs"]["nightly"]
     parts = ["corpus", "corpus-alone", "regress", "summary"]
     assert gate["needs"] == parts and gate["if"] == "always()"
+    skip = ' || test "${{ inputs.regress_only }}" = true'
     assert [s["run"] for s in gate["steps"]] == [
-        f'test "${{{{ needs.{p}.result }}}}" = success' for p in parts]  # fmt: skip
+        f'test "${{{{ needs.{p}.result }}}}" = success{skip if p.startswith("corpus") else ""}'
+        for p in parts]  # fmt: skip
+
+
+def test_a_dispatch_can_run_only_the_random_seeds() -> None:
+    """Diagnosing a seed failure on a branch should not cost the corpus's hours. The schedule
+    has no inputs, so a scheduled night always runs the corpus."""
+    flow = _load("nightly.yml")
+    box = _triggers(flow)["workflow_dispatch"]["inputs"]["regress_only"]
+    assert (box["type"], box["default"]) == ("boolean", False)
+    for job in ("corpus", "corpus-alone"):
+        assert flow["jobs"][job]["if"] == "${{ !inputs.regress_only }}"
+    assert "if" not in flow["jobs"]["regress"]
 
 
 def test_the_interim_cron_left_pr_yml() -> None:

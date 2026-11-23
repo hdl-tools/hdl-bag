@@ -33,22 +33,22 @@ from hdl_bag.tests_gen.route_model import (
     private_words,
     pstrb_path,
     region_edges,
-    takes_partial_writes,
+    split_error_word,
+    stores_single_bytes,
 )
 
 _AXI = ("AXI4", "AXI4-Lite")
 
 
 def _unaligned_path(spec: Spec) -> bool:
-    """An AXI master reaches, without error, a slave that can take a partial write."""
-    return any(plain_word(spec, m, s) and takes_partial_writes(spec, s)
+    """An AXI master reaches, without error, a slave that stores a partial write as one."""
+    return any((found := plain_word(spec, m, s)) and stores_single_bytes(spec, found[1])
                for m in spec.masters if m.protocol in _AXI for s in spec.slaves)  # fmt: skip
 
 
 def _split_path(spec: Spec) -> bool:
-    """A master reaches, without error, a slave narrower than the 32-bit word it sends."""
-    return any(plain_word(spec, m, s)
-               for m in spec.masters for s in spec.slaves if s.data_width < 32)  # fmt: skip
+    """A master reaches, without error, a narrow slave that can answer an error."""
+    return any(split_error_word(spec, m, s) for m in spec.masters for s in spec.slaves)
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,7 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("every_master_reaches_what_the_model_says", 3000, lambda _: True),
     GeneratedTest("arbitration_follows_the_fabric_policy", 50, lambda s: any(
         f.protocol == "AHB-Lite" and contention(s, f, secure_too=True) for f in s.fabrics)),
-    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 50, lambda s: any(
+    GeneratedTest("concurrent_traffic_keeps_every_masters_data", 500, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
     GeneratedTest("traffic_survives_back_pressure_on_every_channel", 500, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),

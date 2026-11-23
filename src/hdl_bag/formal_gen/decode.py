@@ -83,6 +83,22 @@ def port_accesses(spec: Spec, fabric: Fabric) -> list[frozenset[str]]:
     return [frozenset(s) for s in out]
 
 
+def contended(spec: Spec, fabric: Fabric, kind: str | None) -> bool:
+    """Whether FABRIC's first two masters can both send a KIND ("read", "write", None for either)
+    of access to one slave port, as the route job's contention cover needs."""
+    masters = masters_of(fabric)
+    if len(masters) < 2:
+        return False
+    writes = {"read": (False,), "write": (True,)}.get(kind or "", (False, True))
+    for region in [*(r for r in spec.memory_map if r.fabric == fabric.name), None]:
+        for write in writes:
+            first, second = ({_target(fabric, m, region, write, ns) for ns in (False, True)}
+                             for m in masters[:2])  # fmt: skip
+            if any(k < len(fabric.slave_ports) for k in first & second):
+                return True
+    return False
+
+
 def _case(fabric: Fabric, master: str, region: Any | None) -> str:
     """The target for each read/write and secure bit, as a case on {write, nonsec}."""
     rows = [f"2'b{int(w)}{int(n)}: return {_target(fabric, master, region, w, n)};"

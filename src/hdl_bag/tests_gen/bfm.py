@@ -316,7 +316,7 @@ class Beat:
     size: int = 2
     burst: int = 0
     trans: int = NONSEQ
-    prot: int = 0b0011
+    prot: int = 0b1011  # cacheable (route_model.TRAFFIC_HPROT)
     nonsec: int = 0
     lock: int = 0
 
