@@ -333,7 +333,7 @@ unit with one clock domain runs on one clock, and each solver step is one edge.
 \item[\file{<project>_reset}] Quiet in reset: while a domain's reset is held, the design
   asks nothing of the masters and slaves in that domain. No request VALID, PSEL or
   HTRANS goes to a slave, no response VALID to an AXI master, and HREADY is high towards
-  an AHB-Lite master. Tasks: \code{prove} (depth 6) and \code{cover} (depth 40). This
+  an AHB-Lite master. Tasks: \code{prove} (depth 6) and \code{cover} (depth 80). This
   is a proof: it holds in every reachable state.
 \item[\file{<project>_protocol}] Port protocol: each port of the top follows the rules of
   its protocol. On a port where the design is the slave, the checker asserts the rules
