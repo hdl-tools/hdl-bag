@@ -37,7 +37,9 @@ from hdl_bag.tests_gen.route_model import (
     check_write,
     midpoint_buffers,
     midpoint_path,
+    midpoint_reads,
     plain_word,
+    pstrb_path,
     reads_per_word,
     refused_access,
     rewrites_words,
@@ -632,6 +634,8 @@ def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
     assert findings == [] and spec is not None
     name = "unaligned_axi_writes_store_only_their_bytes"
     assert (name in applicable_tests(spec)) is applies
+    # Seed 202611220001: the PSTRB byte-write test needs a path that keeps strobes too.
+    assert (pstrb_path(spec, spec.masters[0], spec.slaves[0]) is not None) is applies
 
 
 def test_a_read_repeats_a_word_only_where_its_path_allows() -> None:
@@ -846,6 +850,51 @@ def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
     assert serves_by_priority(SimpleNamespace(midpoint=mid), direct) is by_priority
 
 
+@pytest.mark.parametrize(
+    ("protocol", "max_trans", "id_width", "expected"),
+    [("AXI4", 1, 4, 1), ("AXI4", 2, 4, 6), ("AXI4", 4, 0, 4), ("AXI4-Lite", 2, 0, 2)],
+)  # fmt: skip
+def test_a_guard_with_one_transaction_lets_one_read_through(
+    protocol: str, max_trans: int, id_width: int, expected: int
+) -> None:
+    """Seed 202611220012: with Max mst trans 1 the guard's axi_demux_simple has 1-bit ID
+    counters, full after one read, and a full counter blocks every ID (D80), so a mid-point of
+    six entries still holds one read."""
+    f = SimpleNamespace(protocol=protocol, max_mst_trans=max_trans)
+    m = SimpleNamespace(id_width=id_width)
+    assert midpoint_reads(f, m, 6) == expected
+
+
+def test_a_read_split_by_a_narrow_bus_keeps_the_words_below_the_address(tmp_path: Path) -> None:
+    """Seed 202611220028: a 64-bit AXI4-Lite beat read at a region's last word is split by
+    bag_axil2apb into 16-bit APB reads from the start of the beat; behind the next bridge each
+    is its own transfer, so an AXI4 downsizer in front of the slave cannot trim the word below
+    the address (it starts each transfer at that transfer's own address)."""
+    c = Cfg("splitapb", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.master("m0", "APB4", 32, 32, "D0").link("m0", "p", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b1", 0).link("b1", "l", 0).decode("b1", "DECERR").option("b1", **AXIL_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("q", "APB4", 16, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b2", 0).link("b2", "q", 0).decode("b2", "PSLVERR").option("b2", **APB4_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("a", "AXI4", 64, 32, "D0", "round-robin")
+    c.bridge("b3", 0x4000_0000, template="bag_apb2axi")
+    c.link("q", "b3", 0).link("b3", "a", 0).decode("b3", "DECERR").option("b3", **AXI4_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.words == {(exp.address - 4) // 4, exp.address // 4} and exp.slave_error
+
+
 def _through_apb3(tmp_path: Path) -> Spec:
     """AXI4 master m0, bag_axi2apb onto a 32-bit APB3 bus, bag_apb2axi onto an AXI4 bus with
     slave s0."""
@@ -883,3 +932,22 @@ def test_an_apb3_bus_on_the_way_stores_whole_words(tmp_path: Path) -> None:
     reaches the slave behind it as a whole word."""
     spec = _through_apb3(tmp_path)
     assert writes_whole_words(spec, route(spec, "m0", 0x4000_0040, True, False, {}))
+
+
+def test_a_downsizer_on_a_bridges_far_end_trims_before_the_bus_counts_as_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #200: a 64-bit AXI4-Lite beat read at a region's last word, then a bridge whose
+    far end narrows on AXI4 (forced here, as no workbook builds one today). That downsizer starts
+    at the address, so the word below it, the region's error word, is not read; the bus behind
+    is narrower than the untrimmed beat, but it must not count as having split it yet."""
+    import hdl_bag.tests_gen.route_model as model
+
+    spec, findings = resolve_cfg(_behind_lite64("ahb32"), tmp_path)
+    assert findings == [] and spec is not None
+    real = model._axi4_downsizer_in_front
+    monkeypatch.setattr(model, "_downsizes_on_axi4", lambda b, up, down: False)
+    monkeypatch.setattr(model, "_axi4_downsizer_in_front",
+                        lambda s, port, fabric, from_port=False: (port == "b2" and from_port)
+                        or real(s, port, fabric, from_port))  # fmt: skip
+    assert not route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error

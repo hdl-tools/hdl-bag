@@ -191,6 +191,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
     crossed: list[str] = []
+    # Once a bus narrower than the bytes covered splits the access into transfers, a downsizer
+    # further on starts each at its own address and so trims none of them.
+    split = False
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -202,13 +205,17 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
-            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(
-                b, fabrics[b.upstream], fabrics[b.downstream]
+            if not split and (
+                _axi4_downsizer_in_front(spec, target, fabric)
+                or _downsizes_on_axi4(b, fabrics[b.upstream], fabrics[b.downstream])
             ):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
-            if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
+            if not split and _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
+            # After this hop's own trim: a bus narrower than what is still covered splits it.
+            # shortcut: sticky, so a later AXI4-Lite re-widening is never trimmed; rare.
+            split = split or fabric.data_width // 8 < hi - lo
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = fabric.data_width // 8
@@ -222,7 +229,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         word = slaves[target].data_width // 8  # a slave answers per data word
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
-        if _axi4_downsizer_in_front(spec, target, fabric):
+        if not split and _axi4_downsizer_in_front(spec, target, fabric):
             lo = max(lo, 0)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
@@ -426,6 +433,20 @@ def serves_by_priority(f: Any, direct: bool) -> bool:
     return direct or not midpoint_buffers(f)
 
 
+def midpoint_reads(f: Any, m: Any, buffered: int) -> int:
+    """How many reads master M gets accepted on shared bus F with its slave stalled: what the
+    mid-point holds (BUFFERED), as its guard allows. An AXI4-Lite guard caps a master at Max
+    mst trans. An AXI4 guard admits Max mst trans per ID; with Max mst trans 1 its
+    axi_demux_simple has 1-bit ID counters, full after one read, and a full counter blocks
+    every ID (D80), so one read in all."""
+    trans = f.max_mst_trans or buffered
+    if f.protocol == "AXI4-Lite":
+        return int(min(buffered, trans))
+    if trans == 1:
+        return 1
+    return int(min(buffered, trans << (m.id_width or 0)))
+
+
 def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
     """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
     of an AXI slave right behind the mid-point, and how many reads the mid-point holds. Master
@@ -474,10 +495,12 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
 
 
 def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
-    """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly."""
+    """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly, on a path that
+    keeps the strobes (no PSTRB tie, no APB3 bus on the way: stores_single_bytes)."""
     if m.protocol not in ("AXI4", "AXI4-Lite") or s.protocol != "APB4" or s.data_width != 32:
         return None
-    return plain_word(spec, m, s)
+    found = plain_word(spec, m, s)
+    return found if found and stores_single_bytes(spec, found[1]) else None
 
 
 # --------------------------------------------------------------------------------------- bursts
