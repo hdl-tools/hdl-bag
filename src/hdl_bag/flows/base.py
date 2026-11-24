@@ -123,7 +123,9 @@ def run_backend(
     proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True, check=False)
     output = proc.stdout + proc.stderr
     findings = backend.parse(output, root)
-    if proc.returncode != 0 and not findings:
+    # The tools exit 0 when clean and 1 when they report findings (#187); any other status
+    # means the tool did not finish, so what it printed before is not a verdict.
+    if proc.returncode not in (0, 1) or (proc.returncode != 0 and not findings):
         tail = output.strip().splitlines()[-1:] or ["no output"]
         findings.append(
             Finding(backend.name, "", 0, "TOOL-FAILED", "error",

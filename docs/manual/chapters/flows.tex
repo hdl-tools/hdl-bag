@@ -35,9 +35,10 @@ Two rule IDs can come from any tool:
 \begin{description}
 \item[\ruleid{TOOL-MISSING}] The tool's program is not on your \code{PATH}. Install it,
   or run BAG in the tools image.
-\item[\ruleid{TOOL-FAILED}] The tool ended with a non-zero exit status but reported no
-  finding that BAG could read. The message gives the exit status and the tool's last
-  line of output.
+\item[\ruleid{TOOL-FAILED}] The tool did not finish: it ended with an exit status other
+  than 0 (clean) or 1 (findings reported), as a crash does, or with 1 but no finding that
+  BAG could read. What it printed before is then not a verdict. The message gives the exit
+  status and the tool's last line of output.
 \end{description}
 
 \section{Lint}
