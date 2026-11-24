@@ -1048,3 +1048,12 @@ def test_a_slave_behind_a_translating_bridge_errors_at_the_word_its_region_ends_
     assert error_words(spec, "s0") == {0xFF8}
     exp = route(spec, "m0", 0x4000_0FF8, True, False, {})
     assert (exp.slave, exp.address, exp.slave_error) == ("s0", 0xFF8, True)
+
+
+def test_a_slave_with_no_region_has_no_plain_word() -> None:
+    """The reset test's predicate asks plain_word of every pair at generate time, and a
+    shrinker candidate may leave a slave without a region: that is no word, not a crash."""
+    spec = load(DEMO)
+    s = spec.slaves[0]
+    bare = spec.model_copy(update={"memory_map": [r for r in spec.memory_map if r.slave != s.name]})
+    assert plain_word(bare, bare.masters[0], s) is None

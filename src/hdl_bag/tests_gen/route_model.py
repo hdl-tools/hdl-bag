@@ -838,7 +838,10 @@ def takes_partial_writes(spec: Spec, slave: Any) -> bool:
 def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
     no error, on a path where no converter can refuse them (D104)."""
-    word = next(r for r in spec.memory_map if r.slave == slave.name).base + 0x40
+    region = next((r for r in spec.memory_map if r.slave == slave.name), None)
+    if region is None:
+        return None
+    word = region.base + 0x40
     if word >= 1 << master.addr_width:
         return None
     outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]
