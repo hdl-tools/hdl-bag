@@ -104,8 +104,10 @@ if TYPE_CHECKING:
 PROVE_DEPTH = 6
 # Cover search depth in solver steps. With free clocks each clock edge takes steps of its
 # own: a signal behind a bridge and a clock crossing needs edges of every clock on the way,
-# then a reset. The formal corpus tunes this per config class (Phase 5 PR 4).
-COVER_DEPTH = 40
+# then a reset. The formal corpus tunes this per config class (Phase 5 PR 4). Seed
+# 202611170026 reached its last reset cover at step 40 (#194); the assertions are proved by
+# k-induction, so a deeper search costs no checking, and it ends at the last cover reached.
+COVER_DEPTH = 80
 
 # Bounded depth for the protocol checkers, in solver steps: their transaction counters have
 # no invariant tying them to the fabric's state, so they are checked to a depth, not proved.
