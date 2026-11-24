@@ -211,9 +211,11 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             ):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
-            split = split or fabric.data_width // 8 < hi - lo
             if not split and _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
+            # After this hop's own trim: a bus narrower than what is still covered splits it.
+            # shortcut: sticky, so a later AXI4-Lite re-widening is never trimmed; rare.
+            split = split or fabric.data_width // 8 < hi - lo
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = fabric.data_width // 8

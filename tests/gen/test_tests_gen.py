@@ -932,3 +932,22 @@ def test_an_apb3_bus_on_the_way_stores_whole_words(tmp_path: Path) -> None:
     reaches the slave behind it as a whole word."""
     spec = _through_apb3(tmp_path)
     assert writes_whole_words(spec, route(spec, "m0", 0x4000_0040, True, False, {}))
+
+
+def test_a_downsizer_on_a_bridges_far_end_trims_before_the_bus_counts_as_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #200: a 64-bit AXI4-Lite beat read at a region's last word, then a bridge whose
+    far end narrows on AXI4 (forced here, as no workbook builds one today). That downsizer starts
+    at the address, so the word below it, the region's error word, is not read; the bus behind
+    is narrower than the untrimmed beat, but it must not count as having split it yet."""
+    import hdl_bag.tests_gen.route_model as model
+
+    spec, findings = resolve_cfg(_behind_lite64("ahb32"), tmp_path)
+    assert findings == [] and spec is not None
+    real = model._axi4_downsizer_in_front
+    monkeypatch.setattr(model, "_downsizes_on_axi4", lambda b, up, down: False)
+    monkeypatch.setattr(model, "_axi4_downsizer_in_front",
+                        lambda s, port, fabric, from_port=False: (port == "b2" and from_port)
+                        or real(s, port, fabric, from_port))  # fmt: skip
+    assert not route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error

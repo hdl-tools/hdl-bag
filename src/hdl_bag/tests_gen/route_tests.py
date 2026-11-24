@@ -1003,7 +1003,8 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             absorbed = 0 if direct else await _absorbed(masters, slave, clk, first, base[first],
                                                          slots - 5)  # fmt: skip
             queued = absorbed + 4
-            assert queued <= slots - 2, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
+            # Jobs use slots 3 to 2 + queued, and the lock check the last one.
+            assert queued <= slots - 3, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
             jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
             order = await _served(masters, slave, clk, owner, jobs)
@@ -1530,6 +1531,8 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         if not options:
             # A default slave can be reached only by misses (seed 202611220042: its own region
             # is denied, D32): try the route model's probe addresses.
+            # No secure guard here: route() already makes an APB3 or PROT-tied master's
+            # access non-secure, so a probe into a secure-only region does not reach it.
             options = [t for a in probes(SPEC) for m in SPEC.masters
                        if (t := target_at(a, s, m.name)) is not None]  # fmt: skip
         if not options and any(refused(m.name, r) for r in regions if r.slave == s
