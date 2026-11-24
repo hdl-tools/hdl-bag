@@ -128,6 +128,8 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   strobe are written too. The same happens on an APB4 slave whose PSTRB you tie in
   \sheet{Port_Options} to the default, and \cmd{bag check} warns about that tie
   (\ruleid{PORTOPT-PSTRB-WORD}); tied to 0, no write stores any byte, and it warns too.
+  Behind \code{bag_axi2ahb} the tie is an error (\ruleid{PORTOPT-PSTRB-SPLIT}), as even
+  full-word writes are corrupted there.
   What you can do: write whole words to such slaves.
 \item \textbf{Narrow APB slaves.} \code{bag_axi2apb} splits a beat that is wider than
   the APB bus into several APB transfers. An error on one of them does not stop the

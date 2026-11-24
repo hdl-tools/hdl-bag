@@ -57,6 +57,7 @@
 \checkrule{PORT-ADAPTER}{error}{Slaves row 7: uart0 must match the clock domain of fabric periph\_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)}
 \checkrule{PORTOPT-DUPLICATE}{error}{Port\_Options row 18: cpu0 is already listed on row 5 (PORTOPT-DUPLICATE)}
 \checkrule{PORTOPT-ERROR-MASKED}{warning}{Port\_Options row 18: PSLVERR is tied on br\_ahb2aon: errors from aon\_apb, its miss response included, never reach it (PORTOPT-ERROR-MASKED)}
+\checkrule{PORTOPT-PSTRB-SPLIT}{error}{Port\_Options row 7: PSTRB is tied on b2, and bag\_axi2ahb b1 on the way from m0 turns a write with clear strobes into byte writes: each then stores the whole 32-bit word, so even full-word writes are corrupted. Drive PSTRB on b2, or keep bag\_axi2ahb off this path (PORTOPT-PSTRB-SPLIT)}
 \checkrule{PORTOPT-PSTRB-WORD}{warning}{Port\_Options row 10: PSTRB is tied on uart0: a write of part of its 32-bit word overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)}
 \checkrule{PORTOPT-SIGNAL}{error}{Port\_Options row 10: QOS does not exist on APB4; use n/a (PORTOPT-SIGNAL)}
 \checkrule{PORTOPT-UNKNOWN-PORT}{error}{Port\_Options row 18: ghost is not a connected master, slave or bridge (PORTOPT-UNKNOWN-PORT)}

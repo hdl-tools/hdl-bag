@@ -340,8 +340,10 @@ def check_split_refusals(ctx: Context, result: "CheckResult") -> None:
 def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
     """A port with PSTRB tied to the default on an APB4 word wider than a byte: every write
     stores the whole word, so a partial write overwrites the rest of it (D106). Tied to 0, no
-    write stores any byte, at any width."""
+    write stores any byte, at any width. Reached through bag_axi2ahb, which turns a write beat
+    with clear strobes into byte writes, even a full-word write is corrupted: an error (D109)."""
     from hdl_bag.ir.resolve import resolve
+    from hdl_bag.tests_gen.route_model import route
 
     spec = resolve(result)
     fabrics = {f.name: f for f in spec.fabrics}
@@ -349,13 +351,37 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
     widths |= {x.name: x.data_width for x in spec.masters if x.protocol == "APB4"}
     widths |= {b.name: fabrics[b.downstream].data_width for b in spec.bridges
                if fabrics[b.downstream].protocol == "APB4"}  # fmt: skip
+    templates = {b.name: b.template for b in spec.bridges}
+    # Per tied port: the masters whose writes reach it through a bag_axi2ahb, and the first such.
+    split: dict[str, tuple[list[str], str]] = {}
+    for m in spec.masters:
+        for r in spec.memory_map:
+            if r.base >= 1 << m.addr_width:
+                continue
+            e = route(spec, m.name, r.base, True, False, {})
+            path = [*e.bridges, *([e.slave] if e.slave else [])]
+            for k, hop in enumerate(path):
+                via = next((b for b in path[:k] if templates.get(b) == "bag_axi2ahb"), None)
+                if via is not None:
+                    masters, _ = split.setdefault(hop, ([], via))
+                    if m.name not in masters:
+                        masters.append(m.name)
     for row in ctx.raw.port_options:
         port = row.value("Port")
-        if row.value("PSTRB") == "tie-0" and str(port) in widths:
+        tied_wide = row.value("PSTRB") == "tie-default" and widths.get(str(port), 8) > 8
+        if tied_wide and str(port) in split:
+            masters, via = split[str(port)]
+            ctx.report("PORTOPT-PSTRB-SPLIT", row["PSTRB"],
+                       f"PSTRB is tied on {port}, and bag_axi2ahb {via} on the way from "
+                       f"{', '.join(sorted(masters))} turns a write with clear strobes into byte "
+                       f"writes: each then stores the whole {widths[str(port)]}-bit word, so even "
+                       f"full-word writes are corrupted. Drive PSTRB on {port}, or keep "
+                       "bag_axi2ahb off this path")  # fmt: skip
+        elif row.value("PSTRB") == "tie-0" and str(port) in widths:
             ctx.report("PORTOPT-PSTRB-WORD", row["PSTRB"],
                        f"PSTRB is tied to 0 on {port}: no write stores any byte. Drive PSTRB, or "
                        "tie it to the default")  # fmt: skip
-        elif row.value("PSTRB") == "tie-default" and widths.get(str(port), 8) > 8:
+        elif tied_wide:
             ctx.report("PORTOPT-PSTRB-WORD", row["PSTRB"],
                        f"PSTRB is tied on {port}: a write of part of its {widths[str(port)]}-bit "
                        "word overwrites the rest of the word. Drive PSTRB, or write whole words "

@@ -987,6 +987,9 @@ of an APB fabric gives a warning (\ruleid{PORTOPT-ERROR-MASKED}): no error reach
 master, its own miss response included. A PSTRB tied to the default on an APB4 port wider
 than 8 bits gives a warning, as a partial write then overwrites the rest of the word, and
 so does a PSTRB tied to 0, as no write then stores any byte (\ruleid{PORTOPT-PSTRB-WORD}).
+Behind \code{bag_axi2ahb} a PSTRB tied to the default is an error
+(\ruleid{PORTOPT-PSTRB-SPLIT}): that bridge turns a write with clear strobes into byte
+writes, each of which then stores the whole word, so even a full-word write is corrupted.
 A CACHE tied to 0 on an AXI4 master or bridge makes every access non-modifiable; where an
 AXI4 to AXI4-Lite converter on the way must split one, it answers SLVERR, and
 \cmd{bag check} warns (\ruleid{AXI-SPLIT-REFUSED}).
