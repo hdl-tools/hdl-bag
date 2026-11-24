@@ -1498,15 +1498,20 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
     # Secure regions need a master that can say secure: not APB3, not PROT-tied (route knows).
     able = {m.name for m in SPEC.masters if m.protocol != "APB3"}
 
-    def reach(master: str, r: Any, write: bool) -> bool:
-        if r.base + 48 >= 1 << width[master] or (r.secure and master not in able):
+    def reach_at(master: str, base: int, slave: str, write: bool) -> bool:
+        if base + 48 >= 1 << width[master]:
             return False
-        return all((e := route(SPEC, master, r.base + 4 * k, write, False, {})).slave == r.slave
+        return all((e := route(SPEC, master, base + 4 * k, write, False, {})).slave == slave
                    and not e.slave_error and not e.may_refuse for k in range(12))  # fmt: skip
 
+    def target_at(base: int, slave: str, master: str) -> _Target | None:
+        writes, reads = reach_at(master, base, slave, True), reach_at(master, base, slave, False)
+        return _Target(slave, master, base, writes, reads) if writes or reads else None
+
     def target(r: Any, master: str) -> _Target | None:
-        writes, reads = reach(master, r, True), reach(master, r, False)
-        return _Target(r.slave, master, r.base, writes, reads) if writes or reads else None
+        if r.secure and master not in able:
+            return None
+        return target_at(r.base, r.slave, master)
 
     regions = sorted((r for r in SPEC.memory_map if r.slave in slave_names),
                      key=lambda r: (r.access != "RW", r.secure, r.base))  # fmt: skip
@@ -1522,6 +1527,11 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
     for s in sorted(_axi_names(SPEC.slaves) - shut):
         options = [t for r in regions if r.slave == s for m in SPEC.masters
                    if (t := target(r, m.name)) is not None]  # fmt: skip
+        if not options:
+            # A default slave can be reached only by misses (seed 202611220042: its own region
+            # is denied, D32): try the route model's probe addresses.
+            options = [t for a in probes(SPEC) for m in SPEC.masters
+                       if (t := target_at(a, s, m.name)) is not None]  # fmt: skip
         if not options and any(refused(m.name, r) for r in regions if r.slave == s
                                for m in SPEC.masters):  # fmt: skip
             continue
