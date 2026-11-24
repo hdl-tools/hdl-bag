@@ -72,6 +72,7 @@ from hdl_bag.tests_gen.route_model import (
     forced_resp_paths,
     midpoint_buffers,
     midpoint_path,
+    midpoint_reads,
     narrow_apb_path,
     pin_sets,
     plain_word,
@@ -1045,11 +1046,7 @@ async def axi_shared_bus_midpoint_buffers_reads(dut: Any) -> None:
         m, words, buffered = found
         exp = route(SPEC, m.name, words[0], False, False, {})
         assert exp.slave is not None
-        expected = buffered
-        if f.protocol == "AXI4-Lite":
-            expected = min(buffered, f.max_mst_trans or buffered)
-        else:
-            expected = min(buffered, (f.max_mst_trans or buffered) << (m.id_width or 0))
+        expected = midpoint_reads(f, m, buffered)
         ar = masters[m.name].bus.read.ar
         clk = clocks[f.domain]
         slave = slaves[exp.slave]

@@ -425,6 +425,20 @@ def serves_by_priority(f: Any, direct: bool) -> bool:
     return direct or not midpoint_buffers(f)
 
 
+def midpoint_reads(f: Any, m: Any, buffered: int) -> int:
+    """How many reads master M gets accepted on shared bus F with its slave stalled: what the
+    mid-point holds (BUFFERED), as its guard allows. An AXI4-Lite guard caps a master at Max
+    mst trans. An AXI4 guard admits Max mst trans per ID; with Max mst trans 1 its
+    axi_demux_simple has 1-bit ID counters, full after one read, and a full counter blocks
+    every ID (D80), so one read in all."""
+    trans = f.max_mst_trans or buffered
+    if f.protocol == "AXI4-Lite":
+        return int(min(buffered, trans))
+    if trans == 1:
+        return 1
+    return int(min(buffered, trans << (m.id_width or 0)))
+
+
 def midpoint_path(spec: Spec, f: Any) -> tuple[Any, list[int], int] | None:
     """On AXI shared bus F: the master with the widest ID (so per-ID limits do not bind), words
     of an AXI slave right behind the mid-point, and how many reads the mid-point holds. Master

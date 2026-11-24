@@ -36,6 +36,7 @@ from hdl_bag.tests_gen.route_model import (
     check_write,
     midpoint_buffers,
     midpoint_path,
+    midpoint_reads,
     plain_word,
     pstrb_path,
     reads_per_word,
@@ -845,3 +846,18 @@ def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
     takes them in priority order; only unequal adapter chains make arrival order decide."""
     mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
     assert serves_by_priority(SimpleNamespace(midpoint=mid), direct) is by_priority
+
+
+@pytest.mark.parametrize(
+    ("protocol", "max_trans", "id_width", "expected"),
+    [("AXI4", 1, 4, 1), ("AXI4", 2, 4, 6), ("AXI4", 4, 0, 4), ("AXI4-Lite", 2, 0, 2)],
+)  # fmt: skip
+def test_a_guard_with_one_transaction_lets_one_read_through(
+    protocol: str, max_trans: int, id_width: int, expected: int
+) -> None:
+    """Seed 202611220012: with Max mst trans 1 the guard's axi_demux_simple has 1-bit ID
+    counters, full after one read, and a full counter blocks every ID (D80), so a mid-point of
+    six entries still holds one read."""
+    f = SimpleNamespace(protocol=protocol, max_mst_trans=max_trans)
+    m = SimpleNamespace(id_width=id_width)
+    assert midpoint_reads(f, m, 6) == expected
