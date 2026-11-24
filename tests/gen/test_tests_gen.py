@@ -31,14 +31,17 @@ from hdl_bag.tests_gen.route_model import (
     access_bytes,
     attributes,
     blocking_path,
+    burst_path,
     burst_shapes,
     byte_write_lands,
     cache_after_tie,
     check_read,
     check_write,
+    error_words,
     midpoint_buffers,
     midpoint_path,
     midpoint_reads,
+    narrow_apb_path,
     plain_word,
     pstrb_path,
     reads_per_word,
@@ -985,3 +988,108 @@ def test_a_downsizer_on_a_bridges_far_end_trims_before_the_bus_counts_as_split(
                         lambda s, port, fabric, from_port=False: (port == "b2" and from_port)
                         or real(s, port, fabric, from_port))  # fmt: skip
     assert not route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error
+
+
+def test_the_reset_test_applies_only_where_its_body_finds_a_slave_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seeds 202611240036, 048: the reset test applied because private_words found traffic, but
+    its body resets around the slaves plain_word reaches, and found none (`assert reached`).
+    Its predicate now uses the same helper as its body."""
+    spec = load(DEMO)
+    name = "reset_during_traffic_leaves_nothing_behind"
+    assert name in applicable_tests(spec)
+    monkeypatch.setattr(hdl_bag.tests_gen, "plain_word", lambda *a: None)
+    assert name not in applicable_tests(spec)
+
+
+def test_a_converter_on_the_masters_own_port_refuses_a_burst_to_a_miss_too(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240024 (D104): an AXI4 master with CACHE tied to 0 on an AXI4-Lite bus has its
+    own axi_to_axi_lite, whose burst splitter answers a 4-beat burst SLVERR before the address
+    is decoded, so a burst to an unmapped address gets SLVERR, not DECERR."""
+    c = Cfg("ownpc", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": "tie-0"})
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    m = spec.masters[0]
+    miss = burst_path(spec, m, 0)[1]
+    assert miss is not None
+    exp = route(spec, "m0", miss, False, False, {})
+    assert exp.slave is None
+    assert refused_access(spec, m, exp, 0, False, miss, 4, beats=4)
+    assert not refused_access(spec, m, exp, 0, False, miss, 4)
+
+
+def test_a_slave_behind_a_translating_bridge_errors_at_the_word_its_region_ends_with(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240025: behind a pass-through N bridge a slave sees addresses less the window
+    base, but its error word was the region's system address, so no master ever reached it and
+    the route test saw no slave error. The error word is now where the slave sees it."""
+    c = Cfg("offseterr", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("br", 0x4000_0000, pass_through=False, template="bag_axi2apb")
+    c.link("a", "br", 0).link("br", "p", 0).decode("br", "PSLVERR").option("br", **APB4_NA)
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert error_words(spec, "s0") == {0xFF8}
+    exp = route(spec, "m0", 0x4000_0FF8, True, False, {})
+    assert (exp.slave, exp.address, exp.slave_error) == ("s0", 0xFF8, True)
+
+
+def test_a_slave_with_no_region_has_no_plain_word() -> None:
+    """The reset test's predicate asks plain_word of every pair at generate time, and a
+    shrinker candidate may leave a slave without a region: that is no word, not a crash."""
+    spec = load(DEMO)
+    s = spec.slaves[0]
+    bare = spec.model_copy(update={"memory_map": [r for r in spec.memory_map if r.slave != s.name]})
+    assert plain_word(bare, bare.masters[0], s) is None
+
+
+def test_a_read_that_crossed_ahb_starts_at_its_aligned_beat_at_a_later_downsizer(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240029: a 64-bit AXI4-Lite read of the word at 0x...ffc crosses AHB-Lite as a
+    64-bit transfer aligned to 0x...ff8, so the axi_dw_downsizer in front of an 8-bit APB slave
+    further on starts there and reads the error word at 0x...ff8 too."""
+    c = Cfg("ahbalign", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("h", "AHB-Lite", 64, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2ahb")
+    c.link("a", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR")
+    c.option("b1", **AHB_MASTER_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_ahb2axi")
+    c.link("h", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("p", "APB4", 8, 32, "D0")
+    c.bridge("b3", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b3", 0).link("b3", "p", 0).decode("b3", "PSLVERR").option("b3", **APB4_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 8, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.slave == "s0" and 0x4000_0FF8 in exp.words and exp.slave_error
+    # The same 64-bit beat, written with half its strobes, becomes one AHB write per byte, so
+    # the narrow APB test (one access per APB word) leaves this path out.
+    assert narrow_apb_path(spec, spec.masters[0], spec.slaves[0]) is None

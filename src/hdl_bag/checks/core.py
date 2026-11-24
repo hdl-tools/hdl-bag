@@ -55,6 +55,7 @@ RULES: Final[dict[str, Severity]] = {
     "AXI-WRAP-REFUSED": W,
     "AXI-SPLIT-REFUSED": W,
     "PORTOPT-PSTRB-WORD": W,
+    "PORTOPT-PSTRB-SPLIT": E,
     # topology
     "TOPO-UNKNOWN-NAME": E,
     "TOPO-ILLEGAL-LINK": E,

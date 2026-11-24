@@ -12,6 +12,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+import hdl_bag.regress.generate as drawer
 from hdl_bag.checks import run_checks
 from hdl_bag.gen import generate
 from hdl_bag.ir import dumps, resolve
@@ -253,3 +254,20 @@ def test_the_file_header_is_systemverilog_comments() -> None:
     from hdl_bag.regress.generate import HEADER
 
     assert HEADER.splitlines() and all(line.startswith("//") for line in HEADER.splitlines())
+
+
+def _pstrb_tie_behind_axi2ahb(seed: int) -> bool:
+    cfg = random_config(seed)
+    column = 1 + OPTION_COLUMNS.index("pstrb")
+    has_axi2ahb = any(row[1] == "bag_axi2ahb" for row in cfg.data.bridges)
+    return has_axi2ahb and any(row[column] == "tie-default" for row in cfg.data.port_options)
+
+
+def test_no_drawn_config_ties_pstrb_where_bag_axi2ahb_could_reach_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D109: bag check refuses a PSTRB tie that bag_axi2ahb's byte writes reach, so the
+    generator never draws one. Without the filter some of these seeds would."""
+    assert not any(_pstrb_tie_behind_axi2ahb(s) for s in range(300))
+    monkeypatch.setattr(drawer, "_no_pstrb_tie_behind_axi2ahb", lambda cfg: None)
+    assert any(_pstrb_tie_behind_axi2ahb(s) for s in range(300))

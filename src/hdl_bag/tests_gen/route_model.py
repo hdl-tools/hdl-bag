@@ -194,6 +194,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # Once a bus narrower than the bytes covered splits the access into transfers, a downsizer
     # further on starts each at its own address and so trims none of them.
     split = False
+    # Where the access now starts, relative to addr: a read that crossed AHB-Lite starts at its
+    # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there.
+    start = 0
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -209,10 +212,10 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 _axi4_downsizer_in_front(spec, target, fabric)
                 or _downsizes_on_axi4(b, fabrics[b.upstream], fabrics[b.downstream])
             ):
-                lo = max(lo, 0)  # axi_dw_downsizer starts at the address
+                lo = max(lo, start)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
             if not split and _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
-                lo = max(lo, 0)  # axi_dw_downsizer starts at the address
+                lo = max(lo, start)  # axi_dw_downsizer starts at the address
             # After this hop's own trim: a bus narrower than what is still covered splits it.
             # shortcut: sticky, so a later AXI4-Lite re-widening is never trimmed; rare.
             split = split or fabric.data_width // 8 < hi - lo
@@ -221,6 +224,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 lite = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
+            if not write and fabric.protocol == "AHB-Lite":
+                start = min(lo, 0)  # seed 202611240029
             # An APB3 bus has no PPROT: what crosses it is non-secure from there on (D28).
             nonsec = nonsec or prot_tied(spec, b.name) or fabric.protocol == "APB3"
             masked = masked or pslverr_tied(spec, b.name)
@@ -230,7 +235,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
         if not split and _axi4_downsizer_in_front(spec, target, fabric):
-            lo = max(lo, 0)  # axi_dw_downsizer starts at the address
+            lo = max(lo, start)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
         # converters read all of it.
@@ -275,8 +280,13 @@ def error_words(spec: Spec, slave: str) -> set[int]:
     """
     if pslverr_tied(spec, slave):
         return set()
+    from hdl_bag.gen.decode import fabric_offset  # here: gen imports this module's package
+
     width = next(s.addr_width for s in spec.slaves if s.name == slave)
-    return {(r.base + r.size - ERROR_WORD) & ((1 << width) - 1)
+    fabric = next(f for f in spec.fabrics if any(p.port == slave for p in f.slave_ports))
+    # Where the slave sees it: behind a pass-through N bridge, less the window base (seed 025).
+    offset = fabric_offset(spec, fabric)
+    return {(r.base + r.size - ERROR_WORD - offset) & ((1 << width) - 1)
             for r in spec.memory_map if r.slave == slave}  # fmt: skip
 
 
@@ -491,7 +501,19 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
         return None
     found = plain_word(spec, m, s)
     axi2apb = {b.name for b in spec.bridges if b.template == "bag_axi2apb"}
-    return found if found and axi2apb & set(found[1].bridges) else None
+    if not found or not axi2apb & set(found[1].bridges) or splits_word_writes(spec, found[1]):
+        return None
+    return found
+
+
+def splits_word_writes(spec: Spec, exp: Outcome) -> bool:
+    """Whether a word write that EXP routes becomes byte writes: a bag_axi2ahb fed by AXI4-Lite
+    takes full-width beats, and one wider than the word is written with some strobes clear,
+    which bag_axi2ahb_core turns into one AHB write per set strobe (seed 202611240029)."""
+    fabrics = {f.name: f for f in spec.fabrics}
+    return any(b.template == "bag_axi2ahb" and fabrics[b.upstream].protocol == "AXI4-Lite"
+               and min(fabrics[b.upstream].data_width, fabrics[b.downstream].data_width) > 32
+               for b in spec.bridges if b.name in exp.bridges)  # fmt: skip
 
 
 def byte_write_lands(spec: Spec, s: Any, exp: Outcome) -> bool:
@@ -637,9 +659,10 @@ def _pc_width(spec: Spec, port: str, fabric: Any, start: int, from_port: bool) -
 
 
 def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
-               slave: str) -> list[tuple[int, int, int]]:  # fmt: skip
-    """Each axi_to_axi_lite on the way from MASTER to SLAVE: (the bridges crossed before it, the
-    bytes per beat at most as it enters the adapters in front of it, its data width in bytes)."""
+               slave: str | None) -> list[tuple[int, int, int]]:  # fmt: skip
+    """Each axi_to_axi_lite on the way from MASTER to SLAVE (or, for a miss, as far as BRIDGES
+    go): (the bridges crossed before it, the bytes per beat at most as it enters the adapters in
+    front of it, its data width in bytes)."""
     by_name = {f.name: f for f in spec.fabrics}
     m = next(x for x in spec.masters if x.name == master)
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
@@ -659,6 +682,8 @@ def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
             out.append((k + 1, narrowest // 8, w // 8))  # on the bridge's far end
         fabric = down
     narrowest = min(narrowest, fabric.data_width)
+    if slave is None:
+        return out
     if (w := _pc_width(spec, slave, fabric, fabric.data_width, False)) is not None:
         out.append((len(bridges), narrowest // 8, w // 8))
     return out
@@ -692,9 +717,8 @@ def cache_tie_refusals(spec: Spec) -> dict[tuple[str, tuple[str, ...]], list[str
 
 def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, addr: int,
                    size: int, beats: int = 1) -> bool:  # fmt: skip
-    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104)."""
-    if exp.slave is None:
-        return False
+    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104), a
+    miss too: a converter in front of the decode refuses it first (seed 202611240024)."""
     return any(split_refused(attributes(spec, m, prot, nonsec, exp.bridges[:k])[3],
                              min(size, most), addr, beats, width)
                for k, most, width in _splitters(spec, m.name, exp.bridges, exp.slave))  # fmt: skip
@@ -831,7 +855,10 @@ def takes_partial_writes(spec: Spec, slave: Any) -> bool:
 def plain_word(spec: Spec, master: Any, slave: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of SLAVE, and its route, if a secure write and read from MASTER reach it with
     no error, on a path where no converter can refuse them (D104)."""
-    word = next(r for r in spec.memory_map if r.slave == slave.name).base + 0x40
+    region = next((r for r in spec.memory_map if r.slave == slave.name), None)
+    if region is None:
+        return None
+    word = region.base + 0x40
     if word >= 1 << master.addr_width:
         return None
     outs = [route(spec, master.name, word, w, False, {}) for w in (True, False)]

@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from dsl import SAMPLE_WRAP, unexpected, wrap_refusals
+from dsl import AHB_MASTER_NA, APB4_NA, AXIL_NA, SAMPLE_WRAP, Cfg, unexpected, wrap_refusals
 from openpyxl import Workbook
 
 from hdl_bag.checks import RULES, run_checks
@@ -131,6 +131,31 @@ NO_BUS = dataclasses.replace(
     memory_map=[], address_decode=[], port_options=[], user_ports=[], exposed_ports=[],
     placement=[], sub_wrappers=[list(SAMPLE_SPEC.sub_wrappers[0])],
 )  # fmt: skip
+
+
+def _split_before_tie(width: int = 64) -> SpecData:
+    """D109 (seed 202611240029): a WIDTH-bit AXI4-Lite master, bag_axi2ahb onto a WIDTH-bit
+    AHB-Lite bus, then bag_ahb2apb with PSTRB tied onto a 32-bit APB4 slave."""
+    c = Cfg("splittie", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", width, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", width, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("h", "AHB-Lite", width, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2ahb")
+    c.link("a", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR").option(
+        "b1", **AHB_MASTER_NA
+    )
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_ahb2apb")
+    c.link("h", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR")
+    c.option("b2", **{**APB4_NA, "pstrb": "tie-default"})
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    return c.data
+
 
 # (case id, edits or a whole spec, expected messages)
 CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
@@ -338,6 +363,15 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
     ("PORTOPT-PSTRB-WORD", [("Port_Options", 10, "PSTRB", "tie-default")],
      ["Port_Options row 10: PSTRB is tied on uart0: a write of part of its 32-bit word "
       "overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)"]),
+    ("PORTOPT-PSTRB-SPLIT", _split_before_tie(),
+     ["Port_Options row 7: PSTRB is tied on b2, and bag_axi2ahb b1 on the way from m0 turns a "
+      "write with clear strobes into byte writes: each then stores the whole 32-bit word, so "
+      "even full-word writes are corrupted. Drive PSTRB on b2, or keep bag_axi2ahb off this "
+      "path (PORTOPT-PSTRB-SPLIT)"]),
+    # A 32-bit beat a full 32-bit word fills is one transfer: only the D106 warning (review).
+    ("PORTOPT-PSTRB-WORD", _split_before_tie(32),
+     ["Port_Options row 7: PSTRB is tied on b2: a write of part of its 32-bit word overwrites "
+      "the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)"]),
     ("AXI-SPLIT-REFUSED", [("Port_Options", 5, "CACHE", "tie-0")],
      ["Masters row 5: bursts, and transfers wider than a converter on the way, from cpu0 to "
       "clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR where the converter must split them: "

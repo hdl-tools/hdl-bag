@@ -1086,6 +1086,8 @@ async def axi4_bursts_reach_slaves_and_error_paths(dut: Any) -> None:
         if miss is not None:
             exp = route(SPEC, m.name, miss, True, False, {})
             want_w, want_r = _expected_resp(m, exp, True), _expected_resp(m, exp, False)
+            if refused_access(SPEC, m, exp, 0, False, miss, 4, beats=4):
+                want_w = want_r = 2  # D104: refused in front of the decode (seed 202611240024)
             code = await masters[m.name].burst_write(miss, bytes(16))
             assert code == want_w, f"{m.name} burst write to {miss:#x}: {code}, expected {want_w}"
             r = await masters[m.name].burst_read(miss, 16)
