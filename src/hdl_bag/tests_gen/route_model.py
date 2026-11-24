@@ -473,10 +473,12 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
 
 
 def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
-    """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly."""
+    """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly, on a path that
+    keeps the strobes (no PSTRB tie, no APB3 bus on the way: stores_single_bytes)."""
     if m.protocol not in ("AXI4", "AXI4-Lite") or s.protocol != "APB4" or s.data_width != 32:
         return None
-    return plain_word(spec, m, s)
+    found = plain_word(spec, m, s)
+    return found if found and stores_single_bytes(spec, found[1]) else None
 
 
 # --------------------------------------------------------------------------------------- bursts

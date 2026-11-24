@@ -1419,6 +1419,7 @@ async def apb_byte_writes_carry_pstrb(dut: Any) -> None:
             r = await drv.read(word)
             assert not r.err and r.data == 0xFFFF_5AFF, f"{m.name} -> {s.name}: {r.data:#x}"
             checked += 1
+    assert checked > 0
     dut._log.info("byte writes checked: %d master/slave pairs", checked)
 
 

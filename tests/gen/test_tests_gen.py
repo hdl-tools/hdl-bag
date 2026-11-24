@@ -37,6 +37,7 @@ from hdl_bag.tests_gen.route_model import (
     midpoint_buffers,
     midpoint_path,
     plain_word,
+    pstrb_path,
     reads_per_word,
     refused_access,
     rewrites_words,
@@ -630,6 +631,8 @@ def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
     assert findings == [] and spec is not None
     name = "unaligned_axi_writes_store_only_their_bytes"
     assert (name in applicable_tests(spec)) is applies
+    # Seed 202611220001: the PSTRB byte-write test needs a path that keeps strobes too.
+    assert (pstrb_path(spec, spec.masters[0], spec.slaves[0]) is not None) is applies
 
 
 def test_a_read_repeats_a_word_only_where_its_path_allows() -> None:
