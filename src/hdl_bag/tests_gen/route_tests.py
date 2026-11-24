@@ -33,6 +33,7 @@ from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
 from hdl_bag.bursts import FIXED, INCR
+from hdl_bag.formal_gen.depth import unreachable_slaves
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
@@ -1511,7 +1512,8 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         )
 
     found: list[_Target] = []
-    for s in sorted(_axi_names(SPEC.slaves)):
+    shut = set(unreachable_slaves(SPEC))  # bag check warns about these (D105)
+    for s in sorted(_axi_names(SPEC.slaves) - shut):
         options = [t for r in regions if r.slave == s for m in SPEC.masters
                    if (t := target(r, m.name)) is not None]  # fmt: skip
         if not options and any(refused(m.name, r) for r in regions if r.slave == s

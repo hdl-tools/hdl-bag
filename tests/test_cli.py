@@ -42,7 +42,8 @@ def test_check_golden_passes() -> None:
     result = CliRunner().invoke(main, ["check", str(GOLDEN)])
     assert result.exit_code == 0, result.output
     *warnings, summary = result.output.splitlines()
-    assert summary == "demo_ss.xlsx: 0 error(s), 2 warning(s)"
+    # Two WRAP refusals, and two PSTRB ties on 32-bit APB4 slaves (D106).
+    assert summary == "demo_ss.xlsx: 0 error(s), 4 warning(s)"
     assert unexpected(warnings, SAMPLE_WRAP) == []
 
 

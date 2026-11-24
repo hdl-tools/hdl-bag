@@ -58,6 +58,9 @@ def run_checks(raw: RawSpec, base_dir: Path, registry: Registry | None = None) -
         wrapper.check_boundary_names(ctx, clean)
         basics.check_cdc_resets(ctx, clean)
         ports.check_wrap_refusals(ctx, clean)
+        ports.check_split_refusals(ctx, clean)
+        ports.check_pstrb_ties(ctx, clean)
+        memory.check_unreachable_slaves(ctx, clean)
     unknown = {f.rule for f in ctx.findings} - RULES.keys()
     assert not unknown, f"unregistered rule IDs: {unknown}"
     findings = tuple(sorted(set(ctx.findings), key=Finding.sort_key))

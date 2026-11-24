@@ -322,6 +322,46 @@ def check_port_options(ctx: Context) -> None:
                        f"FIFO and register slices exist only on AXI4/AXI4-Lite ports; {port} is {protocol}")  # fmt: skip
 
 
+def check_split_refusals(ctx: Context, result: "CheckResult") -> None:
+    """An AXI master whose accesses a converter on the way must split, with CACHE tied to 0
+    between: PULP axi_to_axi_lite answers such non-modifiable accesses with SLVERR (D104). One
+    warning per master and tied port, on the master's row."""
+    from hdl_bag.ir.resolve import resolve
+    from hdl_bag.tests_gen.route_model import cache_tie_refusals
+
+    for (master, ports), targets in cache_tie_refusals(resolve(result)).items():
+        ctx.report("AXI-SPLIT-REFUSED", ctx.defs[master],
+                   f"bursts, and transfers wider than a converter on the way, from {master} to "
+                   f"{', '.join(targets)} get SLVERR where the converter must split them: CACHE "
+                   f"is tied to 0 on {', '.join(ports)}, so they are non-modifiable. Drive "
+                   "CACHE, or tie it to the default")  # fmt: skip
+
+
+def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
+    """A port with PSTRB tied to the default on an APB4 word wider than a byte: every write
+    stores the whole word, so a partial write overwrites the rest of it (D106). Tied to 0, no
+    write stores any byte, at any width."""
+    from hdl_bag.ir.resolve import resolve
+
+    spec = resolve(result)
+    fabrics = {f.name: f for f in spec.fabrics}
+    widths = {x.name: x.data_width for x in spec.slaves if x.protocol == "APB4"}
+    widths |= {x.name: x.data_width for x in spec.masters if x.protocol == "APB4"}
+    widths |= {b.name: fabrics[b.downstream].data_width for b in spec.bridges
+               if fabrics[b.downstream].protocol == "APB4"}  # fmt: skip
+    for row in ctx.raw.port_options:
+        port = row.value("Port")
+        if row.value("PSTRB") == "tie-0" and str(port) in widths:
+            ctx.report("PORTOPT-PSTRB-WORD", row["PSTRB"],
+                       f"PSTRB is tied to 0 on {port}: no write stores any byte. Drive PSTRB, or "
+                       "tie it to the default")  # fmt: skip
+        elif row.value("PSTRB") == "tie-default" and widths.get(str(port), 8) > 8:
+            ctx.report("PORTOPT-PSTRB-WORD", row["PSTRB"],
+                       f"PSTRB is tied on {port}: a write of part of its {widths[str(port)]}-bit "
+                       "word overwrites the rest of the word. Drive PSTRB, or write whole words "
+                       "only")  # fmt: skip
+
+
 def check_wrap_refusals(ctx: Context, result: "CheckResult") -> None:
     """An AXI4 master whose WRAP bursts a width converter on the way answers with SLVERR (D49):
     the PULP width converters cannot split them (hdl_bag.bursts). Conversion to AXI4-Lite or

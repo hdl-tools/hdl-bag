@@ -3,6 +3,7 @@
 \checkrule{ACC-NOT-SAME-FABRIC}{error}{Access\_Rules row 6: dbg0 is on main\_xbar but uart0 is on periph\_apb (ACC-NOT-SAME-FABRIC)}
 \checkrule{ACC-UNKNOWN-NAME}{error}{Access\_Rules row 5: dma9 is not a connected master or bridge (ACC-UNKNOWN-NAME)}
 \checkrule{ACC-UNREACHABLE-SLAVE}{warning}{Masters row 5: WRAP bursts from cpu0 to br\_main2cfg, br\_main2per, sram0 get SLVERR: dw adapter cpu0\_dw\_2\_main\_xbar cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)}
+\checkrule{AXI-SPLIT-REFUSED}{warning}{Masters row 5: bursts, and transfers wider than a converter on the way, from cpu0 to clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR where the converter must split them: CACHE is tied to 0 on cpu0, so they are non-modifiable. Drive CACHE, or tie it to the default (AXI-SPLIT-REFUSED)}
 \checkrule{AXI-WRAP-REFUSED}{warning}{Masters row 5: WRAP bursts from cpu0 to br\_main2cfg, br\_main2per, ddr0, sram0 get SLVERR: dw adapter cpu0\_dw\_2\_main\_xbar cannot convert them. Send INCR bursts on this path, or keep it at one width and protocol (AXI-WRAP-REFUSED)}
 \checkrule{BRIDGE-FIFO-IGNORED}{warning}{Bridges row 7: bag\_ahb2axi handles one transfer at a time and ignores FIFO depth 2 (BRIDGE-FIFO-IGNORED)}
 \checkrule{BRIDGE-WINDOW-BASE}{error}{Bridges row 5: Window base 0x4000\_1000 differs from br\_main2per's lowest region 0x4000\_0000 (BRIDGE-WINDOW-BASE)}
@@ -56,6 +57,7 @@
 \checkrule{PORT-ADAPTER}{error}{Slaves row 7: uart0 must match the clock domain of fabric periph\_apb: adapters exist only between AXI4/AXI4-Lite ports and fabrics (PORT-ADAPTER)}
 \checkrule{PORTOPT-DUPLICATE}{error}{Port\_Options row 18: cpu0 is already listed on row 5 (PORTOPT-DUPLICATE)}
 \checkrule{PORTOPT-ERROR-MASKED}{warning}{Port\_Options row 18: PSLVERR is tied on br\_ahb2aon: errors from aon\_apb, its miss response included, never reach it (PORTOPT-ERROR-MASKED)}
+\checkrule{PORTOPT-PSTRB-WORD}{warning}{Port\_Options row 10: PSTRB is tied on uart0: a write of part of its 32-bit word overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)}
 \checkrule{PORTOPT-SIGNAL}{error}{Port\_Options row 10: QOS does not exist on APB4; use n/a (PORTOPT-SIGNAL)}
 \checkrule{PORTOPT-UNKNOWN-PORT}{error}{Port\_Options row 18: ghost is not a connected master, slave or bridge (PORTOPT-UNKNOWN-PORT)}
 \checkrule{PROJ-MODULE-PREFIX}{error}{Project row 18: Module prefix 'Demo-SS' is not a lowercase SystemVerilog identifier (PROJ-MODULE-PREFIX)}

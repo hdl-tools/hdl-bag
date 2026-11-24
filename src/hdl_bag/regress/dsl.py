@@ -53,8 +53,11 @@ def wrap_refusals(messages: Iterable[str]) -> list[Refusal]:
 
 
 def unexpected(messages: Iterable[str], declared: set[Refusal]) -> list[str]:
-    """MESSAGES that are not the DECLARED WRAP refusals, and a line if those differ."""
-    messages = list(messages)
+    """MESSAGES that are not the DECLARED WRAP refusals, and a line if those differ. The PSTRB
+    and CACHE tie warnings (D104, D106) follow from a tie the config's Port_Options set on
+    purpose, so the tie declares them."""
+    messages = [m for m in messages
+                if "(PORTOPT-PSTRB-WORD)" not in m and "(AXI-SPLIT-REFUSED)" not in m]  # fmt: skip
     others = [m for m in messages if "(AXI-WRAP-REFUSED)" not in m]
     got = wrap_refusals(messages)
     if sorted(got) != sorted(declared):
