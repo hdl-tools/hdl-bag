@@ -318,7 +318,7 @@ def check_user_ports(ctx: Context) -> None:
                        f"{target} is not a clock domain")  # fmt: skip
         elif kind in ("clock", "reset", "extra-input") and isinstance(width, int) and width != 1:
             ctx.report("USERPORT-CONNECTION", row["Width (bits)"],
-                       f"a {kind.replace('-', ' ')} is 1 bit; {port} is {width} bits")  # fmt: skip
+                       f"{'an' if kind == 'extra-input' else 'a'} {kind.replace('-', ' ')} is 1 bit; {port} is {width} bits")  # fmt: skip
         elif kind == "tie" and isinstance(width, int) and tie is not None and tie >= 1 << width:
             ctx.report("USERPORT-CONNECTION", row["Connection"],
                        f"{conn_text} does not fit in {width} bits")  # fmt: skip
