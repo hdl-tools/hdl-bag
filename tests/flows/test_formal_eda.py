@@ -12,7 +12,7 @@ import pytest
 
 from hdl_bag.flows import Report, prove, run_formal, run_sby
 from hdl_bag.flows.formal import Mode, SymbiYosys
-from hdl_bag.formal_gen import props_module
+from hdl_bag.formal_gen import COVER_DEPTH, props_module
 from hdl_bag.gen import generate
 from hdl_bag.ir import load
 
@@ -699,7 +699,7 @@ def _step_job(tmp_path: Path, register: str) -> tuple[Path, Path]:
     text = (formal / "apb4_min_reset.sby").read_text(encoding="utf-8")
     for old, new in [
         ("[tasks]\nprove\ncover\n", "[tasks]\nbmc\n"),
-        ("prove: mode prove\nprove: depth 6\ncover: mode cover\ncover: depth 40\n",
+        (f"prove: mode prove\nprove: depth 6\ncover: mode cover\ncover: depth {COVER_DEPTH}\n",
          "bmc: mode bmc\nbmc: depth 4\n"),
         ("read_slang ", "read_verilog -formal step_counter.v\nread_slang "),
         ("apb4_min_reset.sv\nprep", "apb4_min_reset.sv step_check.sv\nprep"),
