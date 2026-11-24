@@ -151,8 +151,8 @@ Phase 6 does not include the release; the release is Phase 7, and the entries be
 | PyPI project and release | [hdl-bag 1.0.0](https://pypi.org/project/hdl-bag/1.0.0/) |
 | Tools image tag on GHCR | `ghcr.io/hdl-tools/hdl-bag-tools:v1.0.0` |
 | `CHANGELOG.md` entry for 1.0.0 | [CHANGELOG.md](../CHANGELOG.md) |
-| Release workflow run that published it | _fill in: the `release` workflow run on the tag_ |
-| CI run on the tagged commit | _fill in: the `pr` workflow run on the tagged commit_ |
+| Release workflow run that published it | [release run 45135651528](https://github.com/hdl-tools/hdl-bag/actions/runs/45135651528) (tag push, 6005a87, success) |
+| CI run on the tagged commit | [pr run 45134784622](https://github.com/hdl-tools/hdl-bag/actions/runs/45134784622) (push to main, 6005a87, success) |
 
 ## Effect on later phases
 
