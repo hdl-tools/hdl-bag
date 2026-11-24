@@ -9,6 +9,7 @@ import dataclasses
 import re
 import shutil
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from dsl import AHB_MASTER_NA, APB4_NA, AXIL_NA, SAMPLE_WRAP, Cfg, unexpected, wrap_refusals
@@ -133,7 +134,7 @@ NO_BUS = dataclasses.replace(
 )  # fmt: skip
 
 
-def _split_before_tie(width: int = 64, tied: str = "b2") -> SpecData:
+def _split_before_tie(width: int = 64, tied: Literal["b2", "s0"] = "b2") -> SpecData:
     """D109 (seed 202611240029): a WIDTH-bit AXI4-Lite master, bag_axi2ahb onto a WIDTH-bit
     AHB-Lite bus, then bag_ahb2apb onto a 32-bit APB4 slave, with PSTRB tied on TIED (the
     bridge b2 or the slave s0)."""
