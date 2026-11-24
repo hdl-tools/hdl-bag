@@ -41,6 +41,7 @@ from hdl_bag.tests_gen.route_model import (
     midpoint_buffers,
     midpoint_path,
     midpoint_reads,
+    narrow_apb_path,
     plain_word,
     pstrb_path,
     reads_per_word,
@@ -1057,3 +1058,38 @@ def test_a_slave_with_no_region_has_no_plain_word() -> None:
     s = spec.slaves[0]
     bare = spec.model_copy(update={"memory_map": [r for r in spec.memory_map if r.slave != s.name]})
     assert plain_word(bare, bare.masters[0], s) is None
+
+
+def test_a_read_that_crossed_ahb_starts_at_its_aligned_beat_at_a_later_downsizer(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240029: a 64-bit AXI4-Lite read of the word at 0x...ffc crosses AHB-Lite as a
+    64-bit transfer aligned to 0x...ff8, so the axi_dw_downsizer in front of an 8-bit APB slave
+    further on starts there and reads the error word at 0x...ff8 too."""
+    c = Cfg("ahbalign", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("h", "AHB-Lite", 64, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2ahb")
+    c.link("a", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR")
+    c.option("b1", **AHB_MASTER_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_ahb2axi")
+    c.link("h", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("p", "APB4", 8, 32, "D0")
+    c.bridge("b3", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b3", 0).link("b3", "p", 0).decode("b3", "PSLVERR").option("b3", **APB4_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 8, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.slave == "s0" and 0x4000_0FF8 in exp.words and exp.slave_error
+    # The same 64-bit beat, written with half its strobes, becomes one AHB write per byte, so
+    # the narrow APB test (one access per APB word) leaves this path out.
+    assert narrow_apb_path(spec, spec.masters[0], spec.slaves[0]) is None
