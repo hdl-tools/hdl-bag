@@ -191,6 +191,9 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
     crossed: list[str] = []
+    # Once a bus narrower than the bytes covered splits the access into transfers, a downsizer
+    # further on starts each at its own address and so trims none of them.
+    split = False
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -202,12 +205,14 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
-            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(
-                b, fabrics[b.upstream], fabrics[b.downstream]
+            if not split and (
+                _axi4_downsizer_in_front(spec, target, fabric)
+                or _downsizes_on_axi4(b, fabrics[b.upstream], fabrics[b.downstream])
             ):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             fabric, master = fabrics[b.downstream], b.name
-            if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
+            split = split or fabric.data_width // 8 < hi - lo
+            if not split and _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, 0)  # axi_dw_downsizer starts at the address
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
@@ -221,7 +226,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         word = slaves[target].data_width // 8  # a slave answers per data word
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
-        if _axi4_downsizer_in_front(spec, target, fabric):
+        if not split and _axi4_downsizer_in_front(spec, target, fabric):
             lo = max(lo, 0)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width

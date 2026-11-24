@@ -861,3 +861,33 @@ def test_a_guard_with_one_transaction_lets_one_read_through(
     f = SimpleNamespace(protocol=protocol, max_mst_trans=max_trans)
     m = SimpleNamespace(id_width=id_width)
     assert midpoint_reads(f, m, 6) == expected
+
+
+def test_a_read_split_by_a_narrow_bus_keeps_the_words_below_the_address(tmp_path: Path) -> None:
+    """Seed 202611220028: a 64-bit AXI4-Lite beat read at a region's last word is split by
+    bag_axil2apb into 16-bit APB reads from the start of the beat; behind the next bridge each
+    is its own transfer, so an AXI4 downsizer in front of the slave cannot trim the word below
+    the address (it starts each transfer at that transfer's own address)."""
+    c = Cfg("splitapb", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.master("m0", "APB4", 32, 32, "D0").link("m0", "p", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b1", 0).link("b1", "l", 0).decode("b1", "DECERR").option("b1", **AXIL_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("q", "APB4", 16, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b2", 0).link("b2", "q", 0).decode("b2", "PSLVERR").option("b2", **APB4_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("a", "AXI4", 64, 32, "D0", "round-robin")
+    c.bridge("b3", 0x4000_0000, template="bag_apb2axi")
+    c.link("q", "b3", 0).link("b3", "a", 0).decode("b3", "DECERR").option("b3", **AXI4_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.words == {(exp.address - 4) // 4, exp.address // 4} and exp.slave_error
