@@ -60,6 +60,7 @@ from hdl_bag.tests_gen.route_model import (
     burst_path,
     burst_refused,
     burst_shapes,
+    byte_write_lands,
     check_burst_write,
     check_read,
     check_split_write_error,
@@ -1171,7 +1172,7 @@ async def narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors(dut: Any) -> 
             r = await drv.read(word)
             assert not r.err and r.data == value, f"{label}: read {r.data:#x}"
             # APB3 has no PSTRB: a partial write onto a wider APB word cannot be expressed.
-            if nbytes == 1 or s.protocol == "APB4":
+            if byte_write_lands(SPEC, s, outcome):
                 n = len(sl.log)
                 assert await drv.byte_write(word + 1, 0x5A) == 0, f"{label} byte write"
                 seen = [e for e in sl.log[n:] if e.write]
