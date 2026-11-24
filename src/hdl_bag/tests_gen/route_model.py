@@ -494,6 +494,13 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
     return found if found and axi2apb & set(found[1].bridges) else None
 
 
+def byte_write_lands(spec: Spec, s: Any, exp: Outcome) -> bool:
+    """Whether a byte write that EXP routes onto APB slave S stores only that byte: an 8-bit
+    slave's word is that byte; otherwise S needs PSTRB, and the path must keep the strobes
+    (no PSTRB tie, no APB3 bus on the way: stores_single_bytes)."""
+    return bool(s.data_width == 8 or (s.protocol == "APB4" and stores_single_bytes(spec, exp)))
+
+
 def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
     """Word 0x40 of S, if AXI master M reaches this 32-bit APB4 slave cleanly, on a path that
     keeps the strobes (no PSTRB tie, no APB3 bus on the way: stores_single_bytes)."""
@@ -700,7 +707,13 @@ def reads_per_word(spec: Spec, m: Any, exp: Outcome) -> int:
     bridges = {b.name: b for b in spec.bridges}
     fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
     widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
-    return max(1, exp.word_bytes // (min(widths) // 8))
+    # The slave word crosses the narrowest bus as this many transfers. So does the access, but
+    # it comes back whole only as far as a wider bus behind the narrowest one widens it.
+    # shortcut: access_bytes is a single access; a burst beat wider than 4 bytes is not modelled.
+    narrow = min(widths)
+    after = max(widths[widths.index(narrow) :])
+    return max(1, exp.word_bytes // (narrow // 8),
+               min(access_bytes(m), after // 8) // (narrow // 8))  # fmt: skip
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
