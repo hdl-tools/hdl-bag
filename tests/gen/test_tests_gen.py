@@ -875,16 +875,19 @@ def test_ahb_traffic_is_modifiable_so_its_paths_stay_tested(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
-    ("midpoint", "direct", "by_priority"),
-    [(None, False, True), ((0, "cut"), True, True), ((0, "cut"), False, False)],
-)
+    ("midpoint", "direct", "same_clock", "by_priority"),
+    [(None, False, True, True), ((0, "cut"), True, True, True), ((0, "cut"), False, True, False),
+     (None, False, False, False), (None, True, False, True)],
+)  # fmt: skip
 def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
-    midpoint: tuple[int, str] | None, direct: bool, by_priority: bool
+    midpoint: tuple[int, str] | None, direct: bool, same_clock: bool, by_priority: bool
 ) -> None:
     """Review: with no adapters every request arrives together, so even a buffering mid-point
-    takes them in priority order; only unequal adapter chains make arrival order decide."""
+    takes them in priority order; only unequal adapter chains make arrival order decide. Behind
+    adapters the test aligns the starts, which a clock crossing defeats: the arrival cycle then
+    depends on the phase (#204 review)."""
     mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
-    assert serves_by_priority(SimpleNamespace(midpoint=mid), direct) is by_priority
+    assert serves_by_priority(SimpleNamespace(midpoint=mid), direct, same_clock) is by_priority
 
 
 @pytest.mark.parametrize(

@@ -437,12 +437,20 @@ def midpoint_buffers(f: Any) -> bool:
     return mid is not None and (mid.fifo_depth > 0 or mid.slice != "none")
 
 
-def serves_by_priority(f: Any, direct: bool) -> bool:
+def serves_by_priority(f: Any, direct: bool, same_clock: bool) -> bool:
     """Whether a fixed-priority round on F leaves in priority order: every request waits at the
     arbiter, as with no adapters (DIRECT) or no mid-point to absorb the early arrivals. Behind
     adapters the test starts each master late by how much faster its path is, so the requests
-    arrive in the same cycle (#199)."""
-    return direct or not midpoint_buffers(f)
+    arrive in the same cycle (#199); that needs the masters and the slave on F's clock
+    (SAME_CLOCK), since through a clock crossing the arrival cycle depends on the phase."""
+    return direct or (same_clock and not midpoint_buffers(f))
+
+
+def on_fabric_clock(spec: Spec, f: Any, ports: list[Any], slave: str) -> bool:
+    """Whether every master of PORTS and SLAVE run on fabric F's clock."""
+    domains = {m.domain for m in spec.masters if m.name in {p.port for p in ports}}
+    domains |= {s.domain for s in spec.slaves if s.name == slave}
+    return domains <= {f.domain}
 
 
 def midpoint_reads(f: Any, m: Any, buffered: int) -> int:

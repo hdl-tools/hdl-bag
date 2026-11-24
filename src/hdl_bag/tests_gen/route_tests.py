@@ -75,6 +75,7 @@ from hdl_bag.tests_gen.route_model import (
     midpoint_path,
     midpoint_reads,
     narrow_apb_path,
+    on_fabric_clock,
     pin_sets,
     plain_word,
     private_words,
@@ -938,16 +939,21 @@ async def _latency(masters: dict[str, Any], slave: Any, clk: Any, port: str, add
 
 
 async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int, str],
-                  jobs: list[tuple[str, int]],
-                  delay: dict[str, int] | None = None) -> list[str]:  # fmt: skip
-    """Run JOBS against SLAVE held stalled for 20 cycles; the masters in the order served."""
+                  jobs: list[tuple[str, int]], delay: dict[str, int] | None = None,
+                  hold: int | None = None) -> list[str]:  # fmt: skip
+    """Run JOBS (each master DELAY cycles late) against SLAVE held stalled for HOLD cycles (20
+    past the latest start); the masters in the order served."""
     n = len(slave.log)
     slave.stall(True)
     task = cocotb.start_soon(_writes(masters, jobs, clk, delay))
-    await ClockCycles(clk, 20 + max((delay or {}).values(), default=0))
+    await ClockCycles(clk, hold or 20 + max((delay or {}).values(), default=0))
     slave.stall(False)
     await task
     return [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
+
+
+# Cycles a master's path is given to fill with the slave stalled (_absorbed measures it so).
+_FILL = 40
 
 
 async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, base: int,
@@ -958,7 +964,7 @@ async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, ba
     slave.stall(True)
     task = cocotb.start_soon(_writes(masters, [(port, base + 16 * (3 + k)) for k in range(count)]))
     taken = 0
-    for _ in range(40):
+    for _ in range(_FILL):
         await RisingEdge(clk)
         await ReadOnly()
         taken += int(aw.awvalid.value) & int(aw.awready.value)
@@ -1008,16 +1014,20 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         # Adapter paths of unequal latency bring the requests to the arbiter in different
         # cycles, and once the bus blocks, the first to arrive holds its grant to the
         # handshake (seed 202611220033, #199). So each master starts late by how much faster
-        # its path is (measured, with the bus idle), and all arrive in the same cycle.
+        # its path is (measured, with the bus idle), and all arrive in the same cycle. Through
+        # a clock crossing the arrival cycle depends on the phase, so the order is then not
+        # judged, but the starvation and lock checks below still need the starts staggered.
+        same_clock = on_fabric_clock(SPEC, f, ports, region.slave)
         delay = None
-        if fixed and not direct and serves_by_priority(f, direct):
+        took: dict[str, int] = {}
+        if fixed and not direct:
             took = {p.port: await _latency(masters, slave, clk, p.port, base[p.port] + 16 * 3)
                     for p in ports}  # fmt: skip
             delay = {p: max(took.values()) - t for p, t in took.items()}
         for rnd in range(3):
             jobs = [(p.port, base[p.port] + 16 * rnd) for p in ports]
             order = await _served(masters, slave, clk, owner, jobs, delay)
-            if fixed and serves_by_priority(f, direct):
+            if fixed and serves_by_priority(f, direct, same_clock):
                 assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
             else:
                 assert sorted(order) == sorted(base), f"{f.name} round {rnd}: {order}"
@@ -1041,11 +1051,13 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             assert queued <= slots - 3, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
             jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
-            # Behind adapters, the low request also starts after the 40 cycles _absorbed lets
-            # the first master's path fill, or it can win any cycle that path's next request
-            # is still on its way (seed 202611220033).
-            starve = None if delay is None else {first: 0, last: 40}
-            order = await _served(masters, slave, clk, owner, jobs, starve)
+            # Behind adapters, the low request also starts after the _FILL cycles in which the
+            # first master's path fills, or it can win any cycle that path's next request is
+            # still on its way (seed 202611220033); the slave opens once it has arrived.
+            starve, hold = None, None
+            if delay is not None:
+                starve, hold = {first: 0, last: _FILL}, 20 + _FILL + max(took.values())
+            order = await _served(masters, slave, clk, owner, jobs, starve, hold)
             pos = order.index(last)
             if fixed:
                 assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"
@@ -1056,15 +1068,13 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
                 # so strict alternation is not required; leaving the request last is starvation.
                 assert pos < len(order) - 1, f"{f.name}: round robin starved {last}: {order}"
         if fixed:
-            n = len(slave.log)
-            slave.stall(True)
-            low = cocotb.start_soon(masters[last].write(base[last] + 16 * (slots - 1), 1))
-            await ClockCycles(clk, 10)
-            high = cocotb.start_soon(masters[first].write(base[first] + 16 * (slots - 1), 2))
-            await ClockCycles(clk, 10)
-            slave.stall(False)
-            await Combine(low, high)
-            order = [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
+            # The high request reaches the arbiter 10 cycles after the low one (behind
+            # adapters, with the starts aligned as above), and before the slave opens.
+            align = delay or {}
+            jobs = [(last, base[last] + 16 * (slots - 1)), (first, base[first] + 16 * (slots - 1))]
+            lock = {last: align.get(last, 0), first: align.get(first, 0) + 10}
+            hold = 20 + max(took.values(), default=0)
+            order = await _served(masters, slave, clk, owner, jobs, lock, hold)
             assert order == [last, first], f"{f.name}: grant changed under a stall: {order}"
         tested += 1
         dut._log.info("%s (%s): arbitration checked over %s", f.name, f.arbitration,
