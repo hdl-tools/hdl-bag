@@ -133,8 +133,13 @@ module bag_axi_dw #(
     $fatal(1, "bag_axi_dw: MaxReads must be at least 1");
   end
 
-  slv_req_t  slv_req_in, slv_req;
-  slv_resp_t slv_resp_out, slv_resp;
+  // A struct is one signal to Verilator, so these, which carry both directions between the
+  // ports and the PULP converter, made a combinational loop no bit takes (UNOPTFLAT, #196;
+  // Yosys finds none). split_var has it analyse them field by field.
+  slv_req_t  slv_req_in /*verilator split_var*/;
+  slv_req_t  slv_req /*verilator split_var*/;
+  slv_resp_t slv_resp_out /*verilator split_var*/;
+  slv_resp_t slv_resp /*verilator split_var*/;
 
   // Exclusive accesses through the PULP converter, which ignores AxLOCK. An in-house
   // replacement for it must keep exclusive accesses legal itself, and should then carry an
