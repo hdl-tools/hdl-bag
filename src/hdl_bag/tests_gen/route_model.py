@@ -275,8 +275,13 @@ def error_words(spec: Spec, slave: str) -> set[int]:
     """
     if pslverr_tied(spec, slave):
         return set()
+    from hdl_bag.gen.decode import fabric_offset  # here: gen imports this module's package
+
     width = next(s.addr_width for s in spec.slaves if s.name == slave)
-    return {(r.base + r.size - ERROR_WORD) & ((1 << width) - 1)
+    fabric = next(f for f in spec.fabrics if any(p.port == slave for p in f.slave_ports))
+    # Where the slave sees it: behind a pass-through N bridge, less the window base (seed 025).
+    offset = fabric_offset(spec, fabric)
+    return {(r.base + r.size - ERROR_WORD - offset) & ((1 << width) - 1)
             for r in spec.memory_map if r.slave == slave}  # fmt: skip
 
 
@@ -637,9 +642,10 @@ def _pc_width(spec: Spec, port: str, fabric: Any, start: int, from_port: bool) -
 
 
 def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
-               slave: str) -> list[tuple[int, int, int]]:  # fmt: skip
-    """Each axi_to_axi_lite on the way from MASTER to SLAVE: (the bridges crossed before it, the
-    bytes per beat at most as it enters the adapters in front of it, its data width in bytes)."""
+               slave: str | None) -> list[tuple[int, int, int]]:  # fmt: skip
+    """Each axi_to_axi_lite on the way from MASTER to SLAVE (or, for a miss, as far as BRIDGES
+    go): (the bridges crossed before it, the bytes per beat at most as it enters the adapters in
+    front of it, its data width in bytes)."""
     by_name = {f.name: f for f in spec.fabrics}
     m = next(x for x in spec.masters if x.name == master)
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
@@ -659,6 +665,8 @@ def _splitters(spec: Spec, master: str, bridges: tuple[str, ...],
             out.append((k + 1, narrowest // 8, w // 8))  # on the bridge's far end
         fabric = down
     narrowest = min(narrowest, fabric.data_width)
+    if slave is None:
+        return out
     if (w := _pc_width(spec, slave, fabric, fabric.data_width, False)) is not None:
         out.append((len(bridges), narrowest // 8, w // 8))
     return out
@@ -692,9 +700,8 @@ def cache_tie_refusals(spec: Spec) -> dict[tuple[str, tuple[str, ...]], list[str
 
 def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, addr: int,
                    size: int, beats: int = 1) -> bool:  # fmt: skip
-    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104)."""
-    if exp.slave is None:
-        return False
+    """Whether this access of BEATS beats of SIZE bytes is answered SLVERR on its way (D104), a
+    miss too: a converter in front of the decode refuses it first (seed 202611240024)."""
     return any(split_refused(attributes(spec, m, prot, nonsec, exp.bridges[:k])[3],
                              min(size, most), addr, beats, width)
                for k, most, width in _splitters(spec, m.name, exp.bridges, exp.slave))  # fmt: skip

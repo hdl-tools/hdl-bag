@@ -31,11 +31,13 @@ from hdl_bag.tests_gen.route_model import (
     access_bytes,
     attributes,
     blocking_path,
+    burst_path,
     burst_shapes,
     byte_write_lands,
     cache_after_tie,
     check_read,
     check_write,
+    error_words,
     midpoint_buffers,
     midpoint_path,
     midpoint_reads,
@@ -998,3 +1000,51 @@ def test_the_reset_test_applies_only_where_its_body_finds_a_slave_word(
     assert name in applicable_tests(spec)
     monkeypatch.setattr(hdl_bag.tests_gen, "plain_word", lambda *a: None)
     assert name not in applicable_tests(spec)
+
+
+def test_a_converter_on_the_masters_own_port_refuses_a_burst_to_a_miss_too(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240024 (D104): an AXI4 master with CACHE tied to 0 on an AXI4-Lite bus has its
+    own axi_to_axi_lite, whose burst splitter answers a 4-beat burst SLVERR before the address
+    is decoded, so a burst to an unmapped address gets SLVERR, not DECERR."""
+    c = Cfg("ownpc", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": "tie-0"})
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    m = spec.masters[0]
+    miss = burst_path(spec, m, 0)[1]
+    assert miss is not None
+    exp = route(spec, "m0", miss, False, False, {})
+    assert exp.slave is None
+    assert refused_access(spec, m, exp, 0, False, miss, 4, beats=4)
+    assert not refused_access(spec, m, exp, 0, False, miss, 4)
+
+
+def test_a_slave_behind_a_translating_bridge_errors_at_the_word_its_region_ends_with(
+    tmp_path: Path,
+) -> None:
+    """Seed 202611240025: behind a pass-through N bridge a slave sees addresses less the window
+    base, but its error word was the region's system address, so no master ever reached it and
+    the route test saw no slave error. The error word is now where the slave sees it."""
+    c = Cfg("offseterr", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("br", 0x4000_0000, pass_through=False, template="bag_axi2apb")
+    c.link("a", "br", 0).link("br", "p", 0).decode("br", "PSLVERR").option("br", **APB4_NA)
+    c.region("br", "win", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    assert error_words(spec, "s0") == {0xFF8}
+    exp = route(spec, "m0", 0x4000_0FF8, True, False, {})
+    assert (exp.slave, exp.address, exp.slave_error) == ("s0", 0xFF8, True)
