@@ -1608,3 +1608,11 @@ def test_every_name_the_formal_generator_invents_is_reserved(tmp_path: Path, con
     names += [m for f in sorted(formal.glob("*.sby")) for m in _COPY.findall(f.read_text("utf-8"))]
     assert names
     assert [n for n in names if formal_unit(project, n) is None] == []
+
+
+def test_the_reset_cover_searches_past_step_40() -> None:
+    """Seed 202611170026 (#194): its reset job's covers are all reachable, the last at step 40,
+    one past a depth of 40 (steps 0 to 39). The reset job's assertions are proved by
+    k-induction, not checked to a bound, so a deeper cover search costs no checking: a search
+    ends at the last cover reached."""
+    assert COVER_DEPTH == 80
