@@ -133,9 +133,10 @@ NO_BUS = dataclasses.replace(
 )  # fmt: skip
 
 
-def _split_before_tie(width: int = 64) -> SpecData:
+def _split_before_tie(width: int = 64, tied: str = "b2") -> SpecData:
     """D109 (seed 202611240029): a WIDTH-bit AXI4-Lite master, bag_axi2ahb onto a WIDTH-bit
-    AHB-Lite bus, then bag_ahb2apb with PSTRB tied onto a 32-bit APB4 slave."""
+    AHB-Lite bus, then bag_ahb2apb onto a 32-bit APB4 slave, with PSTRB tied on TIED (the
+    bridge b2 or the slave s0)."""
     c = Cfg("splittie", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
     c.fabric("a", "AXI4-Lite", width, 32, "D0", "round-robin")
@@ -150,9 +151,11 @@ def _split_before_tie(width: int = 64) -> SpecData:
     c.fabric("p", "APB4", 32, 32, "D0")
     c.bridge("b2", 0x4000_0000, template="bag_ahb2apb")
     c.link("h", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR")
-    c.option("b2", **{**APB4_NA, "pstrb": "tie-default"})
+    tie = {"pstrb": "tie-default"}
+    c.option("b2", **{**APB4_NA, **(tie if tied == "b2" else {})})
     c.region("b2", "w2", 0x4000_0000, 0x1_0000)
-    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0)
+    c.option("s0", **{**APB4_NA, **(tie if tied == "s0" else {})})
     c.region("s0", "regs", 0x4000_0000, 0x1000)
     return c.data
 
@@ -367,6 +370,12 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Port_Options row 7: PSTRB is tied on b2, and bag_axi2ahb b1 on the way from m0 turns a "
       "write with clear strobes into byte writes: each then stores the whole 32-bit word, so "
       "even full-word writes are corrupted. Drive PSTRB on b2, or keep bag_axi2ahb off this "
+      "path (PORTOPT-PSTRB-SPLIT)"]),
+    # The slave's own port, not only a bridge's (mutmut trial: untested).
+    ("PORTOPT-PSTRB-SPLIT", _split_before_tie(tied="s0"),
+     ["Port_Options row 8: PSTRB is tied on s0, and bag_axi2ahb b1 on the way from m0 turns a "
+      "write with clear strobes into byte writes: each then stores the whole 32-bit word, so "
+      "even full-word writes are corrupted. Drive PSTRB on s0, or keep bag_axi2ahb off this "
       "path (PORTOPT-PSTRB-SPLIT)"]),
     # A 32-bit beat a full 32-bit word fills is one transfer: only the D106 warning (review).
     ("PORTOPT-PSTRB-WORD", _split_before_tie(32),
