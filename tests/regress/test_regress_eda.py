@@ -14,7 +14,7 @@ from hdl_bag.flows import lint
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.ir import resolve
 from hdl_bag.regress.dsl import AXIL_NA, Cfg
-from hdl_bag.regress.generate import check
+from hdl_bag.regress.generate import check, random_config
 
 # What each seed draws, pinned so a generator change that moves them shows here.
 SEEDS = {
@@ -57,5 +57,21 @@ def test_a_design_whose_only_width_converter_is_axi4_lite_lints_clean(tmp_path: 
     _, result = check(c, tmp_path)
     assert [f.message for f in result.errors] == []
     out = generate(resolve(result), tmp_path / "out", tmp_path)
+    report = lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out))
+    assert [f.format() for f in report.unwaived] == []
+
+
+@pytest.mark.eda
+def test_a_loop_verilator_sees_only_through_whole_structs_is_not_reported(tmp_path: Path) -> None:
+    """Seed 202611220019 (#196): Verilator, which takes each struct as one signal, saw a
+    combinational loop through bag_axi_dw's request and response structs and a generated
+    READY wire (UNOPTFLAT at bag_axi_dw.sv:237). Yosys finds none at bit level. The config is
+    this seed's draw; a generator change that moves it shows as the bridge list here."""
+    cfg = random_config(202611220019)
+    _, result = check(cfg, tmp_path)
+    assert [f.message for f in result.errors] == []
+    spec = resolve(result)
+    assert sorted(b.template for b in spec.bridges) == ["bag_ahb2axi", "bag_axi2apb"]
+    out = generate(spec, tmp_path / "out", tmp_path)
     report = lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out))
     assert [f.format() for f in report.unwaived] == []

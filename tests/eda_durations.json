@@ -941,6 +941,7 @@
  "tests/mutation/test_mutations.py::test_generated_tests_detect_the_rtl_mutation[secure_polarity-apb4_rules]": 1.64,
  "tests/mutation/test_mutations.py::test_generated_tests_detect_the_rtl_mutation[secure_polarity-axi_xbar_rules]": 8.88,
  "tests/regress/test_regress_eda.py::test_a_design_whose_only_width_converter_is_axi4_lite_lints_clean": 0.99,
+ "tests/regress/test_regress_eda.py::test_a_loop_verilator_sees_only_through_whole_structs_is_not_reported": 10.0,
  "tests/regress/test_regress_eda.py::test_a_seed_runs_the_whole_flow[0]": 74.37,
  "tests/regress/test_regress_eda.py::test_a_seed_runs_the_whole_flow[4]": 36.83,
  "tests/rtl/test_inhouse.py::test_ahb2apb[32-32-0-10-10]": 2.18,
