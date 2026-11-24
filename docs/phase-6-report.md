@@ -1,6 +1,6 @@
 # Phase 6 report: module prefix, CDC constraints, examples, guides, bill of materials
 
-Status: **closed by the maintainer; the release is not done.** The v1.0.0 tag, the changelog and the release links belong to Phase 7 and do not exist yet (see "Release"). **Phase 5's gate is still outstanding, and Phase 6 closing does not close it:** the nightly is not green. This report was written from the repository, the closed issues and the merged pull requests. Where a figure comes from a pull request or issue comment rather than a run I read, it says so.
+Status: **closed by the maintainer.** At closing the release was not done; v1.0.0 was released on 2026-11-23, in Phase 7 (see "Release"). **Phase 5's gate is still outstanding, and Phase 6 closing does not close it:** the nightly is not green. This report was written from the repository, the closed issues and the merged pull requests. Where a figure comes from a pull request or issue comment rather than a run I read, it says so.
 
 ## What was built
 
@@ -57,11 +57,11 @@ Each criterion is from the issue's own text. A verdict is mine, from the source 
 | #63 | Limits page | Met, as of the closing date | `docs/manual/chapters/limits.tex` |
 | #63 | README status table | Met | `README.md`, corrected in #166 |
 | #66 | Generated BOM with a test that it matches; Python runtime and sim dependencies | Met | #173 |
-| #66 | Release workflow: PyPI trusted publishing, GHCR tools image tag, `CHANGELOG.md`, version 1.0.0 | **Not met.** `release.yml` (added 2026-10-31) and `tools-image.yml` exist; `CHANGELOG.md` does not exist on `main` (draft PR #174); the version is `0.0.1`. Whether `docs/bom.md` belongs in `license-files` is undecided, and no wheel was built to check | `pyproject.toml`; #66 comment |
+| #66 | Release workflow: PyPI trusted publishing, GHCR tools image tag, `CHANGELOG.md`, version 1.0.0 | **Not met at closing.** `release.yml` (added 2026-10-31) and `tools-image.yml` existed; `CHANGELOG.md` did not exist on `main` (draft PR #174) and the version was `0.0.1`, both done in Phase 7 (#174, #181). Whether `docs/bom.md` belonged in `license-files` was undecided, and no wheel was built to check | `pyproject.toml`; #66 comment |
 | #66 | The maintainer tags `v1.0.0` | **Not met.** Phase 7 | |
 | #67 | A Claude Code skill for the `bag` CLI, in the agents repository | **Not done, and not verifiable from this repository.** The issue is open | #67 |
 | #68 | Usability gate: a person new to the tool, template to a lint-clean, test-passing 4-master 8-slave fabric in under an hour; record the time and problems; fix the docs before tagging | **Not met.** No timed human run happened. A docs-only proxy ran instead (below), and the docs fixes it found are in #176 | #68 comment |
-| #68 | This report, with the release links | This report, with the links pending | |
+| #68 | This report, with the release links | This report; the release links were added after v1.0.0 (#183) | |
 
 ## The usability gate
 
@@ -142,21 +142,21 @@ Stated so the record is complete; each was caught and corrected.
 
 ## Release
 
-Phase 6 does not include the release; the release is Phase 7, and the entries below are its artifacts. The version and the classifier were set by #181, the wheel's licensing documents by #179, and the release page and the tools image's version tag by #180. Two rows are run links, which are written here only after the runs have been read.
+Phase 6 does not include the release; the release is Phase 7, and the entries below are its artifacts. The version and the classifier were set by #181, the wheel's licensing documents by #179, and the release page and the tools image's version tag by #180. The two run links were recorded after both runs were read; both ran on 6005a87 and succeeded.
 
 | Item | Link |
 |---|---|
 | Tag `v1.0.0` | [v1.0.0](https://github.com/hdl-tools/hdl-bag/tree/v1.0.0) |
 | GitHub release page | [releases/tag/v1.0.0](https://github.com/hdl-tools/hdl-bag/releases/tag/v1.0.0) |
 | PyPI project and release | [hdl-bag 1.0.0](https://pypi.org/project/hdl-bag/1.0.0/) |
-| Tools image tag on GHCR | `ghcr.io/hdl-tools/hdl-bag-tools:v1.0.0` |
+| Tools image tag on GHCR | `ghcr.io/hdl-tools/hdl-bag-tools:v1.0.0` (index `sha256:55054fce…`, set by the `pin-tools-image` job of release run 45135651528) |
 | `CHANGELOG.md` entry for 1.0.0 | [CHANGELOG.md](../CHANGELOG.md) |
 | Release workflow run that published it | [release run 45135651528](https://github.com/hdl-tools/hdl-bag/actions/runs/45135651528) (tag push, 6005a87, success) |
 | CI run on the tagged commit | [pr run 45134784622](https://github.com/hdl-tools/hdl-bag/actions/runs/45134784622) (push to main, 6005a87, success) |
 
 ## Effect on later phases
 
-- **Phase 7:** the release (changelog, version, tag, PyPI, the image tag), and the packaging call on whether `docs/bom.md` ships in the wheel's `license-files`. Fill in the release table above, and update the README status to match. #172 is already fixed (#177).
+- **Phase 7:** the release (changelog, version, tag, PyPI, the image tag), and the packaging call on whether `docs/bom.md` ships in the wheel's `license-files`. Fill in the release table above, and update the README status to match (done in #183). #172 is already fixed (#177).
 - **Phase 5 (still open):** #128, #129, #60 and #61, with PR #112. The gate needs two consecutive green weeks, which have not started.
 - **The usability gate:** decide the scope (adapt `soc_4x8`, or the blank template with the examples out of bounds, or both), then run it with someone who has not worked on BAG, after #176's fixes.
 - **v2:** #104 (a CDC tool run on the generated constraints) is the one that closes known gap 1.

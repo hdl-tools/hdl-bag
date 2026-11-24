@@ -10,8 +10,8 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Version 1.0.0, on PyPI. Phases 1 to 4, 6 and 7 of 7 are done. Phase 5's gate and report are
-outstanding (its nightly runs are not yet green).
+Version 1.0.0, on PyPI. Phases 1 to 4 and 6 are done, and v1.0.0 is released. Phase 5's
+gate and report are outstanding (its nightly runs are not yet green).
 
 | Works today | Not yet |
 |---|---|
@@ -53,7 +53,7 @@ bag check spec.xlsx                     # every check; exit 1 on any error
 bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
 bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml, checked either way)
 bag lint out/                           # Project > Lint tools (slang, Verilator, Verible): zero unwaived findings
-bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
+bag sim out/                            # generated cocotb tests (pip install "hdl-bag[sim]")
 bag formal out/                         # generated SymbiYosys jobs: every assertion holds, every cover is reached
 bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim (add --formal for formal)
 bag regress --seeds 10 -o out/regress   # random configs through the whole flow; --seed S reruns one
