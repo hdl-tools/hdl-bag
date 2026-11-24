@@ -82,8 +82,9 @@ TESTS: tuple[GeneratedTest, ...] = (
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
     GeneratedTest("traffic_survives_back_pressure_on_every_channel", 500, lambda s: any(
         private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
-    GeneratedTest("reset_during_traffic_leaves_nothing_behind", 1000, lambda s: any(
-        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+    # The body resets around each slave plain_word reaches (seeds 202611240036, 048).
+    GeneratedTest("reset_during_traffic_leaves_nothing_behind", 1000,
+                  lambda s: _any_pair(s, plain_word)),
     GeneratedTest("traffic_crosses_clock_domains_at_every_ratio", 3000, lambda s: bool(crossing_masters(s))),
     GeneratedTest("shared_buses_block_behind_a_stalled_slave_and_crossbars_do_not", 100, lambda s: any(
         blocking_path(s, f) for f in s.fabrics)),

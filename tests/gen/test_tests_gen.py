@@ -985,3 +985,16 @@ def test_a_downsizer_on_a_bridges_far_end_trims_before_the_bus_counts_as_split(
                         lambda s, port, fabric, from_port=False: (port == "b2" and from_port)
                         or real(s, port, fabric, from_port))  # fmt: skip
     assert not route(spec, "m0", 0x4000_0FFC, False, False, {}).slave_error
+
+
+def test_the_reset_test_applies_only_where_its_body_finds_a_slave_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seeds 202611240036, 048: the reset test applied because private_words found traffic, but
+    its body resets around the slaves plain_word reaches, and found none (`assert reached`).
+    Its predicate now uses the same helper as its body."""
+    spec = load(DEMO)
+    name = "reset_during_traffic_leaves_nothing_behind"
+    assert name in applicable_tests(spec)
+    monkeypatch.setattr(hdl_bag.tests_gen, "plain_word", lambda *a: None)
+    assert name not in applicable_tests(spec)
