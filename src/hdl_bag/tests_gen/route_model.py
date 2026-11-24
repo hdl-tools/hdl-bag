@@ -214,7 +214,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 lite = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
-            nonsec = nonsec or prot_tied(spec, b.name)
+            # An APB3 bus has no PPROT: what crosses it is non-secure from there on (D28).
+            nonsec = nonsec or prot_tied(spec, b.name) or fabric.protocol == "APB3"
             masked = masked or pslverr_tied(spec, b.name)
             crossed.append(b.name)
             continue
@@ -569,7 +570,9 @@ def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
         if downstream[b] == "AXI4-Lite":
             cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
         attrs = (priv, ns, instr, cache_after_tie(spec, b, cache))
-        if prot_tied(spec, b):  # the bridge's downstream end has its PROT tied
+        if downstream[b] == "APB3":  # no PPROT: the next bridge takes 3'b010 (D28)
+            attrs = from_prot(0b010, attrs[3])
+        elif prot_tied(spec, b):  # the bridge's downstream end has its PROT tied
             if downstream[b] == "AHB-Lite":
                 attrs = from_ahb(_tie(spec, b, "hprot"), 1)
             else:  # a PROT tie leaves the cache attributes alone
@@ -752,11 +755,16 @@ def region_edges(spec: Spec, m: Any) -> list[tuple[int, Outcome, Outcome]]:
 
 def stores_single_bytes(spec: Spec, exp: Outcome) -> bool:
     """Whether a single-byte write that EXP routes stores just that byte: the slave takes
-    partial writes, and no bridge on the way drives its APB fabric with PSTRB tied (a tie makes
-    every write a whole word, as configured)."""
+    partial writes, no bridge on the way drives its APB fabric with PSTRB tied (a tie makes
+    every write a whole word, as configured), and no APB3 bus wider than a byte is on the way
+    (APB3 has no PSTRB)."""
     slave = next(s for s in spec.slaves if s.name == exp.slave)
     tied = any(_option(spec, b, "pstrb") in ("tie-0", "tie-default") for b in exp.bridges)
-    return takes_partial_writes(spec, slave) and not tied
+    fabrics = {f.name: f for f in spec.fabrics}
+    downstream = {b.name: fabrics[b.downstream] for b in spec.bridges}
+    apb3 = any(downstream[b].protocol == "APB3" and downstream[b].data_width > 8
+               for b in exp.bridges)  # fmt: skip
+    return takes_partial_writes(spec, slave) and not tied and not apb3
 
 
 def writes_whole_words(spec: Spec, exp: Outcome) -> bool:
