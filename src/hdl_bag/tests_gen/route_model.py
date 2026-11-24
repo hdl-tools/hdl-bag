@@ -439,7 +439,9 @@ def midpoint_buffers(f: Any) -> bool:
 
 def serves_by_priority(f: Any, direct: bool) -> bool:
     """Whether a fixed-priority round on F leaves in priority order: every request waits at the
-    arbiter, as with no adapters (DIRECT) or no mid-point to absorb the early arrivals."""
+    arbiter, as with no adapters (DIRECT) or no mid-point to absorb the early arrivals. Behind
+    adapters the test starts each master late by how much faster its path is, so the requests
+    arrive in the same cycle (#199)."""
     return direct or not midpoint_buffers(f)
 
 

@@ -906,20 +906,45 @@ async def exclusive_accesses_carry_lock_and_exokay_unchanged(dut: Any) -> None:
 # --------------------------------------------------------------------------- AXI fabrics
 
 
-async def _writes(masters: dict[str, Any], jobs: list[tuple[str, int]]) -> None:
-    """Start every (master, address) write in the same cycle and wait for all."""
-    tasks = [cocotb.start_soon(masters[p].write(a, i)) for i, (p, a) in enumerate(jobs)]
+async def _writes(masters: dict[str, Any], jobs: list[tuple[str, int]], clk: Any = None,
+                  delay: dict[str, int] | None = None) -> None:  # fmt: skip
+    """Start every (master, address) write in the same cycle, or each master DELAY[master]
+    cycles of CLK late, and wait for all."""
+
+    async def late(i: int, p: str, a: int) -> Any:
+        if delay is not None:
+            await ClockCycles(clk, 1 + delay[p])
+        return await masters[p].write(a, i)
+
+    tasks = [cocotb.start_soon(late(i, p, a)) for i, (p, a) in enumerate(jobs)]
     await Combine(*tasks)
     assert not any(t.result() for t in tasks), "unexpected write error"
 
 
+async def _latency(masters: dict[str, Any], slave: Any, clk: Any, port: str, addr: int) -> int:
+    """Cycles of CLK from PORT starting a write, on a clock edge with the bus idle, to SLAVE's
+    first handshake for it."""
+    n = len(slave.log)
+    await RisingEdge(clk)
+    task = cocotb.start_soon(masters[port].write(addr, 0))
+    cycles = 0
+    while len(slave.log) == n:
+        await RisingEdge(clk)
+        await ReadOnly()  # after the slave's monitor has logged this edge's handshake
+        cycles += 1
+        assert cycles < 1000, f"{port}: no write reached the slave"
+    await task
+    return cycles
+
+
 async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int, str],
-                  jobs: list[tuple[str, int]]) -> list[str]:  # fmt: skip
+                  jobs: list[tuple[str, int]],
+                  delay: dict[str, int] | None = None) -> list[str]:  # fmt: skip
     """Run JOBS against SLAVE held stalled for 20 cycles; the masters in the order served."""
     n = len(slave.log)
     slave.stall(True)
-    task = cocotb.start_soon(_writes(masters, jobs))
-    await ClockCycles(clk, 20)
+    task = cocotb.start_soon(_writes(masters, jobs, clk, delay))
+    await ClockCycles(clk, 20 + max((delay or {}).values(), default=0))
     slave.stall(False)
     await task
     return [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
@@ -980,10 +1005,18 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         direct = not any(a.fabric == f.name and a.port in base for a in SPEC.adapters)
         index = [p.port for p in ports]
         buffered = midpoint_buffers(f)  # requests then pass the arbiter as they arrive
+        # Adapter paths of unequal latency bring the requests to the arbiter in different
+        # cycles, and once the bus blocks, the first to arrive holds its grant to the
+        # handshake (seed 202611220033, #199). So each master starts late by how much faster
+        # its path is (measured, with the bus idle), and all arrive in the same cycle.
+        delay = None
+        if fixed and not direct and serves_by_priority(f, direct):
+            took = {p.port: await _latency(masters, slave, clk, p.port, base[p.port] + 16 * 3)
+                    for p in ports}  # fmt: skip
+            delay = {p: max(took.values()) - t for p, t in took.items()}
         for rnd in range(3):
-            order = await _served(
-                masters, slave, clk, owner, [(p.port, base[p.port] + 16 * rnd) for p in ports]
-            )
+            jobs = [(p.port, base[p.port] + 16 * rnd) for p in ports]
+            order = await _served(masters, slave, clk, owner, jobs, delay)
             if fixed and serves_by_priority(f, direct):
                 assert order == by_prio, f"{f.name} round {rnd}: {order}, priority {by_prio}"
             else:
@@ -1008,7 +1041,11 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             assert queued <= slots - 3, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
             jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
-            order = await _served(masters, slave, clk, owner, jobs)
+            # Behind adapters, the low request also starts after the 40 cycles _absorbed lets
+            # the first master's path fill, or it can win any cycle that path's next request
+            # is still on its way (seed 202611220033).
+            starve = None if delay is None else {first: 0, last: 40}
+            order = await _served(masters, slave, clk, owner, jobs, starve)
             pos = order.index(last)
             if fixed:
                 assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"
