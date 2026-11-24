@@ -94,6 +94,12 @@ def _user(row: int, inst: str, port: str, direction: str, width: int, conn: str)
     return [*cells, ("User_Ports", row, "Width (bits)", width)]
 
 
+def _reset(row: int, name: str, domain: str) -> list[Edit]:
+    """A Resets row: active-low, async assertion, sync deassertion, in DOMAIN."""
+    return _row("Resets", row, Reset=name, Polarity="active-low", Assertion="async",
+                Deassertion="sync", Domain=domain)  # fmt: skip
+
+
 # aon_apb becomes a user-supplied fabric, so User_Ports rows may name it.
 EXT: list[Edit] = [("Fabrics", 9, "Backing template", "bag_external")]
 
@@ -230,6 +236,21 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Fabrics row 9: Clock domain is required (VALUE-MISSING)"]),
     ("REF-UNKNOWN", [("Masters", 6, "Clock domain", "D_X")],
      ["Masters row 6: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
+    # Branches the mutmut trial on checks/ found untested (2026-11-25).
+    ("REF-UNKNOWN-reset-domain", _reset(9, "rst_x_n", "D_X"),
+     ["Resets row 9: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
+    ("NAME-UNIQUE-reset", _reset(9, "rst_cpu_n", "D_CPU"),
+     ["Resets row 9: domain D_CPU already has reset rst_cpu_n (CLK-RESET-DOMAIN)",
+      "Resets row 9: rst_cpu_n is already defined on Resets row 5 (NAME-UNIQUE)"]),
+    ("HIER-TOP-parent", [("Hierarchy", 5, "Parent", "main_wrapper")],
+     ["Hierarchy row 5: the top wrapper (row 5) must have Parent - (HIER-TOP)"]),
+    ("WRAP-INTERNAL-PORT-master", [("Wrapper", 18, "Exposed at top", "N")],
+     ["Wrapper row 18: master cpu0 must be exposed; only bridges are internal in v1 (WRAP-INTERNAL-PORT)"]),
+    # wdt0 is a slave of aon_apb: the names BAG connects cover its slaves as well as its masters.
+    ("USERPORT-NAME-slave", [*EXT, *_user(5, "aon_apb", "aon_apb_wdt0_apb4_psel", "input", 1, "tie-0")],
+     ["User_Ports row 5: aon_apb_wdt0_apb4_psel is a bus or clock port BAG already connects on aon_apb (USERPORT-NAME)"]),
+    ("USERPORT-CONNECTION-clock-width", [*EXT, *_user(5, "aon_apb", "clk2_i", "input", 2, "clock D_AON")],
+     ["User_Ports row 5: a clock is 1 bit; clk2_i is 2 bits (USERPORT-CONNECTION)"]),
     ("CLK-DOMAIN-TWO-CLOCKS", [("Clocks", 9, h, v) for h, v in (
         ("Clock", "clk_x"), ("Freq (MHz)", 10), ("Domain", "D_SYS"), ("Reset", "rst_sys_n"))],
      ["Clocks row 9: domain D_SYS already has a clock on Clocks row 6 (CLK-DOMAIN-TWO-CLOCKS)"]),
