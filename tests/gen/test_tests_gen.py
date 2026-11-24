@@ -672,15 +672,27 @@ def test_a_read_split_on_the_way_reaches_a_narrow_slave_once_per_transfer() -> N
     AXI4-Lite bus behind widens each to a full beat, which bag_axil2apb reads from a 16-bit
     slave in four transfers. So every slave word is read twice, though the slave is no wider
     than the narrow bus."""
+    assert reads_per_word(*_split_read(widening=True)) == 2  # type: ignore[arg-type]
+
+
+def test_a_read_split_with_no_wider_bus_behind_reaches_each_word_once() -> None:
+    """Review of #202: with no wider bus after the narrow one, each split transfer reaches its
+    own slave word once, so a repeat there is a design reading a register twice."""
+    assert reads_per_word(*_split_read(widening=False)) == 1  # type: ignore[arg-type]
+
+
+def _split_read(widening: bool) -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]:
+    """A 64-bit master's 4-byte read onto a 16-bit bus, then (WIDENING) a 64-bit bus, to a
+    16-bit slave: (spec, master, outcome) for reads_per_word."""
     port = SimpleNamespace(port="m0")
-    spec = SimpleNamespace(
-        fabrics=[SimpleNamespace(name="f0", data_width=64, master_ports=[port]),
-                 SimpleNamespace(name="f1", data_width=16, master_ports=[])],
-        bridges=[SimpleNamespace(name="br0", downstream="f1")],
-    )  # fmt: skip
-    exp = SimpleNamespace(bridges=("br0",), word_bytes=2)
-    m = SimpleNamespace(name="m0", data_width=64, protocol="AHB-Lite")
-    assert reads_per_word(spec, m, exp) == 2  # type: ignore[arg-type]
+    fabrics = [SimpleNamespace(name="f0", data_width=64, master_ports=[port]),
+               SimpleNamespace(name="f1", data_width=16, master_ports=[]),
+               SimpleNamespace(name="f2", data_width=64, master_ports=[])]  # fmt: skip
+    bridges = [SimpleNamespace(name="br0", downstream="f1"),
+               SimpleNamespace(name="br1", downstream="f2")]  # fmt: skip
+    spec = SimpleNamespace(fabrics=fabrics, bridges=bridges)
+    exp = SimpleNamespace(bridges=("br0", "br1") if widening else ("br0",), word_bytes=2)
+    return spec, SimpleNamespace(name="m0", data_width=64, protocol="AHB-Lite"), exp
 
 
 @pytest.mark.parametrize(

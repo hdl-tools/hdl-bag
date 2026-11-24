@@ -707,9 +707,13 @@ def reads_per_word(spec: Spec, m: Any, exp: Outcome) -> int:
     bridges = {b.name: b for b in spec.bridges}
     fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
     widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
-    # The access, as wide as the slave word or as what the master moves, crosses the narrowest
-    # bus as this many transfers, and each can come back to the slave as a whole wider beat.
-    return max(1, max(exp.word_bytes, access_bytes(m)) // (min(widths) // 8))
+    # The slave word crosses the narrowest bus as this many transfers. So does the access, but
+    # it comes back whole only as far as a wider bus behind the narrowest one widens it.
+    # shortcut: access_bytes is a single access; a burst beat wider than 4 bytes is not modelled.
+    narrow = min(widths)
+    after = max(widths[widths.index(narrow) :])
+    return max(1, exp.word_bytes // (narrow // 8),
+               min(access_bytes(m), after // 8) // (narrow // 8))  # fmt: skip
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
