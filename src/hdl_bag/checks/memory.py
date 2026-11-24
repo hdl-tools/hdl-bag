@@ -298,8 +298,9 @@ def check_unreachable_slaves(ctx: Context, result: "CheckResult") -> None:
     for slave in unreachable_slaves(spec):
         if slave not in told and slave in mapped:
             ctx.report("ACC-UNREACHABLE-SLAVE", rows[slave],
-                       f"no master can reach {slave}: Access_Rules, region access and the bridges "
-                       "on the way allow no read or write")  # fmt: skip
+                       f"no master can reach {slave}: no read or write gets in. Check the "
+                       "Access_Rules and region access (RO, WO, secure only) on the way to it, "
+                       "the bridges, and the masters' address widths")  # fmt: skip
 
 
 def check_address_decode(ctx: Context, regions: list[Region]) -> None:

@@ -339,9 +339,10 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Port_Options row 10: PSTRB is tied on uart0: a write of part of its 32-bit word "
       "overwrites the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)"]),
     ("AXI-SPLIT-REFUSED", [("Port_Options", 5, "CACHE", "tie-0")],
-     ["Masters row 5: accesses from cpu0 to clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR "
-      "where a converter must split them: CACHE is tied to 0 on cpu0, so they are non-modifiable. "
-      "Drive CACHE, or tie it to the default (AXI-SPLIT-REFUSED)"]),
+     ["Masters row 5: bursts, and transfers wider than a converter on the way, from cpu0 to "
+      "clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR where the converter must split them: "
+      "CACHE is tied to 0 on cpu0, so they are non-modifiable. Drive CACHE, or tie it to the "
+      "default (AXI-SPLIT-REFUSED)"]),
     ("ACC-UNKNOWN-NAME", [("Access_Rules", 5, "Master", "dma9")],
      ["Access_Rules row 5: dma9 is not a connected master or bridge (ACC-UNKNOWN-NAME)"]),
     ("ACC-NOT-SAME-FABRIC", [("Access_Rules", 6, "Slave / bridge", "uart0")],
@@ -639,8 +640,9 @@ def test_a_slave_that_rules_and_region_access_shut_together_is_unreachable(tmp_p
         *_row("Access_Rules", 10, Master="dma0", Access="RO"), ("Access_Rules", 10, "Slave / bridge", "ddr0"),
     ]  # fmt: skip
     assert _unreachable(_messages(tmp_path, edits)) == [
-        "Topology row 9: no master can reach ddr0: Access_Rules, region access and the bridges "
-        "on the way allow no read or write (ACC-UNREACHABLE-SLAVE)"
+        "Topology row 9: no master can reach ddr0: no read or write gets in. Check the "
+        "Access_Rules and region access (RO, WO, secure only) on the way to it, the bridges, and "
+        "the masters' address widths (ACC-UNREACHABLE-SLAVE)"
     ]
 
 
@@ -657,3 +659,18 @@ def test_the_slaves_behind_a_bridge_no_master_may_use_are_unreachable(tmp_path: 
     behind = sorted(m.split("no master can reach ")[1].split(":")[0] for m in found
                     if "no master can reach " in m)  # fmt: skip
     assert behind == ["gpio0", "spi0", "timer0", "uart0"]
+
+
+def test_a_pstrb_tied_to_0_stores_nothing(tmp_path: Path) -> None:
+    """Review: with PSTRB tied to 0 no write stores any byte, whatever the width."""
+    found = [m for m in _messages(tmp_path, [("Port_Options", 10, "PSTRB", "tie-0")])
+             if "(PORTOPT-PSTRB-WORD)" in m]  # fmt: skip
+    assert found == [
+        "Port_Options row 10: PSTRB is tied to 0 on uart0: no write stores any byte. Drive "
+        "PSTRB, or tie it to the default (PORTOPT-PSTRB-WORD)"
+    ]
+
+
+def test_a_cache_tied_to_the_default_does_not_warn(tmp_path: Path) -> None:
+    edits: list[Edit] = [("Port_Options", 5, "CACHE", "tie-default")]
+    assert not [m for m in _messages(tmp_path, edits) if "(AXI-SPLIT-REFUSED)" in m]

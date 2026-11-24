@@ -797,10 +797,11 @@ the crossbar.
 The rules: both names must be connected ports (\ruleid{ACC-UNKNOWN-NAME}) on the same
 fabric (\ruleid{ACC-NOT-SAME-FABRIC}), and a pair may have one rule
 (\ruleid{ACC-DUPLICATE}). If every master of a fabric is blocked from a slave,
-\cmd{bag check} warns (\ruleid{ACC-UNREACHABLE-SLAVE}). It also warns when the rules,
-region access and the bridges on the way together leave a slave no read or write: a
-write-only region that every master may only read, or a slave behind a bridge that no
-master may use. The generated tests leave such a slave out.
+\cmd{bag check} warns (\ruleid{ACC-UNREACHABLE-SLAVE}). It also warns when no read or
+write of any master gets into a slave for another reason: a write-only region that every
+master may only read, a slave behind a bridge that no master may use, a secure-only region
+whose masters all have PROT tied, or a region above every master's address range. The
+generated tests leave such a slave out.
 
 \section{Memory\_Map}
 
@@ -983,7 +984,12 @@ The rules: the port must be a connected master, slave or bridge
 the others (\ruleid{PORTOPT-SIGNAL}). HMASTLOCK goes to AHB-Lite masters only, so
 \col{LOCK / excl} is \code{n/a} on an AHB-Lite slave. A tied PSLVERR on a master port
 of an APB fabric gives a warning (\ruleid{PORTOPT-ERROR-MASKED}): no error reaches that
-master, its own miss response included.
+master, its own miss response included. A PSTRB tied to the default on an APB4 port wider
+than 8 bits gives a warning, as a partial write then overwrites the rest of the word, and
+so does a PSTRB tied to 0, as no write then stores any byte (\ruleid{PORTOPT-PSTRB-WORD}).
+A CACHE tied to 0 on an AXI4 master or bridge makes every access non-modifiable; where an
+AXI4 to AXI4-Lite converter on the way must split one, it answers SLVERR, and
+\cmd{bag check} warns (\ruleid{AXI-SPLIT-REFUSED}).
 
 \section{User\_Ports}
 \label{sec:wb-user-ports}
