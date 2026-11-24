@@ -66,8 +66,8 @@ def test_a_loop_verilator_sees_only_through_whole_structs_is_not_reported(tmp_pa
     """Seed 202611220019 (#196): Verilator, which takes each struct as one signal, saw a
     combinational loop through bag_axi_dw's request and response structs and a generated
     READY wire (UNOPTFLAT at bag_axi_dw.sv:237), through a downsizing instance (f0_dw_2_s0).
-    Yosys finds none at bit level. The config is this seed's draw (no hand-built config
-    reproduced the loop shape); a generator change that moves it shows as the bridge list here."""
+    Yosys finds none at bit level. The config is this seed's draw (not yet cut down to a
+    hand-built config); a generator change that moves it shows as the bridge list here."""
     cfg = random_config(202611220019)
     _, result = check(cfg, tmp_path)
     assert [f.message for f in result.errors] == []
