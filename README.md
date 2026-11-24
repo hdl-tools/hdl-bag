@@ -10,14 +10,13 @@ spec; every output is generated deterministically from it.
 
 ## Status
 
-Version 1.0.0, not yet tagged or published. Phases 1 to 4 and 6 of 7 are done. Phase 5's gate
-and report are outstanding (its nightly runs are not yet green), and Phase 7 is the release
-itself.
+Version 1.0.0, on PyPI. Phases 1 to 4 and 6 are done, and v1.0.0 is released. Phase 5's
+gate and report are outstanding (its nightly runs are not yet green).
 
 | Works today | Not yet |
 |---|---|
 | Spec workbook template, reader and 100 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
-| Canonical YAML IR, byte-identical across runs | The v1.0 release (Phase 7) |
+| Canonical YAML IR, byte-identical across runs | |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |
 | Example workbooks in [examples](examples), each `bag check` clean and run end to end in CI | |
@@ -43,7 +42,8 @@ Phase reports: [Phase 1](docs/phase-1-report.md), [Phase 2](docs/phase-2-report.
 ## Quick start
 
 ```sh
-# Until v1.0 is on PyPI, install from the repository:
+pip install hdl-bag
+# or the unreleased main branch:
 pip install git+https://github.com/hdl-tools/hdl-bag.git
 # or, from a checkout (needs uv), and put `uv run` in front of every `bag` below:
 uv sync
@@ -53,7 +53,7 @@ bag check spec.xlsx                     # every check; exit 1 on any error
 bag ir spec.xlsx -o spec.ir.yaml        # write the canonical IR
 bag generate spec.xlsx -o out/          # RTL, wrapper and collateral (.xlsx or .ir.yaml, checked either way)
 bag lint out/                           # Project > Lint tools (slang, Verilator, Verible): zero unwaived findings
-bag sim out/                            # generated cocotb tests (pip install hdl-bag[sim])
+bag sim out/                            # generated cocotb tests (pip install "hdl-bag[sim]")
 bag formal out/                         # generated SymbiYosys jobs: every assertion holds, every cover is reached
 bag flow spec.xlsx -o out/              # check -> generate -> lint -> elaborate -> sim (add --formal for formal)
 bag regress --seeds 10 -o out/regress   # random configs through the whole flow; --seed S reruns one
