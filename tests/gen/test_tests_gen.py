@@ -32,6 +32,7 @@ from hdl_bag.tests_gen.route_model import (
     attributes,
     blocking_path,
     burst_shapes,
+    byte_write_lands,
     cache_after_tie,
     check_read,
     check_write,
@@ -636,6 +637,10 @@ def test_the_unaligned_write_test_needs_a_path_that_keeps_strobes(
     assert (name in applicable_tests(spec)) is applies
     # Seed 202611220001: the PSTRB byte-write test needs a path that keeps strobes too.
     assert (pstrb_path(spec, spec.masters[0], spec.slaves[0]) is not None) is applies
+    # Seeds 202611240002, 034: so does the narrow APB test's byte write.
+    found = plain_word(spec, spec.masters[0], spec.slaves[0])
+    assert found is not None
+    assert byte_write_lands(spec, spec.slaves[0], found[1]) is applies
 
 
 def test_a_read_repeats_a_word_only_where_its_path_allows() -> None:
@@ -658,7 +663,24 @@ def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: i
         bridges=[SimpleNamespace(name="br0", downstream="f1")],
     )  # fmt: skip
     exp = SimpleNamespace(bridges=("br0",), word_bytes=8)
-    assert reads_per_word(spec, SimpleNamespace(name="m0"), exp) == repeats  # type: ignore[arg-type]
+    m = SimpleNamespace(name="m0", data_width=64, protocol="AXI4")
+    assert reads_per_word(spec, m, exp) == repeats  # type: ignore[arg-type]
+
+
+def test_a_read_split_on_the_way_reaches_a_narrow_slave_once_per_transfer() -> None:
+    """Seed 202611240040: a 4-byte read crosses a 16-bit APB3 bus as two transfers; a 64-bit
+    AXI4-Lite bus behind widens each to a full beat, which bag_axil2apb reads from a 16-bit
+    slave in four transfers. So every slave word is read twice, though the slave is no wider
+    than the narrow bus."""
+    port = SimpleNamespace(port="m0")
+    spec = SimpleNamespace(
+        fabrics=[SimpleNamespace(name="f0", data_width=64, master_ports=[port]),
+                 SimpleNamespace(name="f1", data_width=16, master_ports=[])],
+        bridges=[SimpleNamespace(name="br0", downstream="f1")],
+    )  # fmt: skip
+    exp = SimpleNamespace(bridges=("br0",), word_bytes=2)
+    m = SimpleNamespace(name="m0", data_width=64, protocol="AHB-Lite")
+    assert reads_per_word(spec, m, exp) == 2  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
