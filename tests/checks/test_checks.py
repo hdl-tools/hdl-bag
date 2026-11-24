@@ -133,15 +133,15 @@ NO_BUS = dataclasses.replace(
 )  # fmt: skip
 
 
-def _split_before_tie() -> SpecData:
-    """D109 (seed 202611240029): a 64-bit AXI4-Lite master, bag_axi2ahb onto a 64-bit
+def _split_before_tie(width: int = 64) -> SpecData:
+    """D109 (seed 202611240029): a WIDTH-bit AXI4-Lite master, bag_axi2ahb onto a WIDTH-bit
     AHB-Lite bus, then bag_ahb2apb with PSTRB tied onto a 32-bit APB4 slave."""
     c = Cfg("splittie", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
-    c.fabric("a", "AXI4-Lite", 64, 32, "D0", "round-robin")
-    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.fabric("a", "AXI4-Lite", width, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", width, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
     c.option("m0", **AXIL_NA)
-    c.fabric("h", "AHB-Lite", 64, 32, "D0")
+    c.fabric("h", "AHB-Lite", width, 32, "D0")
     c.bridge("b1", 0x4000_0000, template="bag_axi2ahb")
     c.link("a", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR").option(
         "b1", **AHB_MASTER_NA
@@ -368,6 +368,10 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
       "write with clear strobes into byte writes: each then stores the whole 32-bit word, so "
       "even full-word writes are corrupted. Drive PSTRB on b2, or keep bag_axi2ahb off this "
       "path (PORTOPT-PSTRB-SPLIT)"]),
+    # A 32-bit beat a full 32-bit word fills is one transfer: only the D106 warning (review).
+    ("PORTOPT-PSTRB-WORD", _split_before_tie(32),
+     ["Port_Options row 7: PSTRB is tied on b2: a write of part of its 32-bit word overwrites "
+      "the rest of the word. Drive PSTRB, or write whole words only (PORTOPT-PSTRB-WORD)"]),
     ("AXI-SPLIT-REFUSED", [("Port_Options", 5, "CACHE", "tie-0")],
      ["Masters row 5: bursts, and transfers wider than a converter on the way, from cpu0 to "
       "clkrst0, gpio0, pmu0, spi0, timer0, uart0 get SLVERR where the converter must split them: "

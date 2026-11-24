@@ -168,7 +168,8 @@ def _no_pstrb_tie_behind_axi2ahb(cfg: Cfg) -> None:
     """D109: bag_axi2ahb turns a write with clear strobes into byte writes, and a PSTRB tie
     further on makes each store a whole word, which bag check refuses (PORTOPT-PSTRB-SPLIT). So a
     config with a bag_axi2ahb drives PSTRB everywhere; the draws are kept, so no other seed
-    changes."""
+    changes. shortcut: wider than the rule (any width, any port), so such configs lose the
+    PSTRB tie; narrow it to the rule if coverage of ties behind bag_axi2ahb is wanted."""
     if not any(row[1] == "bag_axi2ahb" for row in cfg.data.bridges):
         return
     column = 1 + OPTION_COLUMNS.index("pstrb")

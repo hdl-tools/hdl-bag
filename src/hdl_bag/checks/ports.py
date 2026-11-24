@@ -340,10 +340,11 @@ def check_split_refusals(ctx: Context, result: "CheckResult") -> None:
 def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
     """A port with PSTRB tied to the default on an APB4 word wider than a byte: every write
     stores the whole word, so a partial write overwrites the rest of it (D106). Tied to 0, no
-    write stores any byte, at any width. Reached through bag_axi2ahb, which turns a write beat
-    with clear strobes into byte writes, even a full-word write is corrupted: an error (D109)."""
+    write stores any byte, at any width. Reached through bag_axi2ahb from AXI4-Lite, whose
+    full-width beat, wider than the word, a full-word write leaves partly clear, that beat
+    becomes byte writes, so even a full-word write is corrupted: an error (D109)."""
     from hdl_bag.ir.resolve import resolve
-    from hdl_bag.tests_gen.route_model import route
+    from hdl_bag.tests_gen.route_model import probes, route
 
     spec = resolve(result)
     fabrics = {f.name: f for f in spec.fabrics}
@@ -351,17 +352,21 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
     widths |= {x.name: x.data_width for x in spec.masters if x.protocol == "APB4"}
     widths |= {b.name: fabrics[b.downstream].data_width for b in spec.bridges
                if fabrics[b.downstream].protocol == "APB4"}  # fmt: skip
-    templates = {b.name: b.template for b in spec.bridges}
-    # Per tied port: the masters whose writes reach it through a bag_axi2ahb, and the first such.
+    # Each bag_axi2ahb fed by AXI4-Lite, with the width of the beat its core splits (D109): an
+    # AXI4-Lite beat is full width, and a beat whose strobes are all set is one transfer.
+    beats = {b.name: min(fabrics[b.upstream].data_width, fabrics[b.downstream].data_width)
+             for b in spec.bridges
+             if b.template == "bag_axi2ahb" and fabrics[b.upstream].protocol == "AXI4-Lite"}  # fmt: skip
+    # Per tied port: the masters whose writes reach it through such a bridge, and the first such.
     split: dict[str, tuple[list[str], str]] = {}
     for m in spec.masters:
-        for r in spec.memory_map:
-            if r.base >= 1 << m.addr_width:
+        for a in probes(spec):
+            if a >= 1 << m.addr_width:
                 continue
-            e = route(spec, m.name, r.base, True, False, {})
+            e = route(spec, m.name, a, True, False, {})
             path = [*e.bridges, *([e.slave] if e.slave else [])]
             for k, hop in enumerate(path):
-                via = next((b for b in path[:k] if templates.get(b) == "bag_axi2ahb"), None)
+                via = next((b for b in path[:k] if beats.get(b, 0) > widths.get(hop, 8)), None)
                 if via is not None:
                     masters, _ = split.setdefault(hop, ([], via))
                     if m.name not in masters:
