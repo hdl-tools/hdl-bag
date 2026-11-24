@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 from cocotbext.axi import AxiProt
-from dsl import APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
+from dsl import APB3_NA, APB4_NA, AXI4_NA, AXIL_NA, Cfg, resolve_cfg
 
 import hdl_bag.tests_gen
 from hdl_bag.cli import main
@@ -29,6 +29,7 @@ from hdl_bag.tests_gen.route_model import (
     _axi4_downsizer_in_front,
     _splitters,
     access_bytes,
+    attributes,
     blocking_path,
     burst_shapes,
     cache_after_tie,
@@ -603,8 +604,9 @@ def test_a_path_says_how_it_stores_a_partial_write(
     protocol: str, template: str, whole: bool, rewrites: bool
 ) -> None:
     slave = SimpleNamespace(name="s0", protocol=protocol, data_width=32)
-    bridge = SimpleNamespace(name="br0", template=template)
-    spec = SimpleNamespace(slaves=[slave], bridges=[bridge], port_options=[])
+    bridge = SimpleNamespace(name="br0", template=template, downstream="f1")
+    fabric = SimpleNamespace(name="f1", protocol="AXI4", data_width=32)  # not an APB3 hop
+    spec = SimpleNamespace(slaves=[slave], bridges=[bridge], fabrics=[fabric], port_options=[])
     exp = SimpleNamespace(slave="s0", bridges=("br0",))
     assert writes_whole_words(spec, exp) is whole  # type: ignore[arg-type]
     assert rewrites_words(spec, exp) is rewrites  # type: ignore[arg-type]
@@ -891,3 +893,42 @@ def test_a_read_split_by_a_narrow_bus_keeps_the_words_below_the_address(tmp_path
     assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.words == {(exp.address - 4) // 4, exp.address // 4} and exp.slave_error
+
+
+def _through_apb3(tmp_path: Path) -> Spec:
+    """AXI4 master m0, bag_axi2apb onto a 32-bit APB3 bus, bag_apb2axi onto an AXI4 bus with
+    slave s0."""
+    c = Cfg("apb3hop", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.fabric("p", "APB3", 32, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b1", 0).link("b1", "p", 0).decode("b1", "PSLVERR").option("b1", **APB3_NA)
+    c.region("b1", "win1", 0x4000_0000, 0x1_0000)
+    c.fabric("x", "AXI4", 32, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b2", 0).link("b2", "x", 0).decode("b2", "DECERR").option("b2", **AXI4_NA)
+    c.region("b2", "win2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AXI4", 32, 32, "D0").link("x", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    return spec
+
+
+def test_an_apb3_bus_on_the_way_drops_the_protection_bits(tmp_path: Path) -> None:
+    """Seeds 202611220002, 016, 017, 037: APB3 has no PPROT, so the bridge after an APB3 bus
+    drives its default, a non-secure data access (D28), whatever the master sent."""
+    spec = _through_apb3(tmp_path)
+    m = spec.masters[0]
+    assert attributes(spec, m, 0b101, False, ("b1", "b2"))[:3] == (0, 1, 0)
+    assert route(spec, "m0", 0x4000_0040, True, False, {}).nonsec
+
+
+def test_an_apb3_bus_on_the_way_stores_whole_words(tmp_path: Path) -> None:
+    """Seed 202611220017: APB3 has no PSTRB either, so a byte write crossing a 32-bit APB3 bus
+    reaches the slave behind it as a whole word."""
+    spec = _through_apb3(tmp_path)
+    assert writes_whole_words(spec, route(spec, "m0", 0x4000_0040, True, False, {}))
