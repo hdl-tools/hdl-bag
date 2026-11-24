@@ -923,11 +923,13 @@ async def _served(masters: dict[str, Any], slave: Any, clk: Any, owner: dict[int
     return [owner[e.addr] for e in slave.log[n:] if e.write and e.addr in owner]
 
 
-async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, base: int) -> int:
-    """AW handshakes PORT gets at its own wrapper port with SLAVE stalled: its path's capacity."""
+async def _absorbed(masters: dict[str, Any], slave: Any, clk: Any, port: str, base: int,
+                    count: int) -> int:  # fmt: skip
+    """AW handshakes PORT gets at its own wrapper port with SLAVE stalled, of COUNT writes: its
+    path's capacity."""
     aw = masters[port].bus.write.aw
     slave.stall(True)
-    task = cocotb.start_soon(_writes(masters, [(port, base + 16 * (3 + k)) for k in range(12)]))
+    task = cocotb.start_soon(_writes(masters, [(port, base + 16 * (3 + k)) for k in range(count)]))
     taken = 0
     for _ in range(40):
         await RisingEdge(clk)
@@ -961,9 +963,13 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         clk = clocks[f.domain]
         width = next(s.addr_width for s in SPEC.slaves if s.name == region.slave)
         # 16 bytes between jobs: a downsizer's extra (zero-strobe) beat of a narrow write
-        # never lands on another job's address.
-        base = {p.port: region.base + 0x100 * i for i, p in enumerate(ports)}
-        owner = {(a + 16 * k) & ((1 << width) - 1): p for p, a in base.items() for k in range(16)}
+        # never lands on another job's address. Each master gets SLOTS of them, as many as the
+        # region holds up to 64: a deep adapter path absorbs a dozen writes (seeds 202611220021,
+        # 039), and the starvation check queues more than that.
+        slots = max(16, min(64, region.size // (16 * len(ports))))
+        base = {p.port: region.base + 16 * slots * i for i, p in enumerate(ports)}
+        owner = {(a + 16 * k) & ((1 << width) - 1): p for p, a in base.items()
+                 for k in range(slots)}  # fmt: skip
         fixed = f.arbitration == "fixed-priority"
         by_prio = [p.port for p in sorted(ports, key=lambda p: p.priority or 0)]
 
@@ -993,8 +999,10 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             # Behind adapters the last-served request can arrive long after the first-served
             # master's writes: queue more than that master's path absorbs while the slave is
             # stalled (measured), so some still wait at the arbiter when it arrives.
-            queued = 4 if direct else await _absorbed(masters, slave, clk, first, base[first]) + 4
-            assert queued <= 12, f"{f.name}: {first} absorbs {queued - 4} writes; address plan"
+            absorbed = 0 if direct else await _absorbed(masters, slave, clk, first, base[first],
+                                                         slots - 5)  # fmt: skip
+            queued = absorbed + 4
+            assert queued <= slots - 2, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
             jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
             order = await _served(masters, slave, clk, owner, jobs)
@@ -1010,9 +1018,9 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         if fixed:
             n = len(slave.log)
             slave.stall(True)
-            low = cocotb.start_soon(masters[last].write(base[last] + 16 * 12, 1))
+            low = cocotb.start_soon(masters[last].write(base[last] + 16 * (slots - 1), 1))
             await ClockCycles(clk, 10)
-            high = cocotb.start_soon(masters[first].write(base[first] + 16 * 12, 2))
+            high = cocotb.start_soon(masters[first].write(base[first] + 16 * (slots - 1), 2))
             await ClockCycles(clk, 10)
             slave.stall(False)
             await Combine(low, high)
