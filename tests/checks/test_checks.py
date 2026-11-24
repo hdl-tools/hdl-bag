@@ -236,9 +236,10 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Fabrics row 9: Clock domain is required (VALUE-MISSING)"]),
     ("REF-UNKNOWN", [("Masters", 6, "Clock domain", "D_X")],
      ["Masters row 6: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
-    # Branches the mutmut trial on checks/ found untested (2026-11-25).
+    # Branches no other case reaches (found by the mutmut trial on checks/, 2026-11-25).
     ("REF-UNKNOWN-reset-domain", _reset(9, "rst_x_n", "D_X"),
      ["Resets row 9: domain D_X is not defined on Clocks (REF-UNKNOWN)"]),
+    # Every sample domain has a reset, so a repeated reset name in one also repeats its domain.
     ("NAME-UNIQUE-reset", _reset(9, "rst_cpu_n", "D_CPU"),
      ["Resets row 9: domain D_CPU already has reset rst_cpu_n (CLK-RESET-DOMAIN)",
       "Resets row 9: rst_cpu_n is already defined on Resets row 5 (NAME-UNIQUE)"]),
@@ -251,6 +252,11 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["User_Ports row 5: aon_apb_wdt0_apb4_psel is a bus or clock port BAG already connects on aon_apb (USERPORT-NAME)"]),
     ("USERPORT-CONNECTION-clock-width", [*EXT, *_user(5, "aon_apb", "clk2_i", "input", 2, "clock D_AON")],
      ["User_Ports row 5: a clock is 1 bit; clk2_i is 2 bits (USERPORT-CONNECTION)"]),
+    ("USERPORT-CONNECTION-reset-width", [*EXT, *_user(5, "aon_apb", "rst2_ni", "input", 2, "reset D_AON")],
+     ["User_Ports row 5: a reset is 1 bit; rst2_ni is 2 bits (USERPORT-CONNECTION)"]),
+    ("USERPORT-CONNECTION-extra-input-width",
+     [*EXT, *_user(5, "aon_apb", "remap_i", "input", 3, "extra input boot_remap_i")],
+     ["User_Ports row 5: an extra input is 1 bit; remap_i is 3 bits (USERPORT-CONNECTION)"]),
     ("CLK-DOMAIN-TWO-CLOCKS", [("Clocks", 9, h, v) for h, v in (
         ("Clock", "clk_x"), ("Freq (MHz)", 10), ("Domain", "D_SYS"), ("Reset", "rst_sys_n"))],
      ["Clocks row 9: domain D_SYS already has a clock on Clocks row 6 (CLK-DOMAIN-TWO-CLOCKS)"]),
