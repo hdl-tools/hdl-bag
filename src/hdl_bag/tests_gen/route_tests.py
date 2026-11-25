@@ -33,7 +33,7 @@ from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
 from hdl_bag.bursts import FIXED, INCR
-from hdl_bag.formal_gen.depth import unreachable_slaves
+from hdl_bag.formal_gen.depth import reachable, unreachable_slaves
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
@@ -1593,7 +1593,10 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         # A read-only and a write-only way in together cover all three of its channels.
         if not (found[-1].writes and found[-1].reads):
             found += [t for t in options if t.writes != found[-1].writes][:1]
-    for name in sorted(_axi_names(SPEC.masters)):
+    # A master that reaches no slave has no B or R a model answers, as a slave nothing reaches
+    # has no AW, W or AR (D105; shrunk seed 202611250042).
+    reaching = {m for m, _ in reachable(SPEC)}
+    for name in sorted(_axi_names(SPEC.masters) & reaching):
         options = [t for r in regions if (t := target(r, name)) is not None]
         if not options and any(refused(name, r) for r in regions):
             continue

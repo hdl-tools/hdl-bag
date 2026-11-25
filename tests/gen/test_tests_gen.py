@@ -19,7 +19,7 @@ import hdl_bag.tests_gen
 from hdl_bag.cli import main
 from hdl_bag.flows import Report, run_tests, simulate
 from hdl_bag.gen import generate, load_outputs, sources
-from hdl_bag.ir import Spec, load
+from hdl_bag.ir import Spec, load, resolve
 from hdl_bag.regress.dsl import AHB_MASTER_NA, AHB_SLAVE_NA
 from hdl_bag.tests_gen import SHIM_TEST, TESTS, applicable_tests, ready_shim_module
 from hdl_bag.tests_gen.bfm_axi import AxiPortMaster
@@ -1337,3 +1337,28 @@ def test_a_split_onto_an_apb_bus_makes_transfers_of_its_width_before_ahb(tmp_pat
     assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.slave == "s0" and min(exp.words) * 2 == 0x4000_0FFC and not exp.hits_error_word
+
+
+def test_an_axi_master_that_reaches_no_slave_is_left_out_of_the_handshake_orderings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shrunk seed 202611250042 (#213): an AXI master that Access_Rules leave no slave has no
+    B or R its model answers, as a slave nothing reaches has no AW, W or AR (D105): the test
+    leaves it out instead of failing "it reaches no slave"."""
+    from hdl_bag.regress.generate import check
+    from hdl_bag.tests_gen import route_tests
+
+    c = Cfg("ordernone", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("x", "AXI4", 32, 32, "D0", "round-robin")
+    for k in (0, 1):
+        c.master(f"m{k}", "AXI4", 32, 32, "D0").link(f"m{k}", "x", k).decode(f"m{k}", "DECERR")
+        c.option(f"m{k}", **AXI4_NA)
+    c.slave("s0", "AXI4", 32, 32, "D0").link("x", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    c.access("m0", "s0", "-")
+    _, result = check(c, tmp_path)
+    assert not result.errors
+    monkeypatch.setattr(route_tests, "SPEC", resolve(result), raising=False)
+    found, required = route_tests._ordering_targets()
+    assert {t.master for t in found} == {"m1"} and required["m0"] == ()
