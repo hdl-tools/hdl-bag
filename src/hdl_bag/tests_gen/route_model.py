@@ -202,8 +202,15 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there; after
     # a split, at the first transfer.
     start = 0
+    # Bytes per AXI transfer of the access (AxSIZE): an AXI4-Lite master's beat is one transfer
+    # of its width, also behind its pc onto AXI4 (seed 202611200006); a split makes transfers of
+    # the narrow bus's width, and an AXI4-Lite bus of its own.
+    m = next((x for x in spec.masters if x.name == master), None)
+    size = max(hi - lo, m.data_width // 8 if m is not None and m.protocol == "AXI4-Lite" else 0)
+    # No bus carries a transfer wider than itself: a downsizer onto it splits the beat (seed 2).
+    size = min(size, fabric.data_width // 8)
     if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (202611250042)
-        split, start = True, lo
+        split, start, size = True, lo, fabric.data_width // 8
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -225,19 +232,23 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 # generator seed 341).
                 start = lo
             fabric, master = down, b.name
+            size = min(size, fabric.data_width // 8)
             if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
             # After this hop's own trim: a bus narrower than what is still covered splits it.
             if not split and fabric.data_width // 8 < hi - lo:
-                split, start = True, lo
+                split, start, size = True, lo, fabric.data_width // 8
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
-                lite = fabric.data_width // 8
+                lite = size = fabric.data_width // 8
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
             if fabric.data_width < narrowest:
                 narrowest, carried = fabric.data_width, hi - lo
             if not write and fabric.protocol == "AHB-Lite":
+                # bag_axi2ahb_core aligns HADDR to the transfer (at most the AHB width).
+                t = min(size, fabric.data_width // 8)
+                lo = min(lo, (addr + lo) // t * t - addr)
                 start = min(lo, 0)  # seed 202611240029
             # An APB3 bus has no PPROT: what crosses it is non-secure from there on (D28).
             nonsec = nonsec or prot_tied(spec, b.name) or fabric.protocol == "APB3"
