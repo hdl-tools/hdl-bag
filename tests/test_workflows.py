@@ -14,6 +14,8 @@ What the owner settled and the tests hold:
 - PR 6 review: the night's seed base is computed once (a rerun of failed jobs keeps it), a
   shard cut off by its limit is named in the summary as missing seeds and fails the night,
   and a dispatch of pr.yml that selects tests by name may run a deep or alone one.
+- Owner, 2026-11-25: every fixed random seed is shrunk and joins the corpus; shrink.yml shrinks
+  one seed at the commit it failed on.
 """
 
 from pathlib import Path
