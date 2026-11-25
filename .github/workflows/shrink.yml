@@ -41,6 +41,10 @@ on:
         description: The tools image tag (main moves; a seed's night ran on the main of then)
         type: string
         default: main
+      shrinker:
+        description: The ref whose src/hdl_bag/shrink judges candidates (older ones drift, #213)
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -63,6 +67,7 @@ jobs:
       STEP: ${{ inputs.step }}
       BUDGET: ${{ inputs.budget }}
       TIMEOUT: ${{ inputs.timeout }}
+      SHRINKER: ${{ inputs.shrinker }}
       IR: out/regress/${{ inputs.seed }}/rnd${{ inputs.seed }}.ir.yaml
       CCACHE_DIR: /tmp/ccache
       CCACHE_MAXSIZE: 2G
@@ -75,6 +80,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit }}
+      - name: The current shrinker over the failing commit's code
+        # The step a candidate runs is the failing commit's; what decides whether it still
+        # fails the same way is SHRINKER's (a shrinker older than #213 drifts).
+        run: |
+          git config --global --add safe.directory "$PWD"
+          git fetch --depth 1 origin "$SHRINKER"
+          git checkout FETCH_HEAD -- src/hdl_bag/shrink
       - uses: actions/cache/restore@v4
         with:
           path: /tmp/ccache
