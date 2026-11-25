@@ -646,6 +646,7 @@ _FAXI4 = ("awvalid", "awready", "awid", "awaddr", "awlen", "awsize", "awburst", 
 # D81: the LatencyMode values with a spill register on AW in front of the crossbar's demux and
 # none on W (axi_pkg: DemuxAw without DemuxW).
 AW_SPILL_ONLY = ("CUT_SLV_AX", "CUT_ALL_AX")
+XBARS = ("bag_axi_xbar", "bag_axil_xbar")
 
 
 def _first(netlist: Netlist, bus: Bus) -> Instance | None:
@@ -703,10 +704,12 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
     """The bag_faxi4 events the design never lets the master on AXI4 master port BUS make,
     each with why; the protocol job asserts them absent instead of covering them.
 
-    - w_first (D81): the port enters a bag_axi_xbar whose LatencyMode spills AW but not W.
-      axi_demux_simple routes W once AWVALID is presented, so a bare crossbar port may take W
-      first; behind the spill register the port's AW waits only while the register holds
-      earlier AWs, and the data the port then takes is theirs.
+    - w_first (D81): the port enters a bag_axi_xbar or bag_axil_xbar whose LatencyMode spills
+      AW but not W. axi_demux_simple routes W once AWVALID is presented, so a bare crossbar
+      port may take W first; behind the spill register the port's AW waits only while the
+      register holds earlier AWs, and the data the port then takes is theirs. The same through
+      a leading bag_pc to AXI4-Lite (PULP axi_to_axi_lite), which holds no W of its own (owner,
+      2026-11-25; seed 202611250032).
     - same_id (D80, owner: keep the RTL, document the limit): the port enters an AXI4 to
       AXI4-Lite protocol adapter (PULP axi_to_axi_lite) with MaxTrans of 2 or less. Its burst
       splitter's axi_demux_simple has idx_width(MaxTrans)-bit ID counters, full at 1 there,
@@ -721,9 +724,16 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
     out: dict[str, str] = {}
     if first is None:
         return out
-    mode = first.fabric.latency_mode if first.fabric is not None else None
-    if first.template == "bag_axi_xbar" and mode in AW_SPILL_ONLY:
-        out["w_first"] = f"{bus.name} enters {first.name}'s AW spill register ({mode})"
+    entry: Instance | None = first
+    via: list[str] = []
+    while (entry is not None and entry.template == "bag_pc" and entry.down is not None
+           and entry.down.protocol is Protocol.AXI4_LITE):  # fmt: skip
+        via.append(entry.name)
+        entry = _first(netlist, entry.down)
+    mode = entry.fabric.latency_mode if entry is not None and entry.fabric is not None else None
+    if entry is not None and entry.template in XBARS and mode in AW_SPILL_ONLY:
+        through = f" through {', '.join(via)}" if via else ""
+        out["w_first"] = f"{bus.name} enters {entry.name}'s AW spill register ({mode}){through}"
     if (first.template == "bag_dw" and first.up is not None and first.down is not None
             and first.up.data_width > first.down.data_width):  # fmt: skip
         out["w_first"] = (f"{bus.name} enters {first.name}, a downsizing bag_axi_dw: W waits "
