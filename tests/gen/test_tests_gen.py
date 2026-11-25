@@ -1383,3 +1383,13 @@ def test_the_handshake_ordering_test_applies_only_where_an_axi_port_is_reached(
     _, result = check(c, tmp_path)
     assert not result.errors
     assert "axi_ports_take_every_handshake_ordering" not in applicable_tests(resolve(result))
+
+
+def test_the_handshake_ordering_test_needs_an_access_that_is_not_refused(tmp_path: Path) -> None:
+    """CI on #218: with CACHE tied to 0 every AXI access is refused (D104), so the test has no
+    traffic to watch the orderings of, and must not apply."""
+    from hdl_bag.tests_gen import applicable_tests
+
+    spec, findings = resolve_cfg(_tied_cache("tie-0"), tmp_path)
+    assert findings == [] and spec is not None
+    assert "axi_ports_take_every_handshake_ordering" not in applicable_tests(spec)
