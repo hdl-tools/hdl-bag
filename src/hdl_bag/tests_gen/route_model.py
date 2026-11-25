@@ -191,12 +191,16 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
     crossed: list[str] = []
-    # Once a bus narrower than the bytes covered splits the access into transfers, a downsizer
-    # further on starts each at its own address and so trims none of them.
+    # Once a bus narrower than the bytes covered splits the access into transfers, each later
+    # starts at its own address: an AXI4-Lite bus widens each to its beat, and a downsizer after
+    # it starts back at the transfer's address (seed 202611250040).
     split = False
     # Where the access now starts, relative to addr: a read that crossed AHB-Lite starts at its
-    # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there.
+    # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there; after
+    # a split, at the first transfer.
     start = 0
+    if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (202611250042)
+        split, start = True, lo
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -208,17 +212,21 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
-            if not split and (
-                _axi4_downsizer_in_front(spec, target, fabric)
-                or _downsizes_on_axi4(b, fabrics[b.upstream], fabrics[b.downstream])
-            ):
+            up, down = fabrics[b.upstream], fabrics[b.downstream]
+            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(b, up, down):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
-            fabric, master = fabrics[b.downstream], b.name
-            if not split and _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
+            elif (b.template == "bag_axi2apb" and up.protocol == "AXI4-Lite"
+                  and up.data_width > down.data_width):  # fmt: skip
+                # bag_axil2apb's axi_lite_dw_converter (_downsizes_on_axi4) reads the whole
+                # beat from its start: the transfers after it start there (review of #209,
+                # generator seed 341).
+                start = lo
+            fabric, master = down, b.name
+            if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
             # After this hop's own trim: a bus narrower than what is still covered splits it.
-            # shortcut: sticky, so a later AXI4-Lite re-widening is never trimmed; rare.
-            split = split or fabric.data_width // 8 < hi - lo
+            if not split and fabric.data_width // 8 < hi - lo:
+                split, start = True, lo
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = fabric.data_width // 8
@@ -234,7 +242,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         word = slaves[target].data_width // 8  # a slave answers per data word
         width = slaves[target].addr_width
         visible = (addr - offset) & ((1 << width) - 1)
-        if not split and _axi4_downsizer_in_front(spec, target, fabric):
+        if _axi4_downsizer_in_front(spec, target, fabric):
             lo = max(lo, start)  # axi_dw_downsizer starts at the address
         # The slave decides on the address it sees (a redirected miss can alias its error word).
         # A read reaches every slave word of the master's beat (SPAN bytes): width
