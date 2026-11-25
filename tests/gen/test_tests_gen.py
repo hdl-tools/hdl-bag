@@ -1191,21 +1191,26 @@ def test_a_lite_converter_after_a_split_realigns_the_read_to_its_beat(tmp_path: 
     assert exp.hits_error_word and exp.slave_error
 
 
-def _rewidened(tmp_path: Path) -> Spec:
-    """Generator seed 327's path to s6, cut down: a 64-bit AXI4-Lite master on a 32-bit AXI4
-    bus, an 8-bit APB bus, a 64-bit AXI4-Lite bus, then bag_axi2ahb to a 32-bit AHB-Lite slave."""
+def _rewidened(tmp_path: Path, master_bits: int = 64, apb: bool = True) -> Spec:
+    """Generator seed 327's path to s6, cut down: a MASTER_BITS AXI4-Lite master on a 32-bit
+    AXI4 bus, an 8-bit APB bus (or, without APB, bag_axi2axil straight on), a 64-bit AXI4-Lite
+    bus, then bag_axi2ahb to a 32-bit AHB-Lite slave."""
     c = Cfg("rewiden", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
     c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
-    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.master("m0", "AXI4-Lite", master_bits, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
     c.option("m0", **AXIL_NA)
-    c.fabric("p", "APB3", 8, 32, "D0")
-    c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
-    c.link("a", "b1", 0).link("b1", "p", 0).decode("b1", "PSLVERR").option("b1", **APB3_NA)
-    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
     c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
-    c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
-    c.link("p", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    if apb:
+        c.fabric("p", "APB3", 8, 32, "D0")
+        c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
+        c.link("a", "b1", 0).link("b1", "p", 0).decode("b1", "PSLVERR").option("b1", **APB3_NA)
+        c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+        c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
+        c.link("p", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    else:
+        c.bridge("b2", 0x4000_0000, template="bag_axi2axil")
+        c.link("a", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
     c.region("b2", "w2", 0x4000_0000, 0x1_0000)
     c.fabric("h", "AHB-Lite", 32, 32, "D0")
     c.bridge("b3", 0x4000_0000, template="bag_axi2ahb")
@@ -1230,5 +1235,15 @@ def test_a_split_read_rewidened_before_a_downsizer_reads_a_word_once_per_byte_be
     m = spec.masters[0]
     exp = route(spec, "m0", 0x4000_0100, False, False, {})
     assert exp.slave == "s0" and reads_per_word(spec, m, exp) == 8
-    # A burst beat wider than the access: each of its bytes behind the split reads again too.
-    assert reads_per_word(spec, m, exp, covered=16) == 8
+
+
+@pytest.mark.parametrize(("master_bits", "apb", "repeats"), [(32, True, 4), (32, False, 1)])
+def test_a_widening_after_the_split_adds_no_reads(
+    tmp_path: Path, master_bits: int, apb: bool, repeats: int
+) -> None:
+    """Review of #210: what counts is the access where the 8-bit bus splits it, not what the
+    64-bit AXI4-Lite bus widens it to later. A 32-bit Lite master's 4-byte read is four byte
+    reads (each word at most four times); with no narrow bus at all, nothing repeats."""
+    spec = _rewidened(tmp_path, master_bits, apb)
+    exp = route(spec, "m0", 0x4000_0100, False, False, {})
+    assert exp.slave == "s0" and reads_per_word(spec, spec.masters[0], exp) == repeats

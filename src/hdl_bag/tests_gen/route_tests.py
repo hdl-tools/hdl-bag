@@ -1364,7 +1364,7 @@ async def axi4_burst_shapes_match_the_model(dut: Any) -> None:
                 assert need <= seen, f"{where}: read words {sorted(seen)}, needs {sorted(need)}"
                 # A beat narrower than a bus on the way can repeat a read: split into single
                 # transfers, each narrow beat reads that bus's whole word.
-                repeats = reads_per_word(SPEC, m, exp, covered=beats << size)
+                repeats = reads_per_word(SPEC, m, exp, covered=1 << size)
                 if burst != FIXED and 1 << size >= widest_on_path(SPEC, m, exp):
                     assert max(Counter(touched).values(), default=0) <= repeats, (
                         f"{where}: read an address twice: {touched}"
