@@ -199,6 +199,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there; after
     # a split, at the first transfer.
     start = 0
+    if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (seed ...0042)
+        split, start = True, lo
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
