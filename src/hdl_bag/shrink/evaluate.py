@@ -31,6 +31,18 @@ from hdl_bag.template.data import SpecData
 class Signature:
     rules: frozenset[str]  # unwaived rule IDs of the step's report
     target: str | None  # sim: test name; formal: "<job stem>:<task>"; lint: None
+    # What the findings say, with what moves as a spec shrinks taken out (_shape): the same
+    # rule and test can fail another way, and a shrink must not drift to it (seed 202611250040).
+    shape: frozenset[str] = frozenset()
+
+
+def _shape(message: str) -> str:
+    """MESSAGE without what varies with the spec: the cocotb seed, lists and sets (addresses
+    read, pins), and numbers (addresses, lines, port and seed numbers)."""
+    text = re.sub(r" \(seed \d+\)", "", message)
+    text = re.sub(r"\[[^\]]*\]", "[…]", text)
+    text = re.sub(r"\{[^}]*\}", "{…}", text)
+    return re.sub(r"(0x[0-9a-fA-F_]+|\d+)", "#", text)
 
 
 # None: the step passed, or its target is gone.
@@ -78,7 +90,8 @@ def build(data: SpecData, work: Path, spec_dir: Path) -> tuple[ir.Spec, Outputs]
 def _signature(report: Report, target: str | None) -> Signature | None:
     if report.ok:
         return None
-    return Signature(frozenset(f.rule for f in report.unwaived), target)
+    return Signature(frozenset(f.rule for f in report.unwaived), target,
+                     frozenset(_shape(f.message) for f in report.unwaived))  # fmt: skip
 
 
 def lint_step() -> Step:
