@@ -48,6 +48,7 @@ from hdl_bag.ir import Spec, load, resolve
 from hdl_bag.naming import formal_name, formal_unit
 from hdl_bag.protocols import Protocol
 from hdl_bag.reader import read_workbook
+from hdl_bag.regress.generate import check
 from hdl_bag.template.builder import build_workbook
 from hdl_bag.templates import builtin_registry
 
@@ -1647,3 +1648,26 @@ def test_the_reset_cover_searches_past_step_40() -> None:
     k-induction, not checked to a bound, so a deeper cover search costs no checking: a search
     ends at the last cover reached."""
     assert COVER_DEPTH == 80
+
+
+def test_an_apb_master_that_reaches_no_slave_gets_no_wait_cover(tmp_path: Path) -> None:
+    """Seed 202611180004: Access_Rules leave m0 no slave, so the decoder-mux answers every
+    transfer itself, with PREADY high: proto_wait_m0 could never be reached (FORMAL-COVER),
+    while its read and write covers still are, through the mux's own error response."""
+    c = Cfg("apbnone", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f0", "APB4", 8, 32, "D0")
+    c.master("m0", "APB4", 8, 32, "D0").link("m0", "f0", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    c.slave("s0", "APB4", 8, 32, "D0").link("f0", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    c.access("m0", "s0", "-")
+    _, result = check(c, tmp_path)
+    assert [f.message for f in result.findings] == [
+        "Topology row 6: no master on f0 can reach s0 (ACC-UNREACHABLE-SLAVE)"
+    ]
+    spec = resolve(result)
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "apbnone_protocol.sv").read_text(encoding="utf-8")
+    assert "proto_wait_m0: cover" not in text
+    assert "proto_write_m0: cover" in text and "proto_read_m0: cover" in text
