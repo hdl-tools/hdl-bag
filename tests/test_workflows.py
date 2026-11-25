@@ -232,19 +232,33 @@ def test_a_dispatch_shrinks_one_seed_at_the_commit_it_failed_on() -> None:
     """Owner, 2026-11-25: every fixed random seed's shrunk config joins the corpus. shrink.yml
     checks out the commit the seed failed on (a dispatch runs on a branch or tag, so the commit
     is an input), redraws the seed (the draw is deterministic, D97), shrinks it on the failing
-    step, and keeps the shrunk IR as an artifact. It only reads, like the nightly."""
+    step, and keeps the shrunk IR as an artifact. It only reads, like the nightly. Review of
+    #211: actions/checkout takes a ref shorter than 40 characters as a branch or tag, so the
+    job refuses one; it says so where bag shrink is missing (commits before 51c66b7); and no
+    input reaches a script except through the environment."""
+    from hdl_bag.regress.generate import random_config
+
     flow = _load("shrink.yml")
     inputs = _triggers(flow)["workflow_dispatch"]["inputs"]
     assert {k for k, v in inputs.items() if v.get("required")} == {"seed", "commit", "step"}
-    assert inputs["budget"]["default"] == "60"
-    grants = [flow["permissions"], *(j.get("permissions", {}) for j in flow["jobs"].values())]
-    assert all(v == "read" for g in grants for v in g.values())
+    assert inputs["budget"]["default"] == "60" and inputs["image"]["default"] == "main"
+    assert flow["permissions"] == {"contents": "read"}
     (job,) = flow["jobs"].values()
-    assert job["container"]["image"] == "ghcr.io/hdl-tools/hdl-bag-tools:main"
+    assert job["permissions"] == {"contents": "read", "packages": "read"}
+    assert job["container"]["image"] == "ghcr.io/hdl-tools/hdl-bag-tools:${{ inputs.image }}"
+    # Where bag regress writes the seed's IR (regress/run.py: <seed>/<config name>.ir.yaml).
+    assert random_config(7).name == "rnd7"
+    assert job["env"]["IR"] == "out/regress/${{ inputs.seed }}/rnd${{ inputs.seed }}.ir.yaml"
     steps = job["steps"]
     checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"]["ref"] == "${{ inputs.commit }}"
-    script = "\n".join(s.get("run", "") for s in steps)
-    assert 'bag regress --seed "$SEED"' in script and 'bag shrink "$IR" --step "$STEP"' in script
+    assert steps.index(checkout) > 0 and '"${#COMMIT}" -eq 40' in steps[0]["run"]
+    runs = [s["run"] for s in steps if "run" in s]
+    assert not any("${{" in r for r in runs)
+    script = "\n".join(runs)
+    assert "uv run bag shrink --help" in script
+    assert 'bag regress --seed "$SEED" --no-formal' in script
+    assert 'bag shrink "$IR" --step "$STEP"' in script
     upload = next(s for s in steps if s.get("uses", "").startswith("actions/upload-artifact"))
     assert upload["with"]["name"] == "shrink-${{ inputs.seed }}"
+    assert "out/regress/*/*.ir.yaml" in upload["with"]["path"]
