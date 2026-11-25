@@ -1303,3 +1303,37 @@ def test_a_downsizer_onto_a_narrower_bus_narrows_the_transfer_ahb_aligns_to(
     assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.slave == "s0" and min(exp.words) * 2 == 0x4000_0FFC and not exp.hits_error_word
+
+
+def test_a_split_onto_an_apb_bus_makes_transfers_of_its_width_before_ahb(tmp_path: Path) -> None:
+    """Review of #214: after a 16-bit APB bus, bag_apb2axi issues 2-byte transfers, so
+    bag_axi2ahb aligns HADDR to 2 bytes and the 64-bit Lite master's read of 0x...ffc does not
+    reach 0x...ff8 (with the split's size not set, the model read it)."""
+    c = Cfg("apbsize", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 64, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB4", 16, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b1", 0).link("b1", "p", 0).decode("b1", "PSLVERR").option("b1", **APB4_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("x", "AXI4", 64, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b2", 0).link("b2", "x", 0).decode("b2", "DECERR").option("b2", **AXI4_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("h", "AHB-Lite", 64, 32, "D0")
+    c.bridge("b3", 0x4000_0000, template="bag_axi2ahb")
+    c.link("x", "b3", 0).link("b3", "h", 0).decode("b3", "HRESP_ERROR")
+    c.option("b3", **AHB_MASTER_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.fabric("q", "APB3", 16, 32, "D0")
+    c.bridge("b4", 0x4000_0000, template="bag_ahb2apb")
+    c.link("h", "b4", 0).link("b4", "q", 0).decode("b4", "PSLVERR").option("b4", **APB3_NA)
+    c.region("b4", "w4", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB3", 16, 32, "D0").link("q", "s0", 0).option("s0", **APB3_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.slave == "s0" and min(exp.words) * 2 == 0x4000_0FFC and not exp.hits_error_word

@@ -203,14 +203,18 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # a split, at the first transfer.
     start = 0
     # Bytes per AXI transfer of the access (AxSIZE): an AXI4-Lite master's beat is one transfer
-    # of its width, also behind its pc onto AXI4 (seed 202611200006); a split makes transfers of
-    # the narrow bus's width, and an AXI4-Lite bus of its own.
-    m = next((x for x in spec.masters if x.name == master), None)
-    size = max(hi - lo, m.data_width // 8 if m is not None and m.protocol == "AXI4-Lite" else 0)
+    # of its width, also behind its pc onto AXI4 (seed 202611200006); each bus caps it at its
+    # width (so a split makes transfers of the narrow bus's width); an AXI4-Lite bus sets its own.
+    # (hi - lo is the transfer for what _read_cover gives: 4 for an AXI4 master, a Lite beat.)
+    # shortcut: a split's transfers are taken to stay narrow; an upsizer would merge a split
+    # burst whose start is not aligned to it (not reachable while AXI4 buses are 32 bits or
+    # more and apb2axi issues single beats), revisit if narrower AXI4 buses are allowed.
+    m = next(x for x in spec.masters if x.name == master)
+    size = max(hi - lo, m.data_width // 8 if m.protocol == "AXI4-Lite" else 0)
     # No bus carries a transfer wider than itself: a downsizer onto it splits the beat (seed 2).
     size = min(size, fabric.data_width // 8)
     if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (202611250042)
-        split, start, size = True, lo, fabric.data_width // 8
+        split, start = True, lo
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
         target = decide(spec, fabric, master, addr, write, nonsec)
@@ -237,7 +241,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
             # After this hop's own trim: a bus narrower than what is still covered splits it.
             if not split and fabric.data_width // 8 < hi - lo:
-                split, start, size = True, lo, fabric.data_width // 8
+                split, start = True, lo
             if not write and fabric.protocol == "AXI4-Lite":
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
                 lite = size = fabric.data_width // 8
