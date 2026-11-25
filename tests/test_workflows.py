@@ -277,9 +277,12 @@ def test_a_shrink_uses_the_current_shrinker_on_the_failing_commits_code() -> Non
     steps = job["steps"]
     runs = [s.get("run", "") for s in steps]
     overlay = next(i for i, r in enumerate(runs) if "-- src/hdl_bag/shrink" in r)
-    assert 'git fetch --depth 1 origin "$SHRINKER"' in runs[overlay]
+    assert 'git config --global --add safe.directory "$PWD"' in runs[overlay]  # a container job
+    assert 'git fetch --depth 1 origin -- "$SHRINKER"' in runs[overlay]
     assert "git checkout FETCH_HEAD -- src/hdl_bag/shrink" in runs[overlay]
+    # Which shrinker judged is kept with the result (main moves on).
+    assert "git rev-parse FETCH_HEAD | tee out/shrink/shrinker.txt" in runs[overlay]
     uses = [s.get("uses", "") for s in steps]
     checkout = next(i for i, u in enumerate(uses) if u.startswith("actions/checkout"))
-    draw = next(i for i, r in enumerate(runs) if "bag regress" in r)
-    assert checkout < overlay < draw
+    first_use = next(i for i, r in enumerate(runs) if "bag shrink" in r)
+    assert checkout < overlay < first_use

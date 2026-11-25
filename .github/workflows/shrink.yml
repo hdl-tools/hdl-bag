@@ -42,7 +42,7 @@ on:
         type: string
         default: main
       shrinker:
-        description: The ref whose src/hdl_bag/shrink judges candidates (older ones drift, #213)
+        description: Branch, tag or full sha whose src/hdl_bag/shrink judges candidates (#213)
         type: string
         default: main
 
@@ -85,8 +85,9 @@ jobs:
         # fails the same way is SHRINKER's (a shrinker older than #213 drifts).
         run: |
           git config --global --add safe.directory "$PWD"
-          git fetch --depth 1 origin "$SHRINKER"
+          git fetch --depth 1 origin -- "$SHRINKER"
           git checkout FETCH_HEAD -- src/hdl_bag/shrink
+          mkdir -p out/shrink && git rev-parse FETCH_HEAD | tee out/shrink/shrinker.txt
       - uses: actions/cache/restore@v4
         with:
           path: /tmp/ccache
