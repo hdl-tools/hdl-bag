@@ -1,0 +1,72 @@
+# Shrink one failing random seed (owner, 2026-11-25: every fixed seed's shrunk config joins the
+# corpus, tests/configs/regress/). It checks out the commit the seed failed on, redraws the seed
+# (the draw is deterministic, D97), and runs bag shrink on the failing step. The shrunk IR is
+# kept as the artifact shrink-<seed>, to commit by hand with a note of the bug and its fix.
+#
+#   gh workflow run shrink.yml -f seed=202611250040 -f commit=13a322e -f step=sim
+name: shrink
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: The random seed to shrink
+        required: true
+      commit:
+        description: The commit it failed on (a dispatch runs on a branch or tag)
+        required: true
+      step:
+        description: "The failing step: lint, sim, formal or test=<name>"
+        required: true
+      budget:
+        description: The most step runs bag shrink may spend
+        default: "60"
+      timeout:
+        description: Seconds per formal task (formal steps only; blank for the default)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  shrink:
+    runs-on: ubuntu-24.04
+    # A cap, not a target: each step run of a sim seed takes one to four minutes.
+    timeout-minutes: 350
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      SEED: ${{ inputs.seed }}
+      STEP: ${{ inputs.step }}
+      BUDGET: ${{ inputs.budget }}
+      TIMEOUT: ${{ inputs.timeout }}
+      IR: out/regress/${{ inputs.seed }}/rnd${{ inputs.seed }}.ir.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - run: uv sync --locked
+      - name: Draw the seed
+        # The seed is expected to fail here; only its IR is needed.
+        run: |
+          uv run bag regress --seed "$SEED" --no-formal -o out/regress || true
+          test -f "$IR"
+      - name: bag shrink
+        run: |
+          uv run bag shrink "$IR" --step "$STEP" --budget "$BUDGET" \
+            ${TIMEOUT:+--timeout "$TIMEOUT"} -o "out/shrink/$SEED.ir.yaml"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shrink-${{ inputs.seed }}
+          path: |
+            out/shrink/
+            out/regress/*/result.json
+          if-no-files-found: ignore
+          retention-days: 90

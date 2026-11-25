@@ -224,3 +224,25 @@ def test_a_tag_is_not_pinned_to_a_tools_image_built_from_a_different_tools_lock(
     assert "::error::" in script
     assert "tools-image.yml" in script
     assert "exit 1" in script
+
+
+def test_a_dispatch_shrinks_one_seed_at_the_commit_it_failed_on() -> None:
+    """Owner, 2026-11-25: every fixed random seed's shrunk config joins the corpus. shrink.yml
+    checks out the commit the seed failed on (a dispatch runs on a branch or tag, so the commit
+    is an input), redraws the seed (the draw is deterministic, D97), shrinks it on the failing
+    step, and keeps the shrunk IR as an artifact. It only reads, like the nightly."""
+    flow = _load("shrink.yml")
+    inputs = _triggers(flow)["workflow_dispatch"]["inputs"]
+    assert {k for k, v in inputs.items() if v.get("required")} == {"seed", "commit", "step"}
+    assert inputs["budget"]["default"] == "60"
+    grants = [flow["permissions"], *(j.get("permissions", {}) for j in flow["jobs"].values())]
+    assert all(v == "read" for g in grants for v in g.values())
+    (job,) = flow["jobs"].values()
+    assert job["container"]["image"] == "ghcr.io/hdl-tools/hdl-bag-tools:main"
+    steps = job["steps"]
+    checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["ref"] == "${{ inputs.commit }}"
+    script = "\n".join(s.get("run", "") for s in steps)
+    assert 'bag regress --seed "$SEED"' in script and 'bag shrink "$IR" --step "$STEP"' in script
+    upload = next(s for s in steps if s.get("uses", "").startswith("actions/upload-artifact"))
+    assert upload["with"]["name"] == "shrink-${{ inputs.seed }}"
