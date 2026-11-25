@@ -1,0 +1,108 @@
+# Shrink one failing random seed (owner, 2026-11-25: every fixed seed's shrunk config joins the
+# corpus, tests/configs/regress/). It checks out a commit the seed fails on, redraws the seed
+# (the draw is deterministic, D97), and runs bag shrink on the failing step. The shrunk IR is
+# kept as the artifact shrink-<seed>, to commit by hand with a note of the bug and its fix.
+#
+#   gh workflow run shrink.yml -f seed=202611250040 -f step=sim \
+#     -f commit=$(gh run view <failing nightly> --json headSha -q .headSha)
+#
+# The commit must be a full 40-character sha (actions/checkout takes anything shorter as a
+# branch or tag), at or after 51c66b7, where bag shrink arrived (#143), and before the fix. A
+# seed that failed on an older nightly can be shrunk at a later commit that still fails, if the
+# draw has not changed in between (bag shrink then reports that SPEC does not fail).
+# A job cut off by its limit keeps no shrunk IR (bag shrink writes it at the end): size the
+# budget at about 3 minutes per sim run.
+name: shrink
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: The random seed to shrink
+        type: string
+        required: true
+      commit:
+        description: A full 40-character sha the seed fails on (at or after 51c66b7)
+        type: string
+        required: true
+      step:
+        description: "The failing step: lint, sim, formal or test=<name>"
+        type: string
+        required: true
+      budget:
+        description: The most step runs bag shrink may spend
+        type: string
+        default: "60"
+      timeout:
+        description: Seconds per formal task (formal steps only; blank for the default)
+        type: string
+        default: ""
+      image:
+        description: The tools image tag (main moves; a seed's night ran on the main of then)
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  shrink:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:${{ inputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      SEED: ${{ inputs.seed }}
+      COMMIT: ${{ inputs.commit }}
+      STEP: ${{ inputs.step }}
+      BUDGET: ${{ inputs.budget }}
+      TIMEOUT: ${{ inputs.timeout }}
+      IR: out/regress/${{ inputs.seed }}/rnd${{ inputs.seed }}.ir.yaml
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
+    steps:
+      - name: The commit is a full sha
+        run: |
+          case "$COMMIT" in *[!0-9a-f]*) echo "::error::commit must be a full sha"; exit 1;; esac
+          test "${#COMMIT}" -eq 40 || { echo "::error::commit must be 40 hex characters"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: actions/cache/restore@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-v2-shrink-${{ inputs.commit }}
+          restore-keys: |
+            ccache-v2-
+      - run: uv sync --locked
+      - name: bag shrink exists at this commit
+        run: uv run bag shrink --help > /dev/null
+      - name: Draw the seed
+        # bag regress has no draw-only mode: it runs the seed's flow too, which is expected to
+        # fail here; only its IR is needed (its result.json says why, if the IR is missing).
+        run: |
+          CCACHE_BASEDIR="$PWD" uv run bag regress --seed "$SEED" --no-formal -o out/regress || true
+          test -f "$IR"
+      - name: bag shrink
+        run: |
+          CCACHE_BASEDIR="$PWD" uv run bag shrink "$IR" --step "$STEP" --budget "$BUDGET" \
+            ${TIMEOUT:+--timeout "$TIMEOUT"} -o "out/shrink/$SEED.ir.yaml"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shrink-${{ inputs.seed }}
+          path: |
+            out/shrink/
+            out/regress/*/result.json
+            out/regress/*/*.ir.yaml
+            out/regress/*/*.xlsx
+            out/regress/*/header.txt
+          if-no-files-found: ignore
+          retention-days: 90
