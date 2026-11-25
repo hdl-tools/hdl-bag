@@ -262,3 +262,27 @@ def test_a_dispatch_shrinks_one_seed_at_the_commit_it_failed_on() -> None:
     upload = next(s for s in steps if s.get("uses", "").startswith("actions/upload-artifact"))
     assert upload["with"]["name"] == "shrink-${{ inputs.seed }}"
     assert "out/regress/*/*.ir.yaml" in upload["with"]["path"]
+
+
+def test_a_shrink_uses_the_current_shrinker_on_the_failing_commits_code() -> None:
+    """#213: a shrinker older than its fix lets a shrink drift to another failure of the same
+    test, and every commit a fixed seed fails on is older than that. So the job takes
+    src/hdl_bag/shrink from the `shrinker` ref (main by default) over the checked-out commit:
+    the step it judges is the failing commit's, the judging is the current one's."""
+    flow = _load("shrink.yml")
+    inputs = _triggers(flow)["workflow_dispatch"]["inputs"]
+    assert inputs["shrinker"]["default"] == "main"
+    (job,) = flow["jobs"].values()
+    assert job["env"]["SHRINKER"] == "${{ inputs.shrinker }}"
+    steps = job["steps"]
+    runs = [s.get("run", "") for s in steps]
+    overlay = next(i for i, r in enumerate(runs) if "-- src/hdl_bag/shrink" in r)
+    assert 'git config --global --add safe.directory "$PWD"' in runs[overlay]  # a container job
+    assert 'git fetch --depth 1 origin -- "$SHRINKER"' in runs[overlay]
+    assert "git checkout FETCH_HEAD -- src/hdl_bag/shrink" in runs[overlay]
+    # Which shrinker judged is kept with the result (main moves on).
+    assert "git rev-parse FETCH_HEAD | tee out/shrink/shrinker.txt" in runs[overlay]
+    uses = [s.get("uses", "") for s in steps]
+    checkout = next(i for i, u in enumerate(uses) if u.startswith("actions/checkout"))
+    first_use = next(i for i, r in enumerate(runs) if "bag shrink" in r)
+    assert checkout < overlay < first_use
