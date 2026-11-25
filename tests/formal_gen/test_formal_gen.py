@@ -1671,3 +1671,25 @@ def test_an_apb_master_that_reaches_no_slave_gets_no_wait_cover(tmp_path: Path) 
     text = (tmp_path / "out" / "formal" / "apbnone_protocol.sv").read_text(encoding="utf-8")
     assert "proto_wait_m0: cover" not in text
     assert "proto_write_m0: cover" in text and "proto_read_m0: cover" in text
+
+
+def test_an_apb_master_whose_accesses_enter_a_bridge_keeps_its_wait_cover(tmp_path: Path) -> None:
+    """Review of #217: a bridge's APB side holds PREADY low while it works (bag_hs_apb_slv), so
+    a master whose accesses enter one waits even when Access_Rules refuse them further on."""
+    c = Cfg("apbbridge", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f0", "APB4", 32, 32, "D0")
+    c.master("m0", "APB4", 32, 32, "D0").link("m0", "f0", 0).decode("m0", "PSLVERR")
+    c.option("m0", **APB4_NA)
+    c.fabric("f1", "AXI4", 32, 32, "D0", "round-robin")
+    c.bridge("b0", 0x4000_0000, template="bag_apb2axi")
+    c.link("f0", "b0", 0).link("b0", "f1", 0).decode("b0", "DECERR").option("b0", **AXI4_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AXI4", 32, 32, "D0").link("f1", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    c.access("b0", "s0", "-")
+    _, result = check(c, tmp_path)
+    assert not result.errors
+    generate(resolve(result), tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "apbbridge_protocol.sv").read_text(encoding="utf-8")
+    assert "proto_wait_m0: cover" in text

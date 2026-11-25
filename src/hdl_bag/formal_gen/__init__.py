@@ -86,7 +86,6 @@ from typing import TYPE_CHECKING
 
 from hdl_bag.flows.formal import SbyTask, sby_job
 from hdl_bag.formal_gen.decode import render_decode
-from hdl_bag.formal_gen.depth import reachable
 from hdl_bag.gen.collateral import RST_SYNC_STAGES, assertion_delayed, reset_groups
 from hdl_bag.gen.netlist import Bus, Instance, Netlist
 from hdl_bag.gen.prefix import out_path
@@ -478,8 +477,8 @@ class Checker:
     module: str  # this instance's copy of it, with its parameters set
     params: tuple[tuple[str, int], ...]
     can: frozenset[str] = frozenset({"read", "write"})  # accesses that can cross the port
-    # A master port's master reaches some slave: else the fabric answers every transfer itself,
-    # and with no slave to stall it, none ever waits (seed 202611180004).
+    # An APB master port's accesses reach a slave or enter a bridge: else the fabric answers
+    # every transfer itself, with PREADY high, and none ever waits (seed 202611180004).
     reaches: bool = True
 
 
@@ -491,11 +490,28 @@ def _family(bus: Bus) -> str | None:
     return None
 
 
+def _may_wait(spec: Spec) -> set[str]:
+    """The masters some access of which reaches a slave or enters a bridge, either of which can
+    hold PREADY low; a bridge's APB side does while it works, even for an access refused further
+    on (bag_hs_apb_slv; review of #217)."""
+    from hdl_bag.tests_gen.route_model import pin_sets, probes, route
+
+    out = set()
+    for m in spec.masters:
+        for a in (a for a in probes(spec) if a < 1 << m.addr_width):
+            for write in (False, True):
+                for pins in pin_sets(spec):
+                    o = route(spec, m.name, a, write, False, pins)
+                    if o.slave or o.bridges:
+                        out.add(m.name)
+    return out
+
+
 def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
     """The protocol checkers SPEC's top gets: one per AXI4-Lite or APB port (D60)."""
     out = []
     active: dict[str, set[str]] | None = None
-    pairs: set[tuple[str, str]] | None = None
+    waits: set[str] | None = None
     for bus in netlist.ports:
         family = _family(bus)
         if not bus.external or family is None:
@@ -508,9 +524,9 @@ def checkers(spec: Spec, netlist: Netlist) -> list[Checker]:
             can = frozenset(active.get(bus.name, set()))
             if not can:
                 continue  # nothing reaches this slave (ACC-UNREACHABLE-SLAVE): nothing to check
-        else:
-            pairs = reachable(spec) if pairs is None else pairs
-            reaches = any(m == bus.name for m, _ in pairs)
+        elif family == "apb":
+            waits = _may_wait(spec) if waits is None else waits
+            reaches = bus.name in waits
         params = zipcpu_params(bus, family, can if bus.is_slave else None)
         out.append(Checker(bus.name, vendor, formal_name(spec.project.name, vendor, bus.name),
                            params, can, reaches))  # fmt: skip
@@ -555,7 +571,7 @@ def _covers(spec: Spec, bus: Bus, chk: Checker, port: "_Ports") -> list[str]:
             out.append((f"proto_write_{name}", f"{done} && {v('pwrite')}"))
         if "read" in chk.can:
             out.append((f"proto_read_{name}", f"{done} && !{v('pwrite')}"))
-        if chk.reaches:
+        if chk.reaches:  # else the fabric answers alone, PREADY high (seed 202611180004)
             out.append((f"proto_wait_{name}", f"{v('psel')} && {v('penable')} && !{v('pready')}"))
         if bus.is_slave and dict(chk.params).get("F_OPT_SLVERR"):
             out.append((f"proto_error_{name}", f"{done} && {v('pslverr')}"))
