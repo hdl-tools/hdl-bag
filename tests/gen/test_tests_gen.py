@@ -1128,6 +1128,7 @@ def test_a_downsizer_after_a_split_and_a_lite_widening_starts_each_transfer_at_i
     assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.slave == "s0" and sorted(exp.words) == [0x4000_0FFC + k for k in range(4)]
+    assert not exp.hits_error_word  # the slave's error word is 0x...ff8
 
 
 def test_a_wide_lite_read_split_by_the_masters_converter_reads_both_halves(
@@ -1152,3 +1153,39 @@ def test_a_wide_lite_read_split_by_the_masters_converter_reads_both_halves(
     assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.slave == "s0" and sorted(exp.words) == [0x4000_0FF8 + k for k in range(8)]
+    assert exp.hits_error_word and exp.slave_error
+
+
+def test_a_lite_converter_after_a_split_realigns_the_read_to_its_beat(tmp_path: Path) -> None:
+    """Review of #209 (seed 341 of the generator): after an 8-bit APB split and an AXI4-Lite
+    crossbar's 64-bit widening, bag_axi2apb onto a 16-bit APB bus is bag_axil2apb, whose
+    axi_lite_dw_converter reads the whole beat from its start; the AXI4 downsizer in front of
+    the 32-bit slave further on then starts at 0x...ff8, so the slave sees that word too."""
+    c = Cfg("splitrealign", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.master("m0", "AHB-Lite", 32, 32, "D0").link("m0", "h", 0).decode("m0", "HRESP_ERROR")
+    c.option("m0", **AHB_MASTER_NA)
+    c.fabric("p1", "APB4", 8, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_ahb2apb")
+    c.link("h", "b1", 0).link("b1", "p1", 0).decode("b1", "PSLVERR").option("b1", **APB4_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
+    c.link("p1", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("p2", "APB4", 16, 32, "D0")
+    c.bridge("b3", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b3", 0).link("b3", "p2", 0).decode("b3", "PSLVERR").option("b3", **APB4_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.fabric("x", "AXI4", 64, 32, "D0", "round-robin")
+    c.bridge("b4", 0x4000_0000, template="bag_apb2axi")
+    c.link("p2", "b4", 0).link("b4", "x", 0).decode("b4", "DECERR").option("b4", **AXI4_NA)
+    c.region("b4", "w4", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AXI4", 32, 32, "D0").link("x", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
+    assert exp.slave == "s0" and sorted(exp.words) == [0x4000_0FF8 // 4, 0x4000_0FFC // 4]
+    assert exp.hits_error_word and exp.slave_error

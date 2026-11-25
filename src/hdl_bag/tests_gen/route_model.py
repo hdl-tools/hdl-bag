@@ -199,7 +199,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # aligned transfer (bag_axi2ahb_core aligns HADDR), so a downsizer later starts there; after
     # a split, at the first transfer.
     start = 0
-    if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (seed ...0042)
+    if fabric.data_width // 8 < hi - lo:  # the master's own converter splits it (202611250042)
         split, start = True, lo
     for _ in range(len(spec.fabrics)):
         addr = aliased(fabric, master, addr, pins)
@@ -212,11 +212,14 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # The nearest pass-through N window sets what the slaves behind it see; a
             # pass-through Y bridge keeps the offset its upstream fabric has.
             offset = offset if b.pass_through else b.window_base
-            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(
-                b, fabrics[b.upstream], fabrics[b.downstream]
-            ):
+            up, down = fabrics[b.upstream], fabrics[b.downstream]
+            if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(b, up, down):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
-            fabric, master = fabrics[b.downstream], b.name
+            elif up.protocol == "AXI4-Lite" and up.data_width > down.data_width:
+                # axi_lite_dw_converter reads the whole beat from its start: the transfers
+                # after it start there (review of #209, generator seed 341).
+                start = lo
+            fabric, master = down, b.name
             if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
             # After this hop's own trim: a bus narrower than what is still covered splits it.

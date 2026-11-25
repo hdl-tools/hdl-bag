@@ -706,15 +706,25 @@ def test_a_master_through_a_lite_converter_into_an_aw_spill_never_gets_its_data_
     (the corpus's mixed_lite_shared) it stays a cover."""
     config = P3 / "mixed_lite_shared.ir.yaml"
     spec = load(config)
-    cut = [f.model_copy(update={"latency_mode": "CUT_ALL_AX"}) if f.name == "cfg" else f
-           for f in spec.fabrics]  # fmt: skip
-    generate(spec.model_copy(update={"fabrics": cut}), tmp_path, config.parent)
-    text = (tmp_path / "formal" / f"{spec.project.name}_protocol.sv").read_text(encoding="utf-8")
-    assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
-            "proto_no_w_first_dbg: assert (!bag_dbg_w_first);\n") in text  # fmt: skip
-    assert "proto_w_first_dbg: cover" not in text
-    assert ("  // proto_no_w_first_dbg: no cover, dbg enters cfg's AW spill register "
-            "(CUT_ALL_AX) through dbg_pc_2_cfg\n") in text  # fmt: skip
+
+    def protocol(mode: str) -> str:
+        cut = [f.model_copy(update={"latency_mode": mode}) if f.name == "cfg" else f
+               for f in spec.fabrics]  # fmt: skip
+        out = tmp_path / mode
+        generate(spec.model_copy(update={"fabrics": cut}), out, config.parent)
+        return (out / "formal" / f"{spec.project.name}_protocol.sv").read_text(encoding="utf-8")
+
+    for mode in ("CUT_ALL_AX", "CUT_SLV_AX"):
+        text = protocol(mode)
+        assert ("  always @(posedge clk_sys) if (!bag_checker_reset_D_SYS) "
+                "proto_no_w_first_dbg: assert (!bag_dbg_w_first);\n") in text  # fmt: skip
+        assert "proto_w_first_dbg: cover" not in text
+        assert ("  // proto_no_w_first_dbg: no cover, dbg enters cfg's AW spill register "
+                f"({mode}) through dbg_pc_2_cfg\n") in text  # fmt: skip
+    # A W spill too (CUT_SLV_PORTS) can take W first, as can no spill at all.
+    for mode in ("NO_LATENCY", "CUT_SLV_PORTS"):
+        text = protocol(mode)
+        assert "proto_w_first_dbg: cover" in text and "proto_no_w_first_dbg" not in text
 
 
 def test_a_master_through_a_one_at_a_time_lite_converter_opens_one_read(tmp_path: Path) -> None:
