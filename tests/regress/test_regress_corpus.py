@@ -3,10 +3,12 @@
 """The shrunk random seeds (owner, 2026-11-25: every seed a nightly failed on, once fixed, is
 shrunk and joins the corpus). Each config in tests/configs/regress/ is what shrink.yml left of
 a seed at a commit it failed on, with the shrinker of #213 and #219, so it still fails there
-the way the seed did: a step, and for sim the one generated test. It must pass that now. The
-step is judged as bag shrink judges it (hdl_bag.shrink.evaluate), at the default cocotb seed
-it shrank with. Other generated tests are not this config's business: a shrunk config is cut
-to its failure, so it may leave them nothing to check.
+the way the seed did: a step, and for sim the one generated test. It must pass that now, at
+the default cocotb seed it shrank with. Unlike bag shrink's judge, a test that is no longer
+generated for the config, or a simulator that is missing, is a failure here, not a pass (review
+of #220). Other generated tests are not this config's business: a shrunk config is cut to its
+failure, so it may leave them nothing to check. Each config was checked once to fail its test
+at the commit before its fix (the PR that added it says how).
 """
 
 from pathlib import Path
@@ -14,8 +16,10 @@ from pathlib import Path
 import pytest
 
 from hdl_bag import ir
+from hdl_bag.flows import run_tests
+from hdl_bag.flows.sim import cocotb_tests
 from hdl_bag.ir.to_workbook import to_spec_data
-from hdl_bag.shrink.evaluate import build, lint_step, sim_step
+from hdl_bag.shrink.evaluate import build, lint_step
 
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 
@@ -45,5 +49,12 @@ def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> N
     built = build(to_spec_data(ir.load(REGRESS / f"{seed}.ir.yaml")), tmp_path, REGRESS)
     assert not isinstance(built, str), f"{seed} stops at {built}"
     spec, out = built
-    run = lint_step() if step == "lint" else sim_step(test)
-    assert run(spec, out) is None, f"{seed} fails {step} {test or ''} again ({fix}: {bug})"
+    again = f"{seed} fails {step} {test or ''} again ({fix}: {bug})"
+    if step == "lint":
+        assert lint_step()(spec, out) is None, again
+        return
+    assert out.tests is not None and test in cocotb_tests(out.root.resolve() / out.tests), (
+        f"{seed}: {test} is no longer generated for it, so it checks nothing"
+    )
+    report = run_tests(out, test_filter=rf"\.{test}$")
+    assert report.ok, f"{again}: {[f.format() for f in report.unwaived]}"
