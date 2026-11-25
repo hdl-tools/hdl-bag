@@ -665,7 +665,7 @@ def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: i
                  SimpleNamespace(name="f1", data_width=middle, master_ports=[])],
         bridges=[SimpleNamespace(name="br0", downstream="f1")],
     )  # fmt: skip
-    exp = SimpleNamespace(bridges=("br0",), word_bytes=8)
+    exp = SimpleNamespace(bridges=("br0",), word_bytes=8, span=4)
     m = SimpleNamespace(name="m0", data_width=64, protocol="AXI4")
     assert reads_per_word(spec, m, exp) == repeats  # type: ignore[arg-type]
 
@@ -694,7 +694,7 @@ def _split_read(widening: bool) -> tuple[SimpleNamespace, SimpleNamespace, Simpl
     bridges = [SimpleNamespace(name="br0", downstream="f1"),
                SimpleNamespace(name="br1", downstream="f2")]  # fmt: skip
     spec = SimpleNamespace(fabrics=fabrics, bridges=bridges)
-    exp = SimpleNamespace(bridges=("br0", "br1") if widening else ("br0",), word_bytes=2)
+    exp = SimpleNamespace(bridges=("br0", "br1") if widening else ("br0",), word_bytes=2, span=4)
     return spec, SimpleNamespace(name="m0", data_width=64, protocol="AHB-Lite"), exp
 
 
@@ -1189,3 +1189,46 @@ def test_a_lite_converter_after_a_split_realigns_the_read_to_its_beat(tmp_path: 
     exp = route(spec, "m0", 0x4000_0FFC, False, False, {})
     assert exp.slave == "s0" and sorted(exp.words) == [0x4000_0FF8 // 4, 0x4000_0FFC // 4]
     assert exp.hits_error_word and exp.slave_error
+
+
+def _rewidened(tmp_path: Path) -> Spec:
+    """Generator seed 327's path to s6, cut down: a 64-bit AXI4-Lite master on a 32-bit AXI4
+    bus, an 8-bit APB bus, a 64-bit AXI4-Lite bus, then bag_axi2ahb to a 32-bit AHB-Lite slave."""
+    c = Cfg("rewiden", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB3", 8, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b1", 0).link("b1", "p", 0).decode("b1", "PSLVERR").option("b1", **APB3_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("l", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b2", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b2", 0).link("b2", "l", 0).decode("b2", "DECERR").option("b2", **AXIL_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.bridge("b3", 0x4000_0000, template="bag_axi2ahb")
+    c.link("l", "b3", 0).link("b3", "h", 0).decode("b3", "HRESP_ERROR")
+    c.option("b3", **AHB_MASTER_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AHB-Lite", 32, 32, "D0").link("h", "s0", 0).option("s0", **AHB_SLAVE_NA)
+    c.region("s0", "mem", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
+    return spec
+
+
+def test_a_split_read_rewidened_before_a_downsizer_reads_a_word_once_per_byte_before_it(
+    tmp_path: Path,
+) -> None:
+    """Generator seed 327: the 64-bit beat the Lite master reads crosses the 8-bit APB bus as
+    eight byte reads; the 64-bit AXI4-Lite bus makes each a full beat again, and bag_axi2ahb's
+    downsizer starts each at its byte, so the upper word of the beat is read once for each of
+    the eight bytes (its own four and the lower word's four)."""
+    spec = _rewidened(tmp_path)
+    m = spec.masters[0]
+    exp = route(spec, "m0", 0x4000_0100, False, False, {})
+    assert exp.slave == "s0" and reads_per_word(spec, m, exp) == 8
+    # A burst beat wider than the access: each of its bytes behind the split reads again too.
+    assert reads_per_word(spec, m, exp, covered=16) == 8

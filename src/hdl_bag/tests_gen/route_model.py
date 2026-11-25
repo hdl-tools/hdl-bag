@@ -48,6 +48,7 @@ class Outcome:
     word_bytes: int = 4  # the slave's data width
     words: frozenset[int] = frozenset()  # slave words (index) the access may reach
     may_refuse: bool = False  # D104: a converter on the way can answer SLVERR
+    span: int = 4  # bytes the access covers when it reaches the slave (a read can cover more)
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -254,7 +255,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         return Outcome(
             target, visible, masked=masked, slave_error=error and not masked, nonsec=nonsec,
             bridges=tuple(crossed), hits_error_word=error, word_bytes=word, words=frozenset(words),
-            may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
+            may_refuse=_may_refuse(spec, origin, tuple(crossed), target), span=hi - lo,
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -742,20 +743,22 @@ def refused_access(spec: Spec, m: Any, exp: Outcome, prot: int, nonsec: bool, ad
                for k, most, width in _splitters(spec, m.name, exp.bridges, exp.slave))  # fmt: skip
 
 
-def reads_per_word(spec: Spec, m: Any, exp: Outcome) -> int:
+def reads_per_word(spec: Spec, m: Any, exp: Outcome, covered: int = 0) -> int:
     """How many times a read from M can reach one slave word: a bus on the way narrower than the
-    slave splits it into transfers, and a wider bus behind makes each a full beat again."""
+    slave splits it into transfers, and a wider bus behind makes each a full beat again, so a
+    word is read once per transfer of that beat at or below it. The access covers what route()
+    found (EXP.span: a Lite master's beat, say) or COVERED bytes (a burst), if more than
+    access_bytes(M) (generator seed 327)."""
     fabrics = {f.name: f for f in spec.fabrics}
     bridges = {b.name: b for b in spec.bridges}
     fabric = next(f for f in spec.fabrics if any(p.port == m.name for p in f.master_ports))
     widths = [fabric.data_width, *(fabrics[bridges[b].downstream].data_width for b in exp.bridges)]
     # The slave word crosses the narrowest bus as this many transfers. So does the access, but
     # it comes back whole only as far as a wider bus behind the narrowest one widens it.
-    # shortcut: access_bytes is a single access; a burst beat wider than 4 bytes is not modelled.
     narrow = min(widths)
     after = max(widths[widths.index(narrow) :])
     return max(1, exp.word_bytes // (narrow // 8),
-               min(access_bytes(m), after // 8) // (narrow // 8))  # fmt: skip
+               min(max(access_bytes(m), exp.span, covered), after // 8) // (narrow // 8))  # fmt: skip
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
