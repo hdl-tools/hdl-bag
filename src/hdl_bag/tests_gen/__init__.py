@@ -46,6 +46,16 @@ def _unaligned_path(spec: Spec) -> bool:
                for m in spec.masters if m.protocol in _AXI for s in spec.slaves)  # fmt: skip
 
 
+def _ordering_ports(spec: Spec) -> bool:
+    """An AXI master that reaches a slave, or an AXI slave something reaches: the ports the
+    handshake-ordering test plans (route_tests._ordering_targets; review of #218)."""
+    from hdl_bag.formal_gen.depth import reachable
+
+    axi = {x.name for x in spec.masters if x.protocol in _AXI}
+    axi |= {x.name for x in spec.slaves if x.protocol in _AXI}
+    return any(m in axi or s in axi for m, s in reachable(spec))
+
+
 def _split_path(spec: Spec) -> bool:
     """A master reaches, without error, a narrow slave that can answer an error."""
     return any(split_error_word(spec, m, s) for m in spec.masters for s in spec.slaves)
@@ -105,8 +115,7 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("single_bytes_reach_both_ends_of_every_region", 1000, lambda s: any(
         region_edges(s, m) for m in s.masters)),
     GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _any_pair(s, pstrb_path)),
-    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
-        x.protocol in _AXI for x in s.masters) or any(x.protocol in _AXI for x in s.slaves)),
+    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, _ordering_ports),
 )  # fmt: skip
 
 

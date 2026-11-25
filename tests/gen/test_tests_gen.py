@@ -1362,3 +1362,24 @@ def test_an_axi_master_that_reaches_no_slave_is_left_out_of_the_handshake_orderi
     monkeypatch.setattr(route_tests, "SPEC", resolve(result), raising=False)
     found, required = route_tests._ordering_targets()
     assert {t.master for t in found} == {"m1"} and required["m0"] == ()
+
+
+def test_the_handshake_ordering_test_applies_only_where_an_axi_port_is_reached(
+    tmp_path: Path,
+) -> None:
+    """Review of #218: with every AXI master and slave out of reach, the test has nothing to
+    plan, so it must not apply (rather than pass having checked nothing)."""
+    from hdl_bag.regress.generate import check
+    from hdl_bag.tests_gen import applicable_tests
+
+    c = Cfg("ordernone2", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("x", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "x", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.slave("s0", "AXI4", 32, 32, "D0").link("x", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    c.access("m0", "s0", "-")
+    _, result = check(c, tmp_path)
+    assert not result.errors
+    assert "axi_ports_take_every_handshake_ordering" not in applicable_tests(resolve(result))
