@@ -215,9 +215,11 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             up, down = fabrics[b.upstream], fabrics[b.downstream]
             if _axi4_downsizer_in_front(spec, target, fabric) or _downsizes_on_axi4(b, up, down):
                 lo = max(lo, start)  # axi_dw_downsizer starts at the address
-            elif up.protocol == "AXI4-Lite" and up.data_width > down.data_width:
-                # axi_lite_dw_converter reads the whole beat from its start: the transfers
-                # after it start there (review of #209, generator seed 341).
+            elif (b.template == "bag_axi2apb" and up.protocol == "AXI4-Lite"
+                  and up.data_width > down.data_width):  # fmt: skip
+                # bag_axil2apb's axi_lite_dw_converter (_downsizes_on_axi4) reads the whole
+                # beat from its start: the transfers after it start there (review of #209,
+                # generator seed 341).
                 start = lo
             fabric, master = down, b.name
             if _axi4_downsizer_in_front(spec, b.name, fabric, from_port=True):
