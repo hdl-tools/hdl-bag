@@ -98,7 +98,12 @@ run EDA tools read its \file{bag_outputs.json} to find the files.
 
 \begin{entry}{\cmd{bag shrink} IR [\opt{--step} STEP] [\opt{-o} FILE] [\opt{--budget} N] [\opt{--timeout} SECONDS]}
 \item[Does] Takes an IR that fails a step and removes whatever it can, one edit at a time,
-  keeping an edit only if the same step still fails with the same rules. The edits drop
+  keeping an edit only if the same step still fails with the same rules, in the same test or
+  formal task, and with at least one of the same messages. In a message, addresses,
+  numbers of two or more digits, bracketed lists, braced sets and dicts (the addresses
+  read, the pins) and Verilator's generated names do not count, as they move as the IR
+  shrinks; names (\code{m0}, \code{cpu}) and single digits (a response code) do. So the
+  shrink keeps the failure it started with, not another one of the same test. The edits drop
   fabrics, masters, slaves, sub-wrappers and rows, clear aliases and optional wrapper
   settings, and narrow widths and memory regions. Every candidate is checked, resolved and
   generated first, and one that is not a valid design is skipped without running the step.

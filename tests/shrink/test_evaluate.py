@@ -73,12 +73,59 @@ def lint_reports(monkeypatch: pytest.MonkeyPatch, *found: tuple[str, str]) -> No
     monkeypatch.setattr(evaluate, "lint", lambda *a, **k: report("lint", *found))
 
 
-def test_the_same_rules_with_another_message_still_reproduce(
+def test_the_same_rules_with_other_numbers_still_reproduce(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint_reports(monkeypatch, ("A", "line 10"), ("B", "line 99"))
-    base = Signature(frozenset({"A", "B"}), None)
+    """Addresses and lines move as a spec shrinks; the failure is the same."""
+    lint_reports(monkeypatch, ("A", "line 10 of s3 at 0x4000"), ("B", "line 99"))
+    base = Signature(frozenset({"A", "B"}), None, frozenset({"line # of s3 at #", "line #"}))
     assert make_oracle(tmp_path / "w", SPEC_DIR, lint_step(), base, {})(multi()) is True
+
+
+def test_a_shrink_may_lose_one_of_two_findings_of_the_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #213: two UNOPTFLATs, or two failed assertions of one task, may become one;
+    the failure is still there. Verilator's generated names and loop paths vary too."""
+    lint_reports(monkeypatch, ("A", "loop at '__VdfgRegularize_h1a2b3c4d_0_7' (loop through x)"))
+    base = Signature(frozenset({"A"}), None, frozenset({"loop at '#' #", "unused: 'y'"}))
+    assert make_oracle(tmp_path / "w", SPEC_DIR, lint_step(), base, {})(multi()) is True
+
+
+@pytest.mark.parametrize(("base_msg", "got_msg", "same"), [
+    # The route test's self-check: four accesses and none errored, or none at all.
+    ("t failed: (4, 0)", "t failed: (0, 0)", False),
+    ("t failed: response 2, expected 3", "t failed: response 3, expected 2", False),
+    # A report cut at 300 characters inside the pins: what is left of them does not count.
+    ("t failed: m0 R 0x4000 pins={'remap_m1_i': False, 'remap_m2_i': Fal...",
+     "t failed: m0 R 0x4010 pins={'remap_m1_i': False}: expected s1", True),
+])  # fmt: skip
+def test_what_a_message_says_decides_the_match_and_what_moves_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_msg: str, got_msg: str, same: bool
+) -> None:
+    lint_reports(monkeypatch, ("TEST-FAILED", base_msg))
+    base = lint_step()(*build(multi(), tmp_path / "b", SPEC_DIR))
+    assert base is not None
+    lint_reports(monkeypatch, ("TEST-FAILED", got_msg))
+    assert make_oracle(tmp_path / "w", SPEC_DIR, lint_step(), base, {})(multi()) is same
+
+
+def test_another_assertion_in_the_same_test_does_not_reproduce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seeds 202611250040 and 042 (shrink.yml): the shrunk configs failed the route test's
+    'nothing errored' self-check, (4, 0), instead of its 'expected error=True, got err=False':
+    the same rule and test, so a signature of those alone let the shrink drift to another bug.
+    Lists and sets in a message (the addresses read, the pins) vary with the spec too."""
+    msg = ("x failed: m0 R 0x417ffffc nonsec=False pins={'remap_m1_i': False}: expected s5 @ "
+           "0x17ffffc error=True, got err=False at {'s5'} (seed 7)")  # fmt: skip
+    lint_reports(monkeypatch, ("TEST-FAILED", msg))
+    base = lint_step()(*build(multi(), tmp_path / "b", SPEC_DIR))
+    assert base is not None and base.shape == frozenset(
+        {"x failed: m0 R # nonsec=False pins={…}: expected s5 @ # error=True, got err=False at {…}"}
+    )
+    lint_reports(monkeypatch, ("TEST-FAILED", "x failed: (4, 0) (seed 7)"))
+    assert make_oracle(tmp_path / "w", SPEC_DIR, lint_step(), base, {})(multi()) is False
 
 
 def test_a_different_rule_set_does_not_reproduce(
@@ -123,7 +170,7 @@ def test_the_failing_sim_test_is_named_from_the_test_list_not_parsed(
 
     monkeypatch.setattr(evaluate, "run_tests", run_tests)
     step, sig = discover("sim", *built, None)
-    assert sig == Signature(frozenset({"TEST-FAILED"}), "ab")
+    assert sig == Signature(frozenset({"TEST-FAILED"}), "ab", frozenset({"ab failed"}))
     assert filters == [None, r"\.ab$"]
     assert step(*built) == sig
 
@@ -141,7 +188,7 @@ def test_formal_discovery_takes_the_first_failing_task_in_order(
 
     monkeypatch.setattr(evaluate, "run_sby", run_sby)
     _, sig = discover("formal", built[0], built[1], 5.0)
-    assert sig == Signature(frozenset({"FORMAL-FAIL"}), "x_b:t2")
+    assert sig == Signature(frozenset({"FORMAL-FAIL"}), "x_b:t2", frozenset({"m"}))
     assert ran == ["t1", "t2"]
 
 

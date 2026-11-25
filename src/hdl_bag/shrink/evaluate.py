@@ -31,6 +31,37 @@ from hdl_bag.template.data import SpecData
 class Signature:
     rules: frozenset[str]  # unwaived rule IDs of the step's report
     target: str | None  # sim: test name; formal: "<job stem>:<task>"; lint: None
+    # What the findings say, with what moves as a spec shrinks taken out (_shape): the same
+    # rule and test can fail another way, and a shrink must not drift to it (seed 202611250040).
+    shape: frozenset[str] = frozenset()
+
+
+def _shape(message: str) -> str:
+    """MESSAGE without what varies with the spec: the cocotb seed, Verilator's generated names
+    and loop paths, lists, sets and dicts (addresses read, pins; one a report cut short leaves
+    open too), and addresses and multi-digit numbers (lines, sizes). Single digits stay: they
+    are names (m0, s5), responses (2, 3) and the route test's counts, (4, 0) or (0, 0)."""
+    text = re.sub(r" \(seed \d+\)", "", message)
+    text = re.sub(r"__Vdfg\w+|\(loop through .*?\)", "#", text)
+    text = re.sub(r"\[[^\]]*\]", "[…]", text)
+    text = re.sub(r"\{[^}]*\}", "{…}", text)
+    text = re.sub(r"[\[{][^\]}]*$", "…", text)  # cut short inside one
+    text = re.sub(r"\.\.\.$", "…", text)  # cut short: what is left is a prefix
+    return re.sub(r"0x[0-9a-fA-F_]+|\d\d+", "#", text)
+
+
+def _matches(got: str, base: str) -> bool:
+    """A message cut short (ends with …) matches any that starts the same."""
+    return got == base or (base.endswith("…") and got.startswith(base[:-1]))
+
+
+def same_failure(got: Signature | None, base: Signature) -> bool:
+    """Whether GOT reproduces BASE: the same rules and target, and still at least one of its
+    messages (a shrink may lose a second finding of a rule, but not drift to another)."""
+    return (
+        got is not None and got.rules == base.rules and got.target == base.target
+        and (not base.shape or any(_matches(g, b) for g in got.shape for b in base.shape))
+    )  # fmt: skip
 
 
 # None: the step passed, or its target is gone.
@@ -78,7 +109,8 @@ def build(data: SpecData, work: Path, spec_dir: Path) -> tuple[ir.Spec, Outputs]
 def _signature(report: Report, target: str | None) -> Signature | None:
     if report.ok:
         return None
-    return Signature(frozenset(f.rule for f in report.unwaived), target)
+    return Signature(frozenset(f.rule for f in report.unwaived), target,
+                     frozenset(_shape(f.message) for f in report.unwaived))  # fmt: skip
 
 
 def lint_step() -> Step:
@@ -221,7 +253,7 @@ def make_oracle(
         spec, out = built
         key = _key(spec)
         if key not in memo:
-            memo[key] = step(spec, out) == baseline
+            memo[key] = same_failure(step(spec, out), baseline)
         return memo[key]
 
     return oracle
