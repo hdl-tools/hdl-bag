@@ -141,11 +141,7 @@ def random_config(seed: int) -> Cfg:
         frontier.append(child)
     if rng.random() < 0.2:
         _feeder(d, bridges)
-    for fab in d.fabrics.values():
-        if fab.proto == "APB3":  # before its ports are drawn, which take its width
-            # FAB-APB3-SPLIT. shortcut: wider than the rule (it ignores the master's width), narrow
-            # it if wide APB3 buses behind narrow ones from narrow masters need coverage.
-            fab.width = min(fab.width, _narrowest_into(d, fab))
+    _no_apb3_wider_than_a_bus_before_it(d)  # before its ports are drawn, which take its width
     for fab in list(d.fabrics.values()):
         # A direct master beside a pass-through N bridge would see other addresses
         # (DEC-MIXED-TRANSLATION).
@@ -168,6 +164,16 @@ def random_config(seed: int) -> Cfg:
     _no_pstrb_tie_behind_axi2ahb(cfg)
     _no_pstrb_tie_after_a_narrow_bus(d)
     return cfg
+
+
+def _no_apb3_wider_than_a_bus_before_it(d: _Draw) -> None:
+    """D109 extended (FAB-APB3-SPLIT): an APB3 bus has no PSTRB, so one wider than a bus the
+    writes cross before it stores a whole word for each split write. shortcut: wider than the
+    rule (it ignores the master's width), narrow it if wide APB3 buses behind narrow ones from
+    narrow masters need coverage."""
+    for fab in d.fabrics.values():
+        if fab.proto == "APB3":
+            fab.width = min(fab.width, _narrowest_into(d, fab))
 
 
 def _narrowest_into(d: _Draw, fab: _Fabric) -> int:

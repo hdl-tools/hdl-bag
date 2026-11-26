@@ -280,6 +280,20 @@ def test_an_ahb_lite_fabric_deep_in_a_sparse_map_still_gets_1_kb_regions(tmp_pat
     assert _errors(202611260046, tmp_path) == []
 
 
+def test_the_draw_avoids_a_split_write_meeting_a_strobeless_word(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D109 extended: without its two filters the draw gives seeds 1 and 158 the errors
+    (review of #224: pin that the filters, not luck, keep them away)."""
+    seeds = {1: "FAB-APB3-SPLIT", 158: "PORTOPT-PSTRB-SPLIT"}
+    for seed in seeds:
+        assert _errors(seed, tmp_path / f"on{seed}") == []
+    monkeypatch.setattr(drawer, "_no_apb3_wider_than_a_bus_before_it", lambda d: None)
+    monkeypatch.setattr(drawer, "_no_pstrb_tie_after_a_narrow_bus", lambda d: None)
+    for seed, rule in seeds.items():
+        assert any(rule in e for e in _errors(seed, tmp_path / f"off{seed}")), seed
+
+
 def test_a_write_split_by_a_narrow_bus_never_meets_a_wider_strobeless_word(tmp_path: Path) -> None:
     """Seed 202611260035: an 8-bit APB4 bus split every write into byte writes before a 16-bit
     APB3 bus, which has no PSTRB, so each stored the whole word (FAB-APB3-SPLIT). The draw keeps

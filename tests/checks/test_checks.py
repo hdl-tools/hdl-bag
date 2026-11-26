@@ -176,17 +176,17 @@ def _split_before_tie(width: int = 64, tied: Literal["b2", "s0"] = "b2") -> Spec
     return c.data
 
 
-def _narrow_before(last: Literal["APB3", "tie"]) -> SpecData:
+def _narrow_before(last: Literal["APB3", "tie", "s0"], thin: int = 8) -> SpecData:
     """Seed 202611260035 (D109 extended): a 32-bit AXI4-Lite master, bag_axi2apb onto an 8-bit
     APB4 bus, which splits every write into byte writes, then bag_apb2ahb and bag_ahb2apb onto
     a wider bus without byte strobes: a 16-bit APB3 bus, or a 32-bit APB4 bus with PSTRB tied
-    on its bridge b2."""
+    on its bridge b2 (or on the slave s0). THIN: the width of that narrow bus."""
     c = Cfg("narrow", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
     c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
     c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
     c.option("m0", **AXIL_NA)
-    c.fabric("p8", "APB4", 8, 32, "D0")
+    c.fabric("p8", "APB4", thin, 32, "D0")
     c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
     c.link("a", "b0", 0).link("b0", "p8", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
     c.region("b0", "w0", 0x4000_0000, 0x1_0000)
@@ -196,13 +196,40 @@ def _narrow_before(last: Literal["APB3", "tie"]) -> SpecData:
     c.option("b1", **AHB_MASTER_NA)
     c.region("b1", "w1", 0x4000_0000, 0x1_0000)
     proto, width = ("APB3", 16) if last == "APB3" else ("APB4", 32)
-    na = APB3_NA if last == "APB3" else {**APB4_NA, "pstrb": "tie-default"}
+    tie = {**APB4_NA, "pstrb": "tie-default"}
+    na = APB3_NA if last == "APB3" else tie if last == "tie" else APB4_NA
     c.fabric("p", proto, width, 32, "D0")
     c.bridge("b2", 0x4000_0000, template="bag_ahb2apb")
     c.link("h", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR").option("b2", **na)
     c.region("b2", "w2", 0x4000_0000, 0x1_0000)
     c.slave("s0", proto, width, 32, "D0").link("p", "s0", 0)
-    c.option("s0", **(APB3_NA if last == "APB3" else APB4_NA))
+    c.option("s0", **(APB3_NA if last == "APB3" else tie if last == "s0" else APB4_NA))
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    return c.data
+
+
+def _two_narrow_paths() -> SpecData:
+    """Review of #224: m0 reaches a 32-bit APB3 bus through a 16-bit APB4 bus, m1 through an
+    8-bit one; the finding names the 8-bit bus, the one that must be widened to clear both."""
+    c = Cfg("narrow2", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("h", "AHB-Lite", 32, 32, "D0", "round-robin")
+    for k, (m, thin) in enumerate((("m0", 16), ("m1", 8))):
+        c.fabric(f"a{k}", "AXI4-Lite", 32, 32, "D0", "round-robin")
+        c.master(m, "AXI4-Lite", 32, 32, "D0").link(m, f"a{k}", 0).decode(m, "DECERR")
+        c.option(m, **AXIL_NA)
+        c.fabric(f"n{k}", "APB4", thin, 32, "D0")
+        c.bridge(f"x{k}", 0x4000_0000, template="bag_axi2apb")
+        c.link(f"a{k}", f"x{k}", 0).link(f"x{k}", f"n{k}", 0).decode(f"x{k}", "PSLVERR")
+        c.option(f"x{k}", **APB4_NA).region(f"x{k}", f"w{k}", 0x4000_0000, 0x1_0000)
+        c.bridge(f"y{k}", 0x4000_0000, template="bag_apb2ahb")
+        c.link(f"n{k}", f"y{k}", 0).link(f"y{k}", "h", k).decode(f"y{k}", "HRESP_ERROR")
+        c.option(f"y{k}", **AHB_MASTER_NA).region(f"y{k}", f"v{k}", 0x4000_0000, 0x1_0000)
+    c.fabric("p", "APB3", 32, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_ahb2apb")
+    c.link("h", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR").option("b2", **APB3_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB3", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB3_NA)
     c.region("s0", "regs", 0x4000_0000, 0x1000)
     return c.data
 
@@ -449,10 +476,21 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Port_Options row 8: PSTRB is tied on b2, and the 8-bit bus p8 on the way from m0 splits "
       "each write into 8-bit writes: each then stores the whole 32-bit word, so even full-word "
       "writes are corrupted. Drive PSTRB on b2, or widen p8 to 32 bits (PORTOPT-PSTRB-SPLIT)"]),
+    ("PORTOPT-PSTRB-SPLIT", _narrow_before("s0"),
+     ["Port_Options row 9: PSTRB is tied on s0, and the 8-bit bus p8 on the way from m0 splits "
+      "each write into 8-bit writes: each then stores the whole 32-bit word, so even full-word "
+      "writes are corrupted. Drive PSTRB on s0, or widen p8 to 32 bits (PORTOPT-PSTRB-SPLIT)"]),
+    # A bus as wide as the APB3 word splits nothing it cannot store (review of #224).
+    ("FAB-APB3-SPLIT", _narrow_before("APB3", thin=16), []),
     ("FAB-APB3-SPLIT", _narrow_before("APB3"),
      ["Fabrics row 8: APB3 bus p has no PSTRB, and the 8-bit bus p8 on the way from m0 splits "
       "each write into 8-bit writes: each then stores the whole 16-bit word, so even full-word "
       "writes are corrupted. Make p APB4 with PSTRB, or widen p8 to 16 bits (FAB-APB3-SPLIT)"]),
+    ("FAB-APB3-SPLIT", _two_narrow_paths(),
+     ["Fabrics row 10: APB3 bus p has no PSTRB, and the 8-bit bus n1 on the way from m0, m1 "
+      "splits each write into 8-bit writes: each then stores the whole 32-bit word, so even "
+      "full-word writes are corrupted. Make p APB4 with PSTRB, or widen n1 to 32 bits "
+      "(FAB-APB3-SPLIT)"]),
     # A 32-bit beat a full 32-bit word fills is one transfer: only the D106 warning (review).
     ("PORTOPT-PSTRB-WORD", _split_before_tie(32),
      ["Port_Options row 7: PSTRB is tied on b2: a write of part of its 32-bit word overwrites "

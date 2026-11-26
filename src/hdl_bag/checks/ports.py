@@ -343,7 +343,10 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
     stores the whole word, so a partial write overwrites the rest of it (D106). Tied to 0, no
     write stores any byte, at any width. Reached through bag_axi2ahb from AXI4-Lite, whose
     full-width beat, wider than the word, a full-word write leaves partly clear, that beat
-    becomes byte writes, so even a full-word write is corrupted: an error (D109)."""
+    becomes byte writes, so even a full-word write is corrupted: an error (D109). So is a tie,
+    or an APB3 bus (no PSTRB: FAB-APB3-SPLIT), behind a bus narrower than both the word and the
+    master, which splits each write into writes of its width (D109 extended, seed
+    202611260035). The buses are fabrics: a bridge's ports take its fabrics' widths."""
     from hdl_bag.ir.resolve import resolve
     from hdl_bag.tests_gen.route_model import probes, route
 
@@ -380,12 +383,14 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
                         masters.append(m.name)
                 bus = fabrics[bridges[hop].downstream] if hop in bridges else None
                 words = [(hop, widths[hop])] if hop in widths else []
-                if bus is not None and bus.protocol == "APB3" and bus.data_width > 8:
+                if bus is not None and bus.protocol == "APB3":
                     words.append((bus.name, bus.data_width))
                 thin = min(buses, key=lambda f: f.data_width)
                 for key, word in words:
                     if thin.data_width < min(word, m.data_width):
-                        masters, _ = narrow.setdefault(key, ([], thin))
+                        # The narrowest such bus over all masters: widening it is the fix.
+                        masters, first = narrow.get(key, ([], thin))
+                        narrow[key] = (masters, min(first, thin, key=lambda f: f.data_width))
                         if m.name not in masters:
                             masters.append(m.name)
                 if bus is not None:
