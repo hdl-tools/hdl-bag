@@ -1393,3 +1393,24 @@ def test_the_handshake_ordering_test_needs_an_access_that_is_not_refused(tmp_pat
     spec, findings = resolve_cfg(_tied_cache("tie-0"), tmp_path)
     assert findings == [] and spec is not None
     assert "axi_ports_take_every_handshake_ordering" not in applicable_tests(spec)
+
+
+def test_an_axi4_master_on_an_axi4_lite_fabric_loses_its_tied_cache(tmp_path: Path) -> None:
+    """Seed 202611260015: an AXI4 master with CACHE tied to 0 enters an AXI4-Lite crossbar
+    through its pc; AXI4-Lite has no AxCACHE, so the pc in front of an AXI4 slave drives the tie
+    default, 0b0011, whatever the master tied."""
+    from hdl_bag.tests_gen.route_model import attributes
+
+    c = Cfg("litecache", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": "tie-0"})
+    c.slave("s0", "AXI4", 32, 32, "D0").link("a", "s0", 0).option("s0", **AXI4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    m = spec.masters[0]
+    assert attributes(spec, m, 0, False, (), at_slave=True)[3] == 0b11
+    # The master's own axi_to_axi_lite still sees the tie, and refuses its bursts (D104).
+    assert attributes(spec, m, 0, False, ())[3] == 0
