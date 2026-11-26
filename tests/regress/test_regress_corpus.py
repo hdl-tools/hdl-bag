@@ -22,12 +22,14 @@ from hdl_bag.flows import run_tests
 from hdl_bag.flows.sim import cocotb_tests
 from hdl_bag.ir.to_workbook import to_spec_data
 from hdl_bag.shrink.evaluate import build, lint_step
-from hdl_bag.tests_gen import applicable_tests
+from hdl_bag.tests_gen import TESTS, applicable_tests
+from hdl_bag.tests_gen.route_model import plain_word, private_words
 
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 
-# seed: (step, generated test or None, fixing PR, the bug). The shrink run is in the PR that
-# added the config.
+# seed: (step, generated test or None, fixing PR, the bug). The step is "lint" or "sim" (EDA:
+# the config must pass it) or "absent" (host: the test must no longer be generated for it). The
+# shrink run is in the PR that added the config.
 SEEDS = {
     202611250040: ("sim", "every_master_reaches_what_the_model_says", "#209",
                    "a downsizer after an 8-bit split and an AXI4-Lite re-widening starts each "
@@ -38,7 +40,8 @@ SEEDS = {
     202611240024: ("sim", "axi4_bursts_reach_slaves_and_error_paths", "#203",
                    "a burst refused in front of the decode answers SLVERR on a miss (D104)"),
     202611240036: ("absent", "reset_during_traffic_leaves_nothing_behind", "#203",
-                   "the reset test's predicate uses the body's helper (plain_word)"),
+                   "the reset test's predicate uses the body's helper (plain_word): a minimal "
+                   "config with traffic but no plain word"),
     202611240048: ("absent", "reset_during_traffic_leaves_nothing_behind", "#203",
                    "the reset test's predicate uses the body's helper (plain_word)"),
     327: ("sim", "every_master_reaches_what_the_model_says", "#212",
@@ -56,11 +59,16 @@ def test_every_config_in_the_regress_corpus_has_an_entry() -> None:
 
 @pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] == "absent"))
 def test_a_shrunk_seed_no_longer_gets_the_test_it_failed(seed: int) -> None:
-    """The fix was that the test does not apply to such a config: it has nothing to check."""
+    """Host, no EDA. The fix was that the test does not apply to such a config: it has nothing
+    to check. Pinned to why (review of #221): the reset test resets around each slave plain_word
+    reaches, and these configs have traffic (private_words, what the old predicate asked) but no
+    plain word, the case its predicate wrongly claimed."""
     _, test, fix, bug = SEEDS[seed]
-    assert test not in applicable_tests(ir.load(REGRESS / f"{seed}.ir.yaml")), (
-        f"{seed} gets {test} again ({fix}: {bug})"
-    )
+    spec = ir.load(REGRESS / f"{seed}.ir.yaml")
+    assert test in {t.name for t in TESTS}, f"{test} is gone, so this entry guards nothing"
+    assert not any(plain_word(spec, m, s) for m in spec.masters for s in spec.slaves)
+    assert any(private_words(spec, m, i, 8) for i, m in enumerate(spec.masters))
+    assert test not in applicable_tests(spec), f"{seed} gets {test} again ({fix}: {bug})"
 
 
 @pytest.mark.eda
