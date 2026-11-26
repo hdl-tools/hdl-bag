@@ -236,7 +236,7 @@ async def _bring_up(dut: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str,
 
 def _attributes(m: Any, prot: int, nonsec: bool,
                 bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
-    return attributes(SPEC, m, prot, nonsec, bridges)
+    return attributes(SPEC, m, prot, nonsec, bridges, at_slave=True)
 
 
 def _expected_prot(m: Any, slave: str, prot: int, nonsec: bool,

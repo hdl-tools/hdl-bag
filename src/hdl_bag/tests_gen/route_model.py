@@ -631,10 +631,13 @@ def _tie(spec: Spec, port: str, sig: str) -> int:
     return default | {"hnonsec": 1, "pprot": 0b010, "awprot": 0b010, "arprot": 0b010}.get(sig, 0)
 
 
-def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
-               bridges: tuple[str, ...]) -> tuple[int, int, int, int]:  # fmt: skip
+def attributes(spec: Spec, m: Any, prot: int, nonsec: bool, bridges: tuple[str, ...],
+               at_slave: bool = False) -> tuple[int, int, int, int]:  # fmt: skip
     """(privileged, non-secure, instruction, AxCACHE[1:0]) of an access as it leaves the last
-    bridge: each bridge maps them to its downstream protocol."""
+    bridge: each bridge maps them to its downstream protocol. AT_SLAVE: once it has crossed the
+    fabric it is then on, which on AXI4-Lite drops AxCACHE, so a pc onto an AXI4 slave drives
+    the tie default, 0b0011 (seed 202611260015). Without it, what a converter at the start of
+    that fabric sees (D104 refusals)."""
     templates = {b.name: b.template for b in spec.bridges}
     downstream = {b.name: next(f.protocol for f in spec.fabrics if f.name == b.downstream)
                   for b in spec.bridges}  # fmt: skip
@@ -656,6 +659,8 @@ def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
                           cache_after_tie(spec, m.name, 0b11))  # fmt: skip
     for b in bridges:
         priv, ns, instr, cache = attrs
+        if next(x.upstream_protocol for x in spec.bridges if x.name == b) == "AXI4-Lite":
+            cache = 0b11  # a bridge off AXI4-Lite has no AxCACHE to read (review of #222)
         cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
         if downstream[b] == "AXI4-Lite":
             cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011
@@ -668,6 +673,18 @@ def attributes(spec: Spec, m: Any, prot: int, nonsec: bool,
             else:  # a PROT tie leaves the cache attributes alone
                 tie = _tie(spec, b, "awprot" if downstream[b] in ("AXI4", "AXI4-Lite") else "pprot")
                 attrs = from_prot(tie, attrs[3])
+    last = next(
+        f
+        for f in spec.fabrics
+        if f.name
+        == (
+            next(b.downstream for b in spec.bridges if b.name == bridges[-1])
+            if bridges
+            else m.fabric
+        )
+    )
+    if at_slave and last.protocol == "AXI4-Lite":
+        attrs = (*attrs[:3], 0b11)
     return attrs
 
 
