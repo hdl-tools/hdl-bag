@@ -1,0 +1,197 @@
+schema: '0.7'
+project:
+  name: rnd202611260015
+  module_prefix: null
+  revision: seed 202611260015
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/rnd202611260015
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_0
+    mhz: 100
+    source: top port
+    domain: D0
+    reset: rst_0_n
+  - name: clk_1
+    mhz: 100
+    source: top port
+    domain: D1
+    reset: rst_1_n
+resets:
+  - name: rst_0_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D0
+  - name: rst_1_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D1
+fabrics:
+  - name: f0
+    protocol: AXI4-Lite
+    topology: crossbar
+    data_width: 32
+    addr_width: 12
+    domain: D0
+    arbitration: round-robin
+    latency_mode: NO_LATENCY
+    max_mst_trans: 1
+    max_slv_trans: 2
+    midpoint: null
+    template: bag_axil_xbar
+    backing_ip: PULP
+    external_module: null
+    master_ports:
+      - index: 0
+        port: m0
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s0
+        region: r0
+        base: '0x0000_0000'
+        end: '0x0000_0FFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: m0
+        miss: default-slave
+        default_slave: s0
+        aliases: []
+masters:
+  - name: m0
+    protocol: AXI4
+    fabric: f0
+    data_width: 32
+    addr_width: 12
+    id_width: 1
+    user_width: 0
+    domain: D0
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: s0
+    protocol: AXI4
+    fabric: f0
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: true
+    user_width: 0
+    domain: D0
+    error_response: SLVERR
+    wait_states: 0
+bridges: []
+adapters:
+  - name: m0_pc_2_f0
+    type: pc
+    port: m0
+    fabric: f0
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4
+      to: AXI4-Lite
+    placed_in: rnd202611260015_top
+    rtl_name: u_m0_pc_2_f0
+  - name: f0_pc_2_s0
+    type: pc
+    port: s0
+    fabric: f0
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4-Lite
+      to: AXI4
+    placed_in: rnd202611260015_top
+    rtl_name: u_f0_pc_2_s0
+port_options:
+  - port: m0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: tie-0
+    region: tie-default
+    cache: tie-0
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: s0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+user_ports: []
+memory_map:
+  - slave: s0
+    region: r0
+    base: '0x0000_0000'
+    size: '0x0000_1000'
+    access: RW
+    secure: false
+    fabric: f0
+hierarchy:
+  top: rnd202611260015_top
+  wrappers: []
+  placement:
+    - instance: f0
+      kind: fabric
+      wrapper: rnd202611260015_top
+      rtl_name: u_f0
+    - instance: f0_pc_2_s0
+      kind: adapter
+      wrapper: rnd202611260015_top
+      rtl_name: u_f0_pc_2_s0
+    - instance: m0_pc_2_f0
+      kind: adapter
+      wrapper: rnd202611260015_top
+      rtl_name: u_m0_pc_2_f0
+wrapper:
+  top: rnd202611260015_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: rnd202611260015_pkg
+  file_header: null
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: m0
+      exposed: true
+      prefix: null
+    - port: s0
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 1.0.0
+  source: rnd202611260015.xlsx
+  sha256: 1bb271075db8da30cdf8e68f479491bb91d8a3a55c3c55f7b6e6420416e497a8

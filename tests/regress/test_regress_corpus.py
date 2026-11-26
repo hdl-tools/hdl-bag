@@ -10,16 +10,19 @@ of #220). Other generated tests are not this config's business: a shrunk config 
 failure, so it may leave them nothing to check. Each config was checked once to fail its test
 at the commit before its fix (the PR that added it says how). Where the fix was that the test
 no longer applies (its predicate claimed a config its body could not check), the entry's step
-is "absent" and the test must not be generated for the config.
+is "absent" and the test must not be generated for the config. Where the fix was that formal_gen
+no longer emits a cover the config can never reach, the step is "no-cover" and the entry names
+the cover.
 """
 
 from pathlib import Path
 
 import pytest
 
-from hdl_bag import ir
+from hdl_bag import formal_gen, ir
 from hdl_bag.flows import run_tests
 from hdl_bag.flows.sim import cocotb_tests
+from hdl_bag.gen import generate
 from hdl_bag.ir.to_workbook import to_spec_data
 from hdl_bag.shrink.evaluate import build, lint_step
 from hdl_bag.tests_gen import TESTS, applicable_tests
@@ -27,9 +30,10 @@ from hdl_bag.tests_gen.route_model import plain_word, private_words
 
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 
-# seed: (step, generated test or None, fixing PR, the bug). The step is "lint" or "sim" (EDA:
-# the config must pass it) or "absent" (host: the test must no longer be generated for it). The
-# shrink run is in the PR that added the config.
+# seed: (step, generated test or cover, fixing PR, the bug). The step is "lint" or "sim" (EDA:
+# the config must pass it), "absent" (host: the test must no longer be generated for it) or
+# "no-cover" (host: formal_gen must no longer emit the cover). The shrink run is in the PR that
+# added the config.
 SEEDS = {
     202611250040: ("sim", "every_master_reaches_what_the_model_says", "#209",
                    "a downsizer after an 8-bit split and an AXI4-Lite re-widening starts each "
@@ -44,6 +48,14 @@ SEEDS = {
                    "config with traffic but no plain word"),
     202611240048: ("absent", "reset_during_traffic_leaves_nothing_behind", "#203",
                    "the reset test's predicate uses the body's helper (plain_word)"),
+    202611180004: ("no-cover", "proto_wait_m0", "#217",
+                   "an APB master that reaches no slave gets no wait cover: the decoder-mux "
+                   "answers every transfer itself, with PREADY high (a minimal config: no "
+                   "region, where the seed's Access_Rules denied m0)"),
+    202611260015: ("sim", "every_master_reaches_what_the_model_says", "#222",
+                   "an AXI4-Lite fabric drops a master's tied AxCACHE, so a pc onto an AXI4 "
+                   "slave drives 0b11 (the shrink cut every region; one 4 KB region for s0 was "
+                   "restored by hand, else the route test's error self-check has no error word)"),
     327: ("sim", "every_master_reaches_what_the_model_says", "#212",
           "a split read re-widened by an AXI4-Lite bus before a downsizer reads a word once "
           "per byte at or below it"),
@@ -71,8 +83,26 @@ def test_a_shrunk_seed_no_longer_gets_the_test_it_failed(seed: int) -> None:
     assert test not in applicable_tests(spec), f"{seed} gets {test} again ({fix}: {bug})"
 
 
+@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] == "no-cover"))
+def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: int) -> None:
+    """Host, no EDA. The fix was that formal_gen does not emit a cover this config can never
+    reach. Pinned to why: the master's read and write covers are still there, so the protocol
+    job still runs for it."""
+    _, cover, fix, bug = SEEDS[seed]
+    assert cover.startswith("proto_wait_"), cover  # the only kind of cover this guards so far
+    # The label is still one formal_gen emits, so its absence below means something.
+    assert '"proto_wait_' in Path(formal_gen.__file__).read_text(encoding="utf-8")
+    generate(ir.load(REGRESS / f"{seed}.ir.yaml"), tmp_path / "out", REGRESS)
+    jobs = sorted((tmp_path / "out" / "formal").glob("*_protocol.sv"))
+    assert jobs, f"{seed}: no protocol job"
+    text = "".join(p.read_text(encoding="utf-8") for p in jobs)
+    master = cover.removeprefix("proto_wait_")
+    assert f"proto_write_{master}: cover" in text and f"proto_read_{master}: cover" in text
+    assert f"{cover}: cover" not in text, f"{seed} gets {cover} again ({fix}: {bug})"
+
+
 @pytest.mark.eda
-@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] != "absent"))
+@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] in ("lint", "sim")))
 def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> None:
     step, test, fix, bug = SEEDS[seed]
     built = build(to_spec_data(ir.load(REGRESS / f"{seed}.ir.yaml")), tmp_path, REGRESS)
