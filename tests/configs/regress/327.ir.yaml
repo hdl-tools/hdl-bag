@@ -183,7 +183,7 @@ fabrics:
         slave: s7
         region: r0
         base: '0x5080_8000'
-        end: '0x5080_8007'
+        end: '0x5080_83FF'
         access: RW
         secure: false
     access_rules: []
@@ -384,7 +384,7 @@ memory_map:
   - slave: s7
     region: r0
     base: '0x5080_8000'
-    size: '0x0000_0008'
+    size: '0x0000_0400'
     access: RW
     secure: false
     fabric: f3
