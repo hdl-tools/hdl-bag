@@ -23,6 +23,7 @@ from hdl_bag.reader.model import Cell, Row
 
 if TYPE_CHECKING:
     from hdl_bag.checks import CheckResult
+    from hdl_bag.ir.model import Fabric
 
 TOPOLOGIES: Final = ("crossbar", "shared-bus", "single-layer", "decoder-mux")
 ARBITRATION: Final = ("round-robin", "fixed-priority", "single-master")
@@ -359,18 +360,36 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
              if b.template == "bag_axi2ahb" and fabrics[b.upstream].protocol == "AXI4-Lite"}  # fmt: skip
     # Per tied port: the masters whose writes reach it through such a bridge, and the first such.
     split: dict[str, tuple[list[str], str]] = {}
+    # D109 extended (seed 202611260035): a bus narrower than a word without byte strobes
+    # further on (an APB3 bus, or a PSTRB tie) splits each write into writes of its width, and
+    # each stores the whole word. Per such bus or port: the masters, and the first narrow bus.
+    narrow: dict[str, tuple[list[str], Fabric]] = {}
+    bridges = {b.name: b for b in spec.bridges}
     for m in spec.masters:
         for a in probes(spec):
             if a >= 1 << m.addr_width:
                 continue
             e = route(spec, m.name, a, True, False, {})
             path = [*e.bridges, *([e.slave] if e.slave else [])]
+            buses = [fabrics[m.fabric]]  # the buses the write has crossed so far
             for k, hop in enumerate(path):
                 via = next((b for b in path[:k] if beats.get(b, 0) > widths.get(hop, 8)), None)
                 if via is not None:
                     masters, _ = split.setdefault(hop, ([], via))
                     if m.name not in masters:
                         masters.append(m.name)
+                bus = fabrics[bridges[hop].downstream] if hop in bridges else None
+                words = [(hop, widths[hop])] if hop in widths else []
+                if bus is not None and bus.protocol == "APB3" and bus.data_width > 8:
+                    words.append((bus.name, bus.data_width))
+                thin = min(buses, key=lambda f: f.data_width)
+                for key, word in words:
+                    if thin.data_width < min(word, m.data_width):
+                        masters, _ = narrow.setdefault(key, ([], thin))
+                        if m.name not in masters:
+                            masters.append(m.name)
+                if bus is not None:
+                    buses.append(bus)
     for row in ctx.raw.port_options:
         port = row.value("Port")
         tied_wide = row.value("PSTRB") == "tie-default" and widths.get(str(port), 8) > 8
@@ -382,6 +401,14 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
                        f"writes: each then stores the whole {widths[str(port)]}-bit word, so even "
                        f"full-word writes are corrupted. Drive PSTRB on {port}, or keep "
                        "bag_axi2ahb off this path")  # fmt: skip
+        elif tied_wide and str(port) in narrow:
+            masters, thin = narrow[str(port)]
+            ctx.report("PORTOPT-PSTRB-SPLIT", row["PSTRB"],
+                       f"PSTRB is tied on {port}, and the {thin.data_width}-bit bus {thin.name} on "
+                       f"the way from {', '.join(sorted(masters))} splits each write into "
+                       f"{thin.data_width}-bit writes: each then stores the whole "
+                       f"{widths[str(port)]}-bit word, so even full-word writes are corrupted. "
+                       f"Drive PSTRB on {port}, or widen {thin.name} to {widths[str(port)]} bits")  # fmt: skip
         elif row.value("PSTRB") == "tie-0" and str(port) in widths:
             ctx.report("PORTOPT-PSTRB-WORD", row["PSTRB"],
                        f"PSTRB is tied to 0 on {port}: no write stores any byte. Drive PSTRB, or "
@@ -391,6 +418,16 @@ def check_pstrb_ties(ctx: Context, result: "CheckResult") -> None:
                        f"PSTRB is tied on {port}: a write of part of its {widths[str(port)]}-bit "
                        "word overwrites the rest of the word. Drive PSTRB, or write whole words "
                        "only")  # fmt: skip
+    for name, (masters, thin) in narrow.items():
+        frow = ctx.fabric_row(name)
+        if frow is not None and fabrics[name].protocol == "APB3":
+            word = fabrics[name].data_width
+            ctx.report("FAB-APB3-SPLIT", frow["Data width (bits)"],
+                       f"APB3 bus {name} has no PSTRB, and the {thin.data_width}-bit bus "
+                       f"{thin.name} on the way from {', '.join(sorted(masters))} splits each "
+                       f"write into {thin.data_width}-bit writes: each then stores the whole "
+                       f"{word}-bit word, so even full-word writes are corrupted. Make {name} "
+                       f"APB4 with PSTRB, or widen {thin.name} to {word} bits")  # fmt: skip
 
 
 def check_wrap_refusals(ctx: Context, result: "CheckResult") -> None:

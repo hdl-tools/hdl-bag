@@ -12,7 +12,16 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from dsl import AHB_MASTER_NA, APB4_NA, AXIL_NA, SAMPLE_WRAP, Cfg, unexpected, wrap_refusals
+from dsl import (
+    AHB_MASTER_NA,
+    APB3_NA,
+    APB4_NA,
+    AXIL_NA,
+    SAMPLE_WRAP,
+    Cfg,
+    unexpected,
+    wrap_refusals,
+)
 from openpyxl import Workbook
 
 from hdl_bag.checks import RULES, run_checks
@@ -163,6 +172,37 @@ def _split_before_tie(width: int = 64, tied: Literal["b2", "s0"] = "b2") -> Spec
     c.region("b2", "w2", 0x4000_0000, 0x1_0000)
     c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0)
     c.option("s0", **{**APB4_NA, **(tie if tied == "s0" else {})})
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    return c.data
+
+
+def _narrow_before(last: Literal["APB3", "tie"]) -> SpecData:
+    """Seed 202611260035 (D109 extended): a 32-bit AXI4-Lite master, bag_axi2apb onto an 8-bit
+    APB4 bus, which splits every write into byte writes, then bag_apb2ahb and bag_ahb2apb onto
+    a wider bus without byte strobes: a 16-bit APB3 bus, or a 32-bit APB4 bus with PSTRB tied
+    on its bridge b2."""
+    c = Cfg("narrow", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p8", "APB4", 8, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b0", 0).link("b0", "p8", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x1_0000)
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_apb2ahb")
+    c.link("p8", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR")
+    c.option("b1", **AHB_MASTER_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    proto, width = ("APB3", 16) if last == "APB3" else ("APB4", 32)
+    na = APB3_NA if last == "APB3" else {**APB4_NA, "pstrb": "tie-default"}
+    c.fabric("p", proto, width, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_ahb2apb")
+    c.link("h", "b2", 0).link("b2", "p", 0).decode("b2", "PSLVERR").option("b2", **na)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", proto, width, 32, "D0").link("p", "s0", 0)
+    c.option("s0", **(APB3_NA if last == "APB3" else APB4_NA))
     c.region("s0", "regs", 0x4000_0000, 0x1000)
     return c.data
 
@@ -405,6 +445,14 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
       "write with clear strobes into byte writes: each then stores the whole 32-bit word, so "
       "even full-word writes are corrupted. Drive PSTRB on s0, or keep bag_axi2ahb off this "
       "path (PORTOPT-PSTRB-SPLIT)"]),
+    ("PORTOPT-PSTRB-SPLIT", _narrow_before("tie"),
+     ["Port_Options row 8: PSTRB is tied on b2, and the 8-bit bus p8 on the way from m0 splits "
+      "each write into 8-bit writes: each then stores the whole 32-bit word, so even full-word "
+      "writes are corrupted. Drive PSTRB on b2, or widen p8 to 32 bits (PORTOPT-PSTRB-SPLIT)"]),
+    ("FAB-APB3-SPLIT", _narrow_before("APB3"),
+     ["Fabrics row 8: APB3 bus p has no PSTRB, and the 8-bit bus p8 on the way from m0 splits "
+      "each write into 8-bit writes: each then stores the whole 16-bit word, so even full-word "
+      "writes are corrupted. Make p APB4 with PSTRB, or widen p8 to 16 bits (FAB-APB3-SPLIT)"]),
     # A 32-bit beat a full 32-bit word fills is one transfer: only the D106 warning (review).
     ("PORTOPT-PSTRB-WORD", _split_before_tie(32),
      ["Port_Options row 7: PSTRB is tied on b2: a write of part of its 32-bit word overwrites "

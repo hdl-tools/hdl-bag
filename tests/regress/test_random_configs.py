@@ -278,3 +278,10 @@ def test_an_ahb_lite_fabric_deep_in_a_sparse_map_still_gets_1_kb_regions(tmp_pat
     AHB-Lite fabric's regions were 512 bytes, which MM-SMALL-AHB now refuses. The draw keeps
     room for every target's floor instead."""
     assert _errors(202611260046, tmp_path) == []
+
+
+def test_a_write_split_by_a_narrow_bus_never_meets_a_wider_strobeless_word(tmp_path: Path) -> None:
+    """Seed 202611260035: an 8-bit APB4 bus split every write into byte writes before a 16-bit
+    APB3 bus, which has no PSTRB, so each stored the whole word (FAB-APB3-SPLIT). The draw keeps
+    an APB3 bus no wider than any bus before it."""
+    assert _errors(202611260035, tmp_path) == []
