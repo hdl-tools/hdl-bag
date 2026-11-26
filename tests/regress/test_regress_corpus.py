@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from hdl_bag import ir
+from hdl_bag import formal_gen, ir
 from hdl_bag.flows import run_tests
 from hdl_bag.flows.sim import cocotb_tests
 from hdl_bag.gen import generate
@@ -54,7 +54,8 @@ SEEDS = {
                    "region, where the seed's Access_Rules denied m0)"),
     202611260015: ("sim", "every_master_reaches_what_the_model_says", "#222",
                    "an AXI4-Lite fabric drops a master's tied AxCACHE, so a pc onto an AXI4 "
-                   "slave drives 0b0011"),
+                   "slave drives 0b11 (the shrink cut every region; one 4 KB region for s0 was "
+                   "restored by hand, else the route test's error self-check has no error word)"),
     327: ("sim", "every_master_reaches_what_the_model_says", "#212",
           "a split read re-widened by an AXI4-Lite bus before a downsizer reads a word once "
           "per byte at or below it"),
@@ -88,8 +89,12 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
     reach. Pinned to why: the master's read and write covers are still there, so the protocol
     job still runs for it."""
     _, cover, fix, bug = SEEDS[seed]
+    assert cover.startswith("proto_wait_"), cover  # the only kind of cover this guards so far
+    # The label is still one formal_gen emits, so its absence below means something.
+    assert '"proto_wait_' in Path(formal_gen.__file__).read_text(encoding="utf-8")
     generate(ir.load(REGRESS / f"{seed}.ir.yaml"), tmp_path / "out", REGRESS)
     jobs = sorted((tmp_path / "out" / "formal").glob("*_protocol.sv"))
+    assert jobs, f"{seed}: no protocol job"
     text = "".join(p.read_text(encoding="utf-8") for p in jobs)
     master = cover.removeprefix("proto_wait_")
     assert f"proto_write_{master}: cover" in text and f"proto_read_{master}: cover" in text
@@ -97,9 +102,7 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
 
 
 @pytest.mark.eda
-@pytest.mark.parametrize(
-    "seed", sorted(s for s, e in SEEDS.items() if e[0] not in ("absent", "no-cover"))
-)
+@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] in ("lint", "sim")))
 def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> None:
     step, test, fix, bug = SEEDS[seed]
     built = build(to_spec_data(ir.load(REGRESS / f"{seed}.ir.yaml")), tmp_path, REGRESS)
