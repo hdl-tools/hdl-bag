@@ -659,6 +659,8 @@ def attributes(spec: Spec, m: Any, prot: int, nonsec: bool, bridges: tuple[str, 
                           cache_after_tie(spec, m.name, 0b11))  # fmt: skip
     for b in bridges:
         priv, ns, instr, cache = attrs
+        if next(x.upstream_protocol for x in spec.bridges if x.name == b) == "AXI4-Lite":
+            cache = 0b11  # a bridge off AXI4-Lite has no AxCACHE to read (review of #222)
         cache = {"bag_apb2axi": 0b11, "bag_apb2ahb": 0}.get(templates[b], cache)
         if downstream[b] == "AXI4-Lite":
             cache = 0b11  # AXI4-Lite has no AxCACHE: the next bridge assumes 0b0011

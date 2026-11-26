@@ -1414,3 +1414,25 @@ def test_an_axi4_master_on_an_axi4_lite_fabric_loses_its_tied_cache(tmp_path: Pa
     assert attributes(spec, m, 0, False, (), at_slave=True)[3] == 0b11
     # The master's own axi_to_axi_lite still sees the tie, and refuses its bursts (D104).
     assert attributes(spec, m, 0, False, ())[3] == 0
+
+
+def test_a_bridge_off_an_axi4_lite_fabric_takes_the_default_cache(tmp_path: Path) -> None:
+    """Review of #222: bag_axi2ahb on an AXI4-Lite fabric has no AxCACHE to read, so it
+    takes 0b0011 and HPROT[3:2] is 0b11 at the AHB-Lite slave, whatever the master tied."""
+    from hdl_bag.tests_gen.route_model import attributes
+
+    c = Cfg("litecache2", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **{**AXI4_NA, "cache": "tie-0"})
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2ahb")
+    c.link("a", "b1", 0).link("b1", "h", 0).decode("b1", "HRESP_ERROR")
+    c.option("b1", **AHB_MASTER_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "AHB-Lite", 32, 32, "D0").link("h", "s0", 0).option("s0", **AHB_SLAVE_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    assert attributes(spec, spec.masters[0], 0, False, ("b1",), at_slave=True)[3] == 0b11
