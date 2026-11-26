@@ -49,6 +49,7 @@
 \checkrule{MM-PATH-NO-REGION}{warning}{Slaves row 13: slave rtc0 has no region in Memory\_Map (MM-PATH-NO-REGION)}
 \checkrule{MM-SIZE-NOT-POW2}{error}{Memory\_Map row 20: size 0x0000\_3000 is not a power of 2 (MM-SIZE-NOT-POW2)}
 \checkrule{MM-SLAVE-ALIGN}{error}{Memory\_Map row 21: uart0 0x4000\_8000..0x4000\_8FFF is outside the 12-bit block 0x4000\_0000..0x4000\_0FFF of its region regs (Memory\_Map row 11) (MM-SLAVE-ALIGN)}
+\checkrule{MM-SMALL-AHB}{error}{Memory\_Map row 15: itcm0 region mem is smaller than 1 KB on AHB-Lite fabric ahb\_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)}
 \checkrule{MM-SMALL-AXI}{warning}{Memory\_Map row 9: pmu0 region regs is smaller than 4 KB on AXI fabric cfg\_bus (MM-SMALL-AXI)}
 \checkrule{MM-UNKNOWN-SLAVE}{error}{Memory\_Map row 21: ghost is not defined on Slaves or Bridges (MM-UNKNOWN-SLAVE)}
 \checkrule{NAME-IDENT}{error}{Memory\_Map row 20: Region 'Regs' is not a lowercase SystemVerilog identifier (NAME-IDENT)}

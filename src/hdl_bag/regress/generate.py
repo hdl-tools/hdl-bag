@@ -313,10 +313,14 @@ def _map(d: _Draw, fab: _Fabric, base: int, size: int) -> None:
     rng = d.rng
     d.block[fab.name] = (base, size)
     n = len(fab.targets)
-    slots = 1 << (n - 1).bit_length()
+    slots = least = 1 << (n - 1).bit_length()
     if not d.dense:
         slots *= rng.choice((2, 4))
+    need = _slot_need(d, fab)
+    while slots > least and size // slots < need:
+        slots //= 2  # fewer gaps, so every target still fits its floor
     slot = size // slots
+    assert slot >= need, f"{fab.name}: a {slot:#x} slot under its {need:#x} floor"
     picks = list(range(n)) if d.dense else sorted(rng.sample(range(slots), n))
     for t, k in zip(fab.targets, picks, strict=True):
         at = base + k * slot
@@ -331,8 +335,21 @@ def _map(d: _Draw, fab: _Fabric, base: int, size: int) -> None:
             _map(d, d.fabrics[d.downstream[t]], at, win)
 
 
+def _slot_need(d: _Draw, fab: _Fabric) -> int:
+    """The smallest slot every target of FAB fits: on AHB-Lite a region of 1 KB at least
+    (MM-SMALL-AHB), and a bridge's window must hold the map of the fabric behind it."""
+    need = KB if fab.proto == "AHB-Lite" else 0
+    for t in fab.targets:
+        if t not in d.slaves and d.downstream[t] not in d.block:
+            child = d.fabrics[d.downstream[t]]
+            need = max(need, (1 << (len(child.targets) - 1).bit_length()) * _slot_need(d, child))
+    return need
+
+
 def _bridge_window(d: _Draw, bridge: str, at: int, slot: int) -> int:
     win = slot if d.dense else min(slot, max(16 * KB, slot >> d.rng.choice((0, 2, 4))))
+    child = d.fabrics[d.downstream[bridge]]
+    win = max(win, (1 << (len(child.targets) - 1).bit_length()) * _slot_need(d, child))
     d.cfg.region(bridge, "win", at, win)
     _set_window(d, bridge, at)
     return win

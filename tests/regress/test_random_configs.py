@@ -271,3 +271,10 @@ def test_no_drawn_config_ties_pstrb_where_bag_axi2ahb_could_reach_it(
     assert not any(_pstrb_tie_behind_axi2ahb(s) for s in range(300))
     monkeypatch.setattr(drawer, "_no_pstrb_tie_behind_axi2ahb", lambda cfg: None)
     assert any(_pstrb_tie_behind_axi2ahb(s) for s in range(300))
+
+
+def test_an_ahb_lite_fabric_deep_in_a_sparse_map_still_gets_1_kb_regions(tmp_path: Path) -> None:
+    """Seed 202611260046: a sparse map shrank the slots behind a chain of bridges until the
+    AHB-Lite fabric's regions were 512 bytes, which MM-SMALL-AHB now refuses. The draw keeps
+    room for every target's floor instead."""
+    assert _errors(202611260046, tmp_path) == []

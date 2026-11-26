@@ -191,6 +191,12 @@ def check_memory_map(ctx: Context) -> list[Region]:
         if size < 4096 and ctx.fabric_protocol(fabric) in AXI_FAMILY:
             ctx.report("MM-SMALL-AXI", row["Size (hex)"],
                        f"{target} region {rname} is smaller than 4 KB on AXI fabric {fabric}")  # fmt: skip
+        # AHB bursts stop only at 1 KB boundaries, so a smaller region lets one run on into the
+        # next target, which then sees SEQ with no NONSEQ (seed 202611260046). A region is
+        # aligned to its size, so 1 KB or more is also 1 KB aligned.
+        if size < 1024 and ctx.fabric_protocol(fabric) == "AHB-Lite":
+            ctx.report("MM-SMALL-AHB", row["Size (hex)"],
+                       f"{target} region {rname} is smaller than 1 KB on AHB-Lite fabric {fabric}: an AHB burst may run on into the next region")  # fmt: skip
         regions.append(r)
 
     listed = {r["Slave / bridge"].value for r in ctx.raw.memory_map}
@@ -366,6 +372,9 @@ def check_address_decode(ctx: Context, regions: list[Region]) -> None:
                        f"alias size {_hex(a_size)} must be a power of 2 with base and target aligned to it")  # fmt: skip
             continue
         end = a_base + a_size - 1
+        if a_size < 1024 and proto == "AHB-Lite":  # as for a region (review of #223)
+            ctx.report("MM-SMALL-AHB", alias["Alias size (hex)"],
+                       f"alias {_hex(a_base)}..{_hex(end)} is smaller than 1 KB on AHB-Lite fabric {fabric}: an AHB burst may run on into the next region")  # fmt: skip
         if hit := next(
             (r for r in regions if r.fabric == fabric and r.overlaps(a_base, end)), None
         ):
