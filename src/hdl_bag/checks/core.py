@@ -51,6 +51,7 @@ RULES: Final[dict[str, Severity]] = {
     "FAB-NA-SETTING": W,
     "FAB-ID-GROWTH": W,
     "FAB-GUARD-ID-WIDTH": W,
+    "FAB-APB3-SPLIT": E,
     "PORT-ADAPTER": E,
     "AXI-WRAP-REFUSED": W,
     "AXI-SPLIT-REFUSED": W,

@@ -24,6 +24,7 @@
 \checkrule{DEC-UNKNOWN-MASTER}{error}{Address\_Decode row 14: ghost is not a connected master or bridge (DEC-UNKNOWN-MASTER)}
 \checkrule{EXT-MODULE-NAME}{error}{Fabrics row 9: External module '1bad' is not a SystemVerilog identifier (EXT-MODULE-NAME)}
 \checkrule{EXT-MODULE-SHARED}{error}{Fabrics row 9: aon\_apb and ahb\_bus share module one but differ in protocol, widths, attachments or user ports (EXT-MODULE-SHARED)}
+\checkrule{FAB-APB3-SPLIT}{error}{Fabrics row 8: APB3 bus p has no PSTRB, and the 8-bit bus p8 on the way from m0 splits each write into 8-bit writes: each then stores the whole 16-bit word, so even full-word writes are corrupted. Make p APB4 with PSTRB, or widen p8 to 16 bits (FAB-APB3-SPLIT)}
 \checkrule{FAB-ARBITRATION}{error}{Fabrics row 7: round-robin is not supported by bag\_apb\_mux (single-master) (FAB-ARBITRATION)}
 \checkrule{FAB-EMPTY-SIDE}{error}{Fabrics row 10: fabric spare\_apb has no master ports in Topology (FAB-EMPTY-SIDE)}
 \checkrule{FAB-GUARD-ID-WIDTH}{warning}{Fabrics row 5: master-side ID width of main\_xbar is 9 bits (> 8): each master port's guard keeps 512 in-flight counters per channel, one per ID (D65); narrow the master IDs if that area matters (FAB-GUARD-ID-WIDTH)}

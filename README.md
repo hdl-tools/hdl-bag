@@ -15,7 +15,7 @@ gate and report are outstanding (its nightly runs are not yet green).
 
 | Works today | Not yet |
 |---|---|
-| Spec workbook template, reader and 101 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
+| Spec workbook template, reader and 102 validation checks | Two consecutive green nightly weeks, and the Phase 5 report |
 | Canonical YAML IR, byte-identical across runs | |
 | `bag regress`: random configurations through check, generate, lint, compile, the generated tests and formal | |
 | Nightly regression workflow, and `bag shrink` to reduce a failing spec (checked against real formal tools) | |

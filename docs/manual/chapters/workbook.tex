@@ -994,7 +994,10 @@ so does a PSTRB tied to 0, as no write then stores any byte (\ruleid{PORTOPT-PST
 Behind a \code{bag_axi2ahb} fed by AXI4-Lite, whose beat (the narrower of its two buses)
 is wider than the tied word, it is an error (\ruleid{PORTOPT-PSTRB-SPLIT}): a full-word
 write leaves part of that beat clear, the bridge turns it into byte writes, and each then
-stores the whole word, so even a full-word write is corrupted.
+stores the whole word, so even a full-word write is corrupted. The same holds behind a bus
+narrower than both the tied word and the master, which splits each write into writes of
+its width, and an APB3 bus wider than such a bus is an error too
+(\ruleid{FAB-APB3-SPLIT}), as APB3 has no PSTRB.
 A CACHE tied to 0 on an AXI4 master or bridge makes every access non-modifiable; where an
 AXI4 to AXI4-Lite converter on the way must split one, it answers SLVERR, and
 \cmd{bag check} warns (\ruleid{AXI-SPLIT-REFUSED}).

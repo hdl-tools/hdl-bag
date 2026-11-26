@@ -141,6 +141,7 @@ def random_config(seed: int) -> Cfg:
         frontier.append(child)
     if rng.random() < 0.2:
         _feeder(d, bridges)
+    _no_apb3_wider_than_a_bus_before_it(d)  # before its ports are drawn, which take its width
     for fab in list(d.fabrics.values()):
         # A direct master beside a pass-through N bridge would see other addresses
         # (DEC-MIXED-TRANSLATION).
@@ -161,7 +162,46 @@ def random_config(seed: int) -> Cfg:
     for k in sorted(d.used_domains):
         cfg.domain(f"D{k}", f"clk_{k}", f"rst_{k}_n")
     _no_pstrb_tie_behind_axi2ahb(cfg)
+    _no_pstrb_tie_after_a_narrow_bus(d)
     return cfg
+
+
+def _no_apb3_wider_than_a_bus_before_it(d: _Draw) -> None:
+    """D109 extended (FAB-APB3-SPLIT): an APB3 bus has no PSTRB, so one wider than a bus the
+    writes cross before it stores a whole word for each split write. shortcut: wider than the
+    rule (it ignores the master's width), narrow it if wide APB3 buses behind narrow ones from
+    narrow masters need coverage."""
+    for fab in d.fabrics.values():
+        if fab.proto == "APB3":
+            fab.width = min(fab.width, _narrowest_into(d, fab))
+
+
+def _narrowest_into(d: _Draw, fab: _Fabric) -> int:
+    """The narrowest bus a write may cross before it reaches FAB, over every bridge into it
+    (D109 extended, seed 202611260035): that bus splits it into writes of its width. Fabrics are
+    drawn parents first, so the widths it reads are final."""
+    ups = [d.fabrics[d.upstream[b]] for b in fab.masters if b in d.upstream]
+    return min((min(u.width, _narrowest_into(d, u)) for u in ups), default=1 << 16)
+
+
+def _no_pstrb_tie_after_a_narrow_bus(d: _Draw) -> None:
+    """D109 extended: a PSTRB tie on a port wider than a bus the writes cross before it makes
+    each split write store the whole word, which bag check refuses (PORTOPT-PSTRB-SPLIT). Such
+    ties are driven instead; the draws are kept, so no other seed changes. shortcut: wider than
+    the rule (it ignores the master's width), narrow it if such ties need coverage."""
+    column = 1 + OPTION_COLUMNS.index("pstrb")
+    for row in d.cfg.data.port_options:
+        if row[column] != "tie-default":
+            continue
+        port = str(row[0])
+        if port in d.downstream:  # a bridge: the word of its downstream bus
+            up = d.fabrics[d.upstream[port]]
+            thin, word = min(up.width, _narrowest_into(d, up)), d.fabrics[d.downstream[port]].width
+        else:
+            fab = next(f for f in d.fabrics.values() if port in f.targets or port in f.masters)
+            thin, word = min(fab.width, _narrowest_into(d, fab)), fab.width
+        if thin < word:
+            row[column] = "drive"
 
 
 def _no_pstrb_tie_behind_axi2ahb(cfg: Cfg) -> None:

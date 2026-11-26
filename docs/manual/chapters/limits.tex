@@ -130,6 +130,8 @@ the fabric, and the reads through \code{bag_axi2ahb}.
   (\ruleid{PORTOPT-PSTRB-WORD}); tied to 0, no write stores any byte, and it warns too.
   Behind a \code{bag_axi2ahb} fed by AXI4-Lite with a beat wider than the word, the tie is
   an error (\ruleid{PORTOPT-PSTRB-SPLIT}), as even full-word writes are corrupted there.
+  So is the tie, or an APB3 bus (\ruleid{FAB-APB3-SPLIT}), behind a bus narrower than the
+  word and the master: that bus splits each write into writes of its width.
   What you can do: write whole words to such slaves.
 \item \textbf{Narrow APB slaves.} \code{bag_axi2apb} splits a beat that is wider than
   the APB bus into several APB transfers. An error on one of them does not stop the
