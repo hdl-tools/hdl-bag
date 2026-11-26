@@ -372,6 +372,9 @@ def check_address_decode(ctx: Context, regions: list[Region]) -> None:
                        f"alias size {_hex(a_size)} must be a power of 2 with base and target aligned to it")  # fmt: skip
             continue
         end = a_base + a_size - 1
+        if a_size < 1024 and proto == "AHB-Lite":  # as for a region (review of #223)
+            ctx.report("MM-SMALL-AHB", alias["Alias size (hex)"],
+                       f"alias {_hex(a_base)}..{_hex(end)} is smaller than 1 KB on AHB-Lite fabric {fabric}: an AHB burst may run on into the next region")  # fmt: skip
         if hit := next(
             (r for r in regions if r.fabric == fabric and r.overlaps(a_base, end)), None
         ):

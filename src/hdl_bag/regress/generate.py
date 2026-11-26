@@ -316,9 +316,11 @@ def _map(d: _Draw, fab: _Fabric, base: int, size: int) -> None:
     slots = least = 1 << (n - 1).bit_length()
     if not d.dense:
         slots *= rng.choice((2, 4))
-    while slots > least and size // slots < _slot_need(d, fab):
+    need = _slot_need(d, fab)
+    while slots > least and size // slots < need:
         slots //= 2  # fewer gaps, so every target still fits its floor
     slot = size // slots
+    assert slot >= need, f"{fab.name}: a {slot:#x} slot under its {need:#x} floor"
     picks = list(range(n)) if d.dense else sorted(rng.sample(range(slots), n))
     for t, k in zip(fab.targets, picks, strict=True):
         at = base + k * slot
