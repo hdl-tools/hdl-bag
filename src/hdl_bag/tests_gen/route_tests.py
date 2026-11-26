@@ -301,6 +301,11 @@ def _expected_resp(m: Any, exp: Any, write: bool, slave_code: int | None = None)
         code = 0 if exp.masked else AXI_RESP[exp.miss]
     elif slave_code is not None:
         code = slave_code
+    elif exp.partial and not exp.hits_error_word:
+        # The missing transfers' answer. shortcut: taken as what the merged response reports;
+        # an AXI4 downsizer merging DECERR with OKAY is not seen in sim yet, check it if a
+        # config with such a miss on an all-AXI path comes up.
+        code = AXI_RESP[exp.partial]
     else:
         code = 2 if exp.slave_error else 0
     protocols = {f.name: f.protocol for f in SPEC.fabrics}

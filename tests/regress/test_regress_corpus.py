@@ -38,6 +38,10 @@ SEEDS = {
     202611250040: ("sim", "every_master_reaches_what_the_model_says", "#209",
                    "a downsizer after an 8-bit split and an AXI4-Lite re-widening starts each "
                    "transfer at its own byte"),
+    202611200006: ("sim", "every_master_reaches_what_the_model_says", "#226",
+                   "a split access whose later transfer misses the slave's region is an error "
+                   "(shrunk at 13a322e for #214's route test, it drifted to this: a 4-byte "
+                   "region)"),
     202611240002: ("sim", "narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", "#202",
                    "the narrow-APB byte write takes only a path that keeps the strobes "
                    "(a bridge with PSTRB tied stores the whole word)"),

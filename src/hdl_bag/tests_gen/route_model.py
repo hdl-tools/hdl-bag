@@ -49,6 +49,8 @@ class Outcome:
     words: frozenset[int] = frozenset()  # slave words (index) the access may reach
     may_refuse: bool = False  # D104: a converter on the way can answer SLVERR
     span: int = 0  # bytes of the access the narrowest bus on the way carries
+    # A split access some of whose transfers miss: that fabric's miss response (#216).
+    partial: str | None = None
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -196,6 +198,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # starts at its own address: an AXI4-Lite bus widens each to its beat, and a downsizer after
     # it starts back at the transfer's address (seed 202611250040).
     split = False
+    partial = None  # the miss response of a fabric where some of its transfers miss
     # The narrowest bus so far, and the bytes of the access it carries (reads_per_word).
     narrowest, carried = fabric.data_width, hi - lo
     # Where the access now starts, relative to addr: a read that crossed AHB-Lite starts at its
@@ -221,6 +224,18 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         if target is None:
             decode = next(d for d in fabric.decode if d.master == master)
             return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
+        # A fabric carries an access its beats cannot hold in one (wider, or unaligned across a
+        # beat) as transfers of its width, each decoded on its own address: one past the
+        # target's region misses, and the merged response is an error (#216, shrunk
+        # 202611200006 and 202611250042).
+        t = fabric.data_width // 8
+        beats = range((addr + lo) // t * t, addr + hi, t)
+        if (
+            partial is None
+            and len(beats) > 1
+            and any(decide(spec, fabric, master, a, write, nonsec) != target for a in beats)
+        ):
+            partial = next(d for d in fabric.decode if d.master == master).miss
         if target in bridges:
             b = bridges[target]
             # The nearest pass-through N window sets what the slaves behind it see; a
@@ -270,11 +285,16 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         # The access reaches every slave word its byte interval touches.
         first = (visible + lo) // word * word
         words = {a // word for a in range(first, visible + hi, word)}
+        if partial is not None:  # only the words in the target's region reach it (#216)
+            words = {w for w in words
+                     if decide(spec, fabric, master, addr + w * word - visible, write, nonsec)
+                     == target}  # fmt: skip
         error = bool(words & {e // word for e in error_words(spec, target)})
         return Outcome(
-            target, visible, masked=masked, slave_error=error and not masked, nonsec=nonsec,
-            bridges=tuple(crossed), hits_error_word=error, word_bytes=word, words=frozenset(words),
-            may_refuse=_may_refuse(spec, origin, tuple(crossed), target), span=carried,
+            target, visible, masked=masked, slave_error=(error or partial is not None) and not masked,
+            nonsec=nonsec, bridges=tuple(crossed), hits_error_word=error, word_bytes=word,
+            words=frozenset(words), may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
+            span=carried, partial=partial,
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -970,7 +990,7 @@ def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, 
         outside = [(a, v) for a, v in got.items() if a // exp.word_bytes not in words]
         assert not outside, f"{where}: stored {_bytes(outside)}, outside the words written"
         got = {a: v for a, v in got.items() if a in want}
-    if exp.hits_error_word:
+    if exp.hits_error_word or exp.partial:  # the transfers that missed stored nothing (#216)
         assert got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
         )
@@ -1008,6 +1028,8 @@ def check_read(where: str, exp: Outcome, length: int, touched: list[int],
         f"{where}: read an address twice: {[hex(a) for a in touched]}"
     )
     need = {a // word for a in range(exp.address, exp.address + length)}
+    if exp.partial:  # the transfers that missed never reach it (#216)
+        need &= exp.words
     assert need <= seen, f"{where}: read words {_words(seen, word)}, needs {_words(need, word)}"
     extra = seen - exp.words - need
     assert not extra, f"{where}: read words {_words(extra, word)}, beyond {_words(exp.words, word)}"
