@@ -33,6 +33,7 @@ from hdl_bag.tests_gen.route_model import (
     private_words,
     pstrb_path,
     region_edges,
+    route,
     split_error_word,
     stores_single_bytes,
 )
@@ -44,6 +45,24 @@ def _unaligned_path(spec: Spec) -> bool:
     """An AXI master reaches, without error, a slave that stores a partial write as one."""
     return any((found := plain_word(spec, m, s)) and stores_single_bytes(spec, found[1])
                for m in spec.masters if m.protocol in _AXI for s in spec.slaves)  # fmt: skip
+
+
+def _ordering_ports(spec: Spec) -> bool:
+    """An AXI master that reaches a slave, or an AXI slave something reaches, with an access
+    at a region's base that is neither refused (D104) nor an error: what the handshake-ordering
+    test plans traffic from (route_tests._ordering_targets; review of #218)."""
+    axi = {x.name for x in spec.masters if x.protocol in _AXI}
+    axi |= {x.name for x in spec.slaves if x.protocol in _AXI}
+    for m in spec.masters:
+        for r in spec.memory_map:
+            if r.base >= 1 << m.addr_width:
+                continue
+            for write in (True, False):
+                o = route(spec, m.name, r.base, write, False, {})
+                usable = o.slave is not None and not (o.may_refuse or o.slave_error or o.miss)
+                if usable and (m.name in axi or o.slave in axi):
+                    return True
+    return False
 
 
 def _split_path(spec: Spec) -> bool:
@@ -105,8 +124,7 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("single_bytes_reach_both_ends_of_every_region", 1000, lambda s: any(
         region_edges(s, m) for m in s.masters)),
     GeneratedTest("apb_byte_writes_carry_pstrb", 50, lambda s: _any_pair(s, pstrb_path)),
-    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, lambda s: any(
-        x.protocol in _AXI for x in s.masters) or any(x.protocol in _AXI for x in s.slaves)),
+    GeneratedTest("axi_ports_take_every_handshake_ordering", 3000, _ordering_ports),
 )  # fmt: skip
 
 

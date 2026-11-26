@@ -33,7 +33,7 @@ from cocotbext.axi import AxiBurstType, AxiLockType
 
 from hdl_bag import __version__
 from hdl_bag.bursts import FIXED, INCR
-from hdl_bag.formal_gen.depth import unreachable_slaves
+from hdl_bag.formal_gen.depth import reachable
 from hdl_bag.ir import Spec, load
 from hdl_bag.naming import flat_signal_name
 from hdl_bag.protocols import OPTIONAL_SIGNAL_NAMES, PROTO_TOKEN, Protocol, port_signals
@@ -1488,8 +1488,8 @@ async def axi_ports_take_every_handshake_ordering(dut: Any) -> None:
     Every AXI port must be reached on the channels its regions allow (_ordering_targets)."""
     masters, slaves, _ = await _bring_up(dut)
     targets, required = _ordering_targets()
-    if not required:
-        return  # no AXI ports
+    # The test applies only where an AXI port is reached (_ordering_ports), so there is traffic.
+    assert targets, "no AXI port is reached, so no ordering can be checked"
     ports = {n: (slaves | masters)[n] for n in required}
     for port in ports.values():
         port.watch_orderings()
@@ -1574,7 +1574,9 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         )
 
     found: list[_Target] = []
-    shut = set(unreachable_slaves(SPEC))  # bag check warns about these (D105)
+    pairs = reachable(SPEC)
+    # Slaves nothing reaches: bag check warns about these (D105).
+    shut = set(_axi_names(SPEC.slaves)) - {s for _, s in pairs}
     for s in sorted(_axi_names(SPEC.slaves) - shut):
         options = [t for r in regions if r.slave == s for m in SPEC.masters
                    if (t := target(r, m.name)) is not None]  # fmt: skip
@@ -1593,7 +1595,9 @@ def _ordering_targets() -> tuple[list[_Target], dict[str, tuple[str, ...]]]:
         # A read-only and a write-only way in together cover all three of its channels.
         if not (found[-1].writes and found[-1].reads):
             found += [t for t in options if t.writes != found[-1].writes][:1]
-    for name in sorted(_axi_names(SPEC.masters)):
+    # A master that reaches no slave has no B or R a model answers, as a slave nothing reaches
+    # has no AW, W or AR (D105; shrunk seed 202611250042).
+    for name in sorted(_axi_names(SPEC.masters) & {m for m, _ in pairs}):
         options = [t for r in regions if (t := target(r, name)) is not None]
         if not options and any(refused(name, r) for r in regions):
             continue
