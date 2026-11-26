@@ -84,6 +84,7 @@ RULES: Final[dict[str, Severity]] = {
     "MM-ADDR-RANGE": E,
     "MM-SLAVE-ALIGN": E,
     "MM-SMALL-AXI": W,
+    "MM-SMALL-AHB": E,
     "MM-PATH-NO-REGION": W,
     "BRIDGE-WINDOW-BASE": E,
     "BRIDGE-WINDOW-EMPTY": E,
