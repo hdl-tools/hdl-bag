@@ -83,13 +83,13 @@ from hdl_bag.tests_gen.route_model import (
     prot_tied,
     pslverr_tied,
     pstrb_path,
+    queued_master,
     reads_per_word,
     refused_access,
     region_edges,
     rewrites_words,
     route,
     saw_access,
-    serialises_writes,
     serves_by_priority,
     split_error_word,
     stores_single_bytes,
@@ -1058,10 +1058,11 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
         last = by_prio[-1] if fixed else order[-1]
         # A master behind a width converter sends one write at a time, and the arbiter rightly
         # serves the low request in the gaps (seed 202611900021): starve with the highest
-        # master whose writes stay queued, else check only that the high one comes first.
-        high = first
-        if fixed:
-            high = next((p for p in by_prio[:-1] if not serialises_writes(SPEC, f, p)), first)
+        # master whose writes stay queued, else check only that the high one comes first
+        # (weaker: round robin would pass it too; the rounds check above still tells them
+        # apart where serves_by_priority holds).
+        queued_by = queued_master(SPEC, f, by_prio) if fixed else None
+        high = queued_by or first
         # Starvation needs every request waiting at the arbiter when the slave opens; a
         # shared-bus mid-point instead absorbs requests during the stall, as they arrive.
         if not buffered:
@@ -1078,12 +1079,15 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
             # Behind adapters, the low request also starts after the _FILL cycles in which the
             # first master's path fills, or it can win any cycle that path's next request is
             # still on its way (seed 202611220033); the slave opens once it has arrived.
-            starve, hold = None, None
+            starve: dict[str, int] | None = None
+            hold: int | None = None
             if delay is not None:
-                starve, hold = {high: 0, last: _FILL}, 20 + _FILL + max(took.values())
+                # Aligned by path latency as the rounds are, then the low one _FILL later.
+                starve = {high: delay[high], last: delay[last] + _FILL}
+                hold = 20 + _FILL + max(took.values())
             order = await _served(masters, slave, clk, owner, jobs, starve, hold)
             pos = order.index(last)
-            if fixed and serialises_writes(SPEC, f, high):
+            if fixed and queued_by is None:
                 assert pos > 0, f"{f.name}: low-priority {last} served before {high}: {order}"
             elif fixed:
                 assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"

@@ -274,16 +274,17 @@ def _reads_a_word_again(spec: Spec) -> bool:
 
 
 def _fixed_priority_top_sends_one_write_at_a_time(spec: Spec) -> bool:
-    """A fixed-priority AXI fabric's contention test whose highest-priority master reaches it
-    through a width converter (serialises_writes): PULP's converters take an AW only once the
-    last write's W has left, so the arbiter sees gaps in that master's queue."""
+    """A fixed-priority AXI fabric's contention test where every master but the last reaches it
+    through an AXI4 width converter, so the starvation check has no master whose writes stay
+    queued (queued_master, as the test body): PULP's converters take an AW only once the last
+    write's W has left, so the arbiter sees gaps in each queue."""
     for f in spec.fabrics:
         if f.protocol not in ("AXI4", "AXI4-Lite") or f.arbitration != "fixed-priority":
             continue
         found = rm.contention(spec, f)
         if found:
-            top = min(found[1], key=lambda p: p.priority or 0).port
-            if rm.serialises_writes(spec, f, top):
+            by_prio = [p.port for p in sorted(found[1], key=lambda p: p.priority or 0)]
+            if rm.queued_master(spec, f, by_prio) is None:
                 return True
     return False
 

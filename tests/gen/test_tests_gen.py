@@ -44,6 +44,7 @@ from hdl_bag.tests_gen.route_model import (
     narrow_apb_path,
     plain_word,
     pstrb_path,
+    queued_master,
     reads_per_word,
     refused_access,
     rewrites_words,
@@ -894,19 +895,27 @@ def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
 def test_a_master_behind_a_width_converter_sends_its_writes_one_at_a_time() -> None:
     """Seed 202611900021: PULP's width converters take an AW only once the last write's W has
     left, so the arbiter sees gaps in such a master's queue; the fixed-priority starvation
-    check then starves with a master whose writes stay queued."""
+    check then starves with a master whose writes stay queued. On AXI4-Lite the width
+    converter passes AW on through a FIFO (review of #243)."""
     f = SimpleNamespace(name="f0")
-    spec = SimpleNamespace(adapters=[
-        SimpleNamespace(fabric="f0", port="m1", template="bag_pc"),
-        SimpleNamespace(fabric="f0", port="m1", template="bag_dw"),
-        SimpleNamespace(fabric="f0", port="m0", template="bag_cut"),
-        SimpleNamespace(fabric="f1", port="m2", template="bag_dw"),
+
+    def ad(port: str, kind: str, index: int, **params: str) -> SimpleNamespace:
+        return SimpleNamespace(fabric="f0", port=port, type=kind, chain_index=index, params=params)
+
+    masters = [SimpleNamespace(name=n, protocol=p)
+               for n, p in (("m1", "AXI4-Lite"), ("m0", "AXI4"), ("m3", "AXI4-Lite"),
+                            ("m4", "AXI4"))]  # fmt: skip
+    spec = SimpleNamespace(masters=masters, adapters=[
+        ad("m1", "pc", 0, to="AXI4"), ad("m1", "dw", 1),  # widened after it becomes AXI4
+        ad("m0", "cut", 0),
+        ad("m3", "dw", 0), ad("m3", "pc", 1, to="AXI4"),  # widened while still Lite
+        ad("m4", "dw", 0),
     ])  # fmt: skip
-    assert serialises_writes(spec, f, "m1")  # type: ignore[arg-type]
-    assert not serialises_writes(spec, f, "m0")  # type: ignore[arg-type]
-    assert not serialises_writes(spec, f, "m2")  # type: ignore[arg-type]
-    route = ROUTE.read_text(encoding="utf-8")
-    assert "if not serialises_writes(SPEC, f, p)), first)" in route
+    assert [serialises_writes(spec, f, m) for m in ("m1", "m0", "m3", "m4")] == [  # type: ignore[arg-type]
+        True, False, False, True]  # fmt: skip
+    assert queued_master(spec, f, ["m1", "m0", "m2"]) == "m0"  # type: ignore[arg-type]
+    assert queued_master(spec, f, ["m1", "m4", "m0"]) is None  # type: ignore[arg-type]
+    assert "queued_master(SPEC, f, by_prio)" in ROUTE.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
