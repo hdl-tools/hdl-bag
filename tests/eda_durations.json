@@ -950,6 +950,7 @@
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611240002]": 60.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611240024]": 60.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611260015]": 60.0,
+ "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611180040]": 120.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611200006]": 60.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[327]": 60.0,
  "tests/regress/test_regress_eda.py::test_a_design_whose_only_width_converter_is_axi4_lite_lints_clean": 0.99,
