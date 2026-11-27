@@ -15,7 +15,9 @@ no longer emits a cover the config can never reach, the step is "no-cover" and t
 the cover.
 """
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,6 +29,7 @@ from hdl_bag.ir import Spec
 from hdl_bag.ir.to_workbook import to_spec_data
 from hdl_bag.shrink.evaluate import build, lint_step
 from hdl_bag.tests_gen import TESTS, applicable_tests
+from hdl_bag.tests_gen import route_model as rm
 from hdl_bag.tests_gen.route_model import plain_word, private_words, stores_single_bytes
 
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
@@ -166,3 +169,165 @@ def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> N
     )
     report = run_tests(out, test_filter=rf"\.{test}$")
     assert report.ok, f"{again}: {[f.format() for f in report.unwaived]}"
+
+
+# ---------------------------------------------------------------- what each sim entry still has
+# Review of #227: a sim entry passing shows only that its test runs and passes; each also
+# keeps the condition its bug needs, so a later change to the model or the config cannot make
+# it pass without checking anything. Each predicate states that condition with the route model.
+
+
+def _accesses(spec: Spec, write: bool) -> Iterator[tuple[Any, int, rm.Outcome]]:
+    for m in spec.masters:
+        for a in rm.probes(spec):
+            if a < 1 << m.addr_width:
+                yield m, a, rm.route(spec, m.name, a, write, False, {})
+
+
+def _bus(spec: Spec, bridge: str) -> Any:
+    b = next(x for x in spec.bridges if x.name == bridge)
+    return next(f for f in spec.fabrics if f.name == b.downstream)
+
+
+def _lite_drops_cache(spec: Spec) -> bool:
+    """#222: a master with CACHE tied to 0 reaches an AXI4 slave across AXI4-Lite, which drops
+    AxCACHE, so the slave sees 0b11."""
+    return any(
+        e.slave in {s.name for s in spec.slaves if s.protocol == "AXI4"}
+        and rm.cache_after_tie(spec, m.name, 0b11) == 0
+        and rm.attributes(spec, m, 0, False, e.bridges, at_slave=True)[3] == 0b11
+        for m, _, e in _accesses(spec, True)
+    )
+
+
+def _partial_miss(spec: Spec) -> bool:
+    """#226: a split access some of whose transfers miss."""
+    return any(e.partial for w in (True, False) for _, _, e in _accesses(spec, w))
+
+
+def _midpoint_one_read(spec: Spec) -> bool:
+    """#200: an AXI4 shared-bus mid-point the test reads through, with Max mst trans 1, a
+    master with IDs and room for more than one read: the guard then admits one read in all
+    (D80), not min(buffered, trans << id_width)."""
+    for f in spec.fabrics:
+        found = rm.midpoint_path(spec, f) if f.protocol == "AXI4" else None
+        if found and f.max_mst_trans == 1 and (found[0].id_width or 0) >= 1 and found[2] > 1:
+            return True
+    return False
+
+
+def _default_only_by_miss(spec: Spec) -> bool:
+    """#200: a default slave no master reaches at its own regions, but some access reaches."""
+    for s in {d.default_slave for f in spec.fabrics for d in f.decode if d.default_slave}:
+        own = [r.base for r in spec.memory_map if r.slave == s]
+        if own and not any(rm.route(spec, m.name, b, True, False, {}).slave == s
+                   for m in spec.masters for b in own if b < 1 << m.addr_width) and any(
+            e.slave == s for _, _, e in _accesses(spec, True)
+        ):  # fmt: skip
+            return True
+    return False
+
+
+def _apb3_before_a_bridge(spec: Spec) -> bool:
+    """#198: an access crosses an APB3 bus (no PPROT) and then another bridge."""
+    return any(
+        e.slave and any(_bus(spec, b).protocol == "APB3" for b in e.bridges[:-1])
+        for _, _, e in _accesses(spec, True)
+    )
+
+
+def _reads_a_word_again(spec: Spec) -> bool:
+    """#212: a read that may reach one slave word more times than its access has bytes: the
+    split beat, re-widened by an AXI4-Lite bus, is wider than the access (reads_per_word's
+    span term; without it the bound is access_bytes)."""
+    return any(e.slave and rm.reads_per_word(spec, m, e) > rm.access_bytes(m)
+               for m, _, e in _accesses(spec, False))  # fmt: skip
+
+
+def _contention_behind_adapters(spec: Spec) -> bool:
+    """#200: an AXI fabric's contention test whose masters sit behind deep adapters (a clock
+    crossing, a FIFO or a multi-stage cut), which absorb more writes than 16 slots per master
+    left room for. (The region's room, set back to 4 KB by hand for 021, is not pinned.)"""
+
+    def deep(a: Any) -> bool:
+        return a.type in ("cdc", "fifo") or (a.type == "cut" and a.params.get("stages", 1) >= 2)
+
+    for f in spec.fabrics:
+        found = rm.contention(spec, f) if f.protocol in ("AXI4", "AXI4-Lite") else None
+        ports = {p.port for p in found[1]} if found else set()
+        if any(a.fabric == f.name and a.port in ports and deep(a) for a in spec.adapters):
+            return True
+    return False
+
+
+def _tied_pstrb_before_narrow_apb(spec: Spec) -> bool:
+    """#202: a plain word of an APB slave narrower than 32 bits through a bridge with PSTRB
+    tied."""
+    for m in spec.masters:
+        for s in spec.slaves:
+            found = plain_word(spec, m, s) if s.protocol in ("APB3", "APB4") else None
+            if (
+                found
+                and 8 < s.data_width < 32
+                and any(
+                    rm._option(spec, b, "pstrb") in ("tie-0", "tie-default")
+                    for b in found[1].bridges
+                )
+            ):
+                return True
+    return False
+
+
+def _refused_miss(spec: Spec) -> bool:
+    """#203: the burst test's miss address is refused by a converter in front of the decode."""
+    for k, m in enumerate(spec.masters):
+        _, miss = rm.burst_path(spec, m, k) if m.protocol == "AXI4" else ([], None)
+        if miss is not None and rm.refused_access(
+            spec, m, rm.route(spec, m.name, miss, False, False, {}), 0, False, miss, 4, 8
+        ):
+            return True
+    return False
+
+
+def _narrow_then(spec: Spec, protocol: str) -> bool:
+    """A read split by a bus narrower than 32 bits, then a PROTOCOL fabric wider than that bus
+    and wider than something after it (a downsizer's way down: the next bus or the slave)."""
+    for _, _, e in _accesses(spec, False):
+        if not e.slave:
+            continue
+        slave = next(s for s in spec.slaves if s.name == e.slave)
+        widths = [_bus(spec, b).data_width for b in e.bridges] + [slave.data_width]
+        kinds = [_bus(spec, b).protocol for b in e.bridges] + ["slave"]
+        for i, w in enumerate(widths[:-1]):
+            for j in range(i + 1, len(widths) - 1):
+                if (w < 32 and kinds[j] == protocol and widths[j] > w
+                        and min(widths[j + 1 :]) < widths[j]):  # fmt: skip
+                    return True
+    return False
+
+
+SIM_CASES: dict[int, Callable[[Spec], bool]] = {
+    202611200006: _partial_miss,
+    202611220012: _midpoint_one_read,
+    # #198, and #226 for the write split past its 4-byte region.
+    202611220017: lambda spec: _apb3_before_a_bridge(spec) and _partial_miss(spec),
+    202611220021: _contention_behind_adapters,
+    # #200: a later AXI4 downsizer no longer trims below the address after the split.
+    202611220028: lambda spec: _narrow_then(spec, "AXI4"),
+    202611220042: _default_only_by_miss,
+    202611240002: _tied_pstrb_before_narrow_apb,
+    202611240024: _refused_miss,
+    # #209: the downsizer after an 8-bit split and an AXI4-Lite re-widening.
+    202611250040: lambda spec: _narrow_then(spec, "AXI4-Lite"),
+    202611260015: _lite_drops_cache,
+    327: _reads_a_word_again,
+}
+
+
+@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] in ("lint", "sim")))
+def test_a_shrunk_seed_keeps_what_its_bug_needs(seed: int) -> None:
+    """Host, no EDA (review of #227): the config still has its bug's condition (SIM_CASES)."""
+    assert seed in SIM_CASES, f"{seed}: no SIM_CASES entry says what its bug needs"
+    assert set(SIM_CASES) <= {s for s, e in SEEDS.items() if e[0] in ("lint", "sim")}
+    _, _, fix, bug = SEEDS[seed]
+    assert SIM_CASES[seed](ir.load(REGRESS / f"{seed}.ir.yaml")), f"{seed} lost it ({fix}: {bug})"
