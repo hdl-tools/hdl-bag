@@ -598,6 +598,10 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
     axi2apb = {b.name for b in spec.bridges if b.template == "bag_axi2apb"}
     if not found or not axi2apb & set(found[1].bridges) or splits_word_writes(spec, found[1]):
         return None
+    # PSTRB tied to 0 on the way or on the slave: no write stores any byte, so the word checks
+    # cannot hold (review of #235; bag check warns, PORTOPT-PSTRB-WORD).
+    if any(_option(spec, p, "pstrb") == "tie-0" for p in (*found[1].bridges, s.name)):
+        return None
     return found
 
 

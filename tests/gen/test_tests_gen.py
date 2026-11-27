@@ -1651,7 +1651,7 @@ def test_no_single_byte_check_behind_a_tied_pstrb_even_onto_an_8_bit_slave(
     tied keeps the narrow-APB test's single-byte check off an 8-bit APB4 slave too. With tie-0
     that is required (no write stores any byte); with tie-default the byte would land (the word
     is the byte), so this only gives up coverage, which is accepted."""
-    from hdl_bag.tests_gen.route_model import byte_write_lands, plain_word
+    from hdl_bag.tests_gen.route_model import byte_write_lands, narrow_apb_path, plain_word
 
     c = Cfg("tied8", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
@@ -1672,3 +1672,6 @@ def test_no_single_byte_check_behind_a_tied_pstrb_even_onto_an_8_bit_slave(
     found = plain_word(spec, spec.masters[0], spec.slaves[0])
     assert found is not None
     assert not byte_write_lands(spec, spec.slaves[0], found[1])
+    # Review of #235: with tie-0 no write stores anything, so the narrow-APB test's word checks
+    # cannot hold either: the path is no narrow-APB word at all. With tie-default it is.
+    assert (narrow_apb_path(spec, spec.masters[0], spec.slaves[0]) is None) == (tie == "tie-0")
