@@ -35,6 +35,9 @@ NO_BIT_LOOP = (
 )
 
 
+LOOP_TIMEOUT = 900  # seconds; seed 202611180040's design takes 10
+
+
 def logic_loop(output: str) -> bool | None:
     """Whether Yosys's output from check names a combinational loop; None when it holds no
     CHECK pass (Yosys or its slang plugin stopped before it)."""
@@ -46,30 +49,41 @@ def logic_loop(output: str) -> bool | None:
 def bit_level_loop(files: Sequence[Path], top: str, root: Path,
                    incdirs: Sequence[Path]) -> bool | None:  # fmt: skip
     """Whether TOP, flattened, has a combinational loop at bit level (D111): Yosys reads FILES
-    with its slang plugin, as the formal flow does, then prep, flatten and check. None when
-    Yosys is not on PATH or did not finish."""
+    with its slang plugin, as the formal flow does, then hierarchy, proc, flatten and check.
+    No optimisation pass runs before check, so a loop is not folded away first (review of
+    #233). It is a structural check of the netlist: it does not follow a loop through a latch
+    or a memory. None when Yosys is not on PATH, fails, or takes longer than LOOP_TIMEOUT.
+    shortcut: the files go into Yosys's -p script, which splits on whitespace, so a path with
+    a space fails the read and gives None (the finding is then kept); write the script to a
+    file with quoted names if lint ever runs on such paths."""
     exe = shutil.which("yosys")
     if exe is None:
         return None
     read = " ".join([*(f"-I {d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files)])
-    script = f"plugin -i slang; read_slang {read} --top {top}; prep -top {top}; flatten; check"
-    proc = subprocess.run([exe, "-p", script], cwd=root, capture_output=True, text=True,
-                          check=False)  # fmt: skip
+    script = (f"plugin -i slang; read_slang {read} --top {top}; hierarchy -top {top}; proc; "
+              "flatten; check")  # fmt: skip
+    try:
+        proc = subprocess.run([exe, "-p", script], cwd=root, capture_output=True, text=True,
+                              check=False, timeout=LOOP_TIMEOUT)  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return None
     return logic_loop(proc.stdout + proc.stderr) if proc.returncode == 0 else None
 
 
 def judge_loops(findings: list[Finding], files: Sequence[Path], top: str, root: Path,
                 incdirs: Sequence[Path], notes: list[str]) -> list[Finding]:  # fmt: skip
     """Waive the unwaived UNOPTFLAT findings when Yosys finds no loop at bit level (D111);
-    keep them when it finds one, or cannot tell (with a note)."""
+    keep them when it finds one, or cannot tell (with a note). The verdict is for the whole
+    design: with one real loop among them, none is waived."""
     loops = [f for f in findings if f.rule == "UNOPTFLAT" and f.waived_by is None]
     if not loops:
         return findings
     found = bit_level_loop(files, top, root, incdirs)
     if found is None:
         notes.append(
-            "Yosys could not check the UNOPTFLAT loop(s) at bit level (yosys with the slang "
-            "plugin, as in the tools image): they are judged as Verilator reports them"
+            "Yosys could not check the UNOPTFLAT loop(s) at bit level (it needs yosys with the "
+            "slang plugin, as in the tools image, and to read the design): they are judged as "
+            "Verilator reports them"
         )
     if found is not False:
         return findings

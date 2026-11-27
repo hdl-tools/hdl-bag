@@ -337,6 +337,40 @@ Found and reported 0 problems.
 """
 
 
+def test_no_yosys_or_a_failed_run_gives_no_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D111, review of #233: without Yosys, or when it fails or runs out of time, there is no
+    verdict (None), so the UNOPTFLAT is kept with a note rather than waived."""
+    import subprocess
+
+    lint_module = import_module("hdl_bag.flows.lint")
+    monkeypatch.setattr(lint_module.shutil, "which", lambda exe: None)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+    monkeypatch.setattr(lint_module.shutil, "which", lambda exe: "/bin/yosys")
+    failed = subprocess.CompletedProcess([], 1, YOSYS_CLEAN, "ERROR: Can't load module")
+    monkeypatch.setattr(lint_module.subprocess, "run", lambda *a, **k: failed)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+
+    def slow(*a: object, **k: object) -> None:
+        raise subprocess.TimeoutExpired("yosys", 1)
+
+    monkeypatch.setattr(lint_module.subprocess, "run", slow)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+    ran = subprocess.CompletedProcess([], 0, YOSYS_CLEAN, "")
+    seen: list[list[str]] = []
+
+    def record(cmd: list[str], **k: object) -> subprocess.CompletedProcess[str]:
+        seen.append(cmd)
+        return ran
+
+    monkeypatch.setattr(lint_module.subprocess, "run", record)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, [Path("inc")]) is False
+    script = seen[0][-1]
+    assert "read_slang -I inc a.sv --top a; hierarchy -top a; proc; flatten; check" in script
+    assert "opt" not in script and "prep" not in script
+
+
 def test_yosys_check_output_says_whether_a_logic_loop_exists() -> None:
     """D111: Yosys's check on the flattened design names a real combinational loop; output with
     no CHECK pass (Yosys or its slang plugin failed) says nothing either way."""
