@@ -353,8 +353,10 @@ unit with one clock domain runs on one clock, and each solver step is one edge.
   \file{bag_fahb.sv} (these file names take the \setting{Module prefix},
   section~\ref{sec:prefix}). The checks that a response comes within a bounded time are off,
   because a port waits as long as the slaves beyond it stall. Tasks: \code{bmc} (depth
-  16), and a \code{cover_<port>} task for each port, at a depth that fits the path from
-  that port to a peer (at least 16). A port whose covers its fabric's route job already
+  16), and a \code{cover_<port>} task for each port, at one and a half times a depth that
+  fits the path from that port to a peer (so at least 24). The estimate can fall short, and
+  a cover search stops once every cover is reached, so the margin costs time only when a
+  cover is unreachable. A port whose covers its fabric's route job already
   holds has no cover task here. This is a bounded check: a cover reached after step
   16 shows that the check can fire there, not that the bmc checked that far.
 \item[\file{<project>_decode}] Address decode: for every fabric that BAG generates, the

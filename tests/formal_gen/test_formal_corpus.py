@@ -368,7 +368,7 @@ def test_a_deep_cover_task_runs_as_a_write_task_and_a_read_task(tmp_path: Path) 
     split = with_direction_split(job, "pmu", zipcpu)
     assert "\ncover_pmu_writes\ncover_pmu_reads\ncover_cpu\n" in split
     assert ("\ncover_pmu_writes: mode cover\ncover_pmu_reads: mode cover\n"
-            "cover_pmu_writes: depth 52\ncover_pmu_reads: depth 52\n") in split  # fmt: skip
+            "cover_pmu_writes: depth 78\ncover_pmu_reads: depth 78\n") in split  # fmt: skip
     assert "\ncover_pmu_writes: smtbmc yices\ncover_pmu_reads: smtbmc yices\n" in split
     assert (
         f" {zipcpu}\ncover_pmu_writes: chparam -set F_OPT_WRITE_ONLY 1 {zipcpu}\n"

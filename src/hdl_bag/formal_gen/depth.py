@@ -15,6 +15,11 @@ shortest netlist path to such a peer, and never below PROTOCOL_DEPTH (16, D77):
   on the path CDC_STEPS more (route jobs: one crossing, no conversion, reached its last cover
   at step 21 of an 8-edge unit).
 
+D116 (owner, 2026-11-27): a port's cover task runs at COVER_MARGIN (1.5) times that depth,
+rounded up: the model undercounts some paths (seed 202611900026: a master's downsizer split each
+write in two across a bridge, 24 steps where the model said 22), and a cover search ends at its
+last reached cover, so the margin costs only an unreachable cover.
+
 Each port's cover task runs at its own depth; the protocol bmc stays at PROTOCOL_DEPTH on every
 design (D79, owner 2026-11-12: at the deepest port's depth the multi-domain designs' bmc would
 not finish), so a cover reached past step 16 shows the check can fire there, not that the bmc
@@ -32,6 +37,7 @@ PATH_EDGES = 8
 PATH_EDGES_PER_HOP = 4
 PATH_EDGES_PER_HALVING = 2
 CDC_STEPS = 8
+COVER_MARGIN = (3, 2)  # D116: cover tasks at 1.5x the path depth
 
 
 def reaching(spec: Spec) -> dict[tuple[str, str], set[str]]:
@@ -109,8 +115,9 @@ def _cost(spec: Spec, netlist: Netlist, a: str, b: str) -> int | None:
 
 
 def port_depths(spec: Spec, netlist: Netlist, ports: list[str]) -> dict[str, int]:
-    """Each of PORTS (external port names) with its protocol depth in solver steps: the nearest
-    peer for each kind of access the port has covers for, and the farther of those two."""
+    """Each of PORTS (external port names) with its cover depth in solver steps: the nearest
+    peer for each kind of access the port has covers for, the farther of those two (never below
+    PROTOCOL_DEPTH), times COVER_MARGIN (D116)."""
     pairs = reaching(spec)
     out = {}
     for port in ports:
@@ -121,7 +128,8 @@ def port_depths(spec: Spec, netlist: Netlist, ports: list[str]) -> dict[str, int
             costs = [c for q in sorted(peers)
                      if (c := _cost(spec, netlist, port, q)) is not None]  # fmt: skip
             nearest += [min(costs)] if costs else []
-        out[port] = max([PROTOCOL_DEPTH, *nearest])
+        num, den = COVER_MARGIN
+        out[port] = -(-max([PROTOCOL_DEPTH, *nearest]) * num // den)
     return out
 
 
