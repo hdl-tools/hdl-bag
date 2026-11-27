@@ -111,11 +111,11 @@ COVER_DEPTH = 80
 
 # Bounded depth for the protocol checkers, in solver steps: their transaction counters have
 # no invariant tying them to the fabric's state, so they are checked to a depth, not proved.
-# The cover task runs at the same depth, so a reached cover is a state the check explored.
 # Owner (2026-11-08): 16, about 40 s on axil_shared_fixed and axil_xbar_rules (20 took them past
 # 10 minutes). D79 (owner, 2026-11-12): the bmc stays at 16 on every design; each port's covers
-# run in a task of their own at that port's path depth (formal_gen.depth, D77), so a cover
-# reached past step 16 shows the check can fire there, but the bmc did not check that far.
+# run in a task of their own at 1.5 times that port's path depth (formal_gen.depth, D77,
+# D116), so a cover reached past step 16 shows the check can fire there, but the bmc did not
+# check that far.
 PROTOCOL_DEPTH = 16
 
 ENGINE = "smtbmc yices"
@@ -558,8 +558,8 @@ def _covers(spec: Spec, bus: Bus, chk: Checker, port: "_Ports") -> list[str]:
     """BAG's own covers on a checked port, so the protocol job shows it checked something
     (ZipCPU's APB files have none, and its AXI4-Lite ones only one per direction): transfers
     completing each way, a wait state, and an error, for what the route model lets cross the
-    port. The cover task runs at the bmc depth, so each one reached is a state the bounded
-    check explored."""
+    port. Each port's cover task runs at its own depth (D79, D116): a cover reached past the
+    bmc depth shows the check can fire there, not that the bmc checked that far."""
 
     def v(sig: str) -> str:
         return _value(spec, bus, sig, port)
