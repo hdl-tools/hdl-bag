@@ -745,7 +745,12 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
       adapter chain, before its fabric (axil_adapters' cpu: bag_dw, then bag_pc), unless a
       CDC, FIFO or register slice comes first (unsettled).
     - w_first (D91): the port enters a downsizing bag_dw, whose bag_axi_dw holds W until it
-      has taken the AW (the downsizer's W beats wait for it)."""
+      has taken the AW (the downsizer's W beats wait for it).
+    - w_first (D117, owner, 2026-11-27; seed 202611900032): the port enters a bag_pc to
+      AXI4-Lite with MaxTrans of 2 or less (D80), then a CDC, FIFO or register slice. The
+      burst splitter arbitrates a new AW only with no write outstanding, when that buffer is
+      empty and takes the AW in the same cycle, so W cannot come first. Straight into a
+      crossbar it can: the crossbar may hold the AW back and still take W."""
     first = _first(netlist, bus)
     out: dict[str, str] = {}
     if first is None:
@@ -765,6 +770,13 @@ def never(spec: Spec, netlist: Netlist, bus: Bus) -> dict[str, str]:
         out["w_first"] = (f"{bus.name} enters {first.name}, a downsizing bag_axi_dw: W waits "
                           "for its AW (D91)")  # fmt: skip
     found = _lite_limit(spec, netlist, bus)
+    if found is not None and found[0] == 0 and len(found[3]) > 1:
+        after = found[3][1]
+        if after.adapter is not None and after.adapter.type in ("cdc", "fifo", "cut"):
+            out.setdefault("w_first", (
+                f"{bus.name} enters {found[1].name}, PULP axi_to_axi_lite with MaxTrans "
+                f"{found[2]}, then a buffer: one write at a time, whose AW the empty buffer "
+                "takes at once (D117)"))  # fmt: skip
     if found is not None and _buffer_in_front(found[3], found[0]) is None:
         k, a, trans, _ = found
         how, why = ("enters", "D80") if k == 0 else ("reaches", "D80, D91")

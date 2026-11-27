@@ -85,6 +85,10 @@ SEEDS = {
                    "config with traffic but no plain word"),
     202611240048: ("absent", "reset_during_traffic_leaves_nothing_behind", "#203",
                    "the reset test's predicate uses the body's helper (plain_word)"),
+    202611900032: ("no-cover", "proto_w_first_m1", "D117",
+                   "an AXI4 master through a MaxTrans-2 bag_pc to AXI4-Lite into a FIFO never "
+                   "takes W first, so the protocol job asserts it absent (unreached through step "
+                   "37; not shrunk: a formal run takes 7 minutes and the config is one fabric)"),
     202611180004: ("no-cover", "proto_wait_m0", "#217",
                    "an APB master that reaches no slave gets no wait cover: the decoder-mux "
                    "answers every transfer itself, with PREADY high (a minimal config: no "
@@ -150,16 +154,21 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
     job still runs for it."""
     _, cover, fix, bug = SEEDS[seed]
     assert cover is not None, f"{seed}: a no-cover entry names its cover"
-    assert cover.startswith("proto_wait_"), cover  # the only kind of cover this guards so far
-    # The label is still one formal_gen emits, so its absence below means something.
-    assert '"proto_wait_' in Path(formal_gen.__file__).read_text(encoding="utf-8")
+    # The kinds of cover this guards so far, each with how formal_gen names it, so that its
+    # absence below means something.
+    labels = {"proto_wait_": '"proto_wait_', "proto_w_first_": '"w_first"'}
+    prefix = next((p for p in labels if cover.startswith(p)), None)
+    assert prefix is not None, cover
+    assert labels[prefix] in Path(formal_gen.__file__).read_text(encoding="utf-8")
     generate(ir.load(REGRESS / f"{seed}.ir.yaml"), tmp_path / "out", REGRESS)
     jobs = sorted((tmp_path / "out" / "formal").glob("*_protocol.sv"))
     assert jobs, f"{seed}: no protocol job"
     text = "".join(p.read_text(encoding="utf-8") for p in jobs)
-    master = cover.removeprefix("proto_wait_")
+    master = cover.removeprefix(prefix)
     assert f"proto_write_{master}: cover" in text and f"proto_read_{master}: cover" in text
     assert f"{cover}: cover" not in text, f"{seed} gets {cover} again ({fix}: {bug})"
+    if prefix == "proto_w_first_":  # never (D117): the job asserts it absent instead
+        assert f"proto_no_w_first_{master}: assert" in text
 
 
 @pytest.mark.eda
