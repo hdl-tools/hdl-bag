@@ -49,9 +49,14 @@ SEEDS = {
     202611220012: ("sim", "axi_shared_bus_midpoint_buffers_reads", "#200",
                    "with Max mst trans 1 the guard's axi_demux_simple admits one read in all "
                    "(D80), not the mid-point's depth (midpoint_reads)"),
+    202611220021: ("sim", "axi_arbitration_rounds_starvation_and_lock", "#200",
+                   "a deep adapter path absorbs more writes than 16 slots per master left room "
+                   "for: up to 64, as the region allows (the shrink cut s1's region to 512 "
+                   "bytes, under even that; it was set back to 4 KB by hand)"),
     202611220028: ("sim", "every_master_reaches_what_the_model_says", "#200",
-                   "a read split by a narrow bus (bag_axil2apb onto 16-bit APB) is several "
-                   "transfers: a later AXI4 downsizer no longer trims the word below the address"),
+                   "a read split by a narrow bus (bag_axi2apb's bag_axil2apb onto 16-bit APB) "
+                   "is several transfers: a later AXI4 downsizer no longer trims the word below "
+                   "the address"),
     202611220042: ("sim", "axi_ports_take_every_handshake_ordering", "#200",
                    "a default slave whose own region is denied (D32) is reached only by misses: "
                    "the ordering test falls back to the probe addresses"),
@@ -118,6 +123,7 @@ def test_a_shrunk_seed_no_longer_gets_the_test_it_failed(seed: int) -> None:
     _, test, fix, bug = SEEDS[seed]
     spec = ir.load(REGRESS / f"{seed}.ir.yaml")
     assert test in {t.name for t in TESTS}, f"{test} is gone, so this entry guards nothing"
+    assert test in ABSENT_CASES, f"{seed}: no ABSENT_CASES entry says why {test} is absent"
     assert ABSENT_CASES[test](spec), f"{seed} is no longer the case {test}'s old predicate took"
     assert test not in applicable_tests(spec), f"{seed} gets {test} again ({fix}: {bug})"
 
