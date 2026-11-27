@@ -206,15 +206,21 @@ def _partial_miss(spec: Spec) -> bool:
 
 
 def _midpoint_one_read(spec: Spec) -> bool:
-    """#200: a shared-bus mid-point the test reads through, with Max mst trans 1 (D80)."""
-    return any(f.max_mst_trans == 1 and rm.midpoint_path(spec, f) for f in spec.fabrics)
+    """#200: an AXI4 shared-bus mid-point the test reads through, with Max mst trans 1, a
+    master with IDs and room for more than one read: the guard then admits one read in all
+    (D80), not min(buffered, trans << id_width)."""
+    for f in spec.fabrics:
+        found = rm.midpoint_path(spec, f) if f.protocol == "AXI4" else None
+        if found and f.max_mst_trans == 1 and (found[0].id_width or 0) >= 1 and found[2] > 1:
+            return True
+    return False
 
 
 def _default_only_by_miss(spec: Spec) -> bool:
     """#200: a default slave no master reaches at its own regions, but some access reaches."""
     for s in {d.default_slave for f in spec.fabrics for d in f.decode if d.default_slave}:
         own = [r.base for r in spec.memory_map if r.slave == s]
-        if not any(rm.route(spec, m.name, b, True, False, {}).slave == s
+        if own and not any(rm.route(spec, m.name, b, True, False, {}).slave == s
                    for m in spec.masters for b in own if b < 1 << m.addr_width) and any(
             e.slave == s for _, _, e in _accesses(spec, True)
         ):  # fmt: skip
@@ -231,17 +237,25 @@ def _apb3_before_a_bridge(spec: Spec) -> bool:
 
 
 def _reads_a_word_again(spec: Spec) -> bool:
-    """#212: a read that may reach one slave word more than once (reads_per_word)."""
-    return any(e.slave and rm.reads_per_word(spec, m, e) > 1 for m, _, e in _accesses(spec, False))
+    """#212: a read that may reach one slave word more times than its access has bytes: the
+    split beat, re-widened by an AXI4-Lite bus, is wider than the access (reads_per_word's
+    span term; without it the bound is access_bytes)."""
+    return any(e.slave and rm.reads_per_word(spec, m, e) > rm.access_bytes(m)
+               for m, _, e in _accesses(spec, False))  # fmt: skip
 
 
 def _contention_behind_adapters(spec: Spec) -> bool:
-    """#200: an AXI fabric's contention test whose masters have adapters (their paths absorb
-    writes)."""
+    """#200: an AXI fabric's contention test whose masters sit behind deep adapters (a clock
+    crossing, a FIFO or a multi-stage cut), which absorb more writes than 16 slots per master
+    left room for. (The region's room, set back to 4 KB by hand for 021, is not pinned.)"""
+
+    def deep(a: Any) -> bool:
+        return a.type in ("cdc", "fifo") or (a.type == "cut" and a.params.get("stages", 1) >= 2)
+
     for f in spec.fabrics:
         found = rm.contention(spec, f) if f.protocol in ("AXI4", "AXI4-Lite") else None
         ports = {p.port for p in found[1]} if found else set()
-        if any(a.fabric == f.name and a.port in ports for a in spec.adapters):
+        if any(a.fabric == f.name and a.port in ports and deep(a) for a in spec.adapters):
             return True
     return False
 
@@ -254,7 +268,7 @@ def _tied_pstrb_before_narrow_apb(spec: Spec) -> bool:
             found = plain_word(spec, m, s) if s.protocol in ("APB3", "APB4") else None
             if (
                 found
-                and s.data_width < 32
+                and 8 < s.data_width < 32
                 and any(
                     rm._option(spec, b, "pstrb") in ("tie-0", "tie-default")
                     for b in found[1].bridges
@@ -276,19 +290,27 @@ def _refused_miss(spec: Spec) -> bool:
 
 
 def _narrow_then(spec: Spec, protocol: str) -> bool:
-    """A read split by a bus narrower than 32 bits, and a PROTOCOL fabric later on its way."""
+    """A read split by a bus narrower than 32 bits, then a PROTOCOL fabric wider than that bus
+    and wider than something after it (a downsizer's way down: the next bus or the slave)."""
     for _, _, e in _accesses(spec, False):
-        buses = [_bus(spec, b) for b in e.bridges] if e.slave else []
-        if any(f.data_width < 32 and any(g.protocol == protocol for g in buses[i + 1 :])
-               for i, f in enumerate(buses)):  # fmt: skip
-            return True
+        if not e.slave:
+            continue
+        slave = next(s for s in spec.slaves if s.name == e.slave)
+        widths = [_bus(spec, b).data_width for b in e.bridges] + [slave.data_width]
+        kinds = [_bus(spec, b).protocol for b in e.bridges] + ["slave"]
+        for i, w in enumerate(widths[:-1]):
+            for j in range(i + 1, len(widths) - 1):
+                if (w < 32 and kinds[j] == protocol and widths[j] > w
+                        and min(widths[j + 1 :]) < widths[j]):  # fmt: skip
+                    return True
     return False
 
 
 SIM_CASES: dict[int, Callable[[Spec], bool]] = {
     202611200006: _partial_miss,
     202611220012: _midpoint_one_read,
-    202611220017: _apb3_before_a_bridge,
+    # #198, and #226 for the write split past its 4-byte region.
+    202611220017: lambda spec: _apb3_before_a_bridge(spec) and _partial_miss(spec),
     202611220021: _contention_behind_adapters,
     # #200: a later AXI4 downsizer no longer trims below the address after the split.
     202611220028: lambda spec: _narrow_then(spec, "AXI4"),
@@ -306,5 +328,6 @@ SIM_CASES: dict[int, Callable[[Spec], bool]] = {
 def test_a_shrunk_seed_keeps_what_its_bug_needs(seed: int) -> None:
     """Host, no EDA (review of #227): the config still has its bug's condition (SIM_CASES)."""
     assert seed in SIM_CASES, f"{seed}: no SIM_CASES entry says what its bug needs"
+    assert set(SIM_CASES) <= {s for s, e in SEEDS.items() if e[0] in ("lint", "sim")}
     _, _, fix, bug = SEEDS[seed]
     assert SIM_CASES[seed](ir.load(REGRESS / f"{seed}.ir.yaml")), f"{seed} lost it ({fix}: {bug})"
