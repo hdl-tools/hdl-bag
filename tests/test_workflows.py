@@ -318,7 +318,9 @@ def test_the_nightly_writes_its_report_from_the_artifacts_and_only_reports() -> 
     assert job["permissions"] == {"contents": "read", "actions": "read"}
     run = "\n".join(str(s.get("run", "")) for s in job["steps"])
     assert "gh run download" in run and "-n regress-summary" in run
-    assert "nightly_report(nights" in run
+    assert "--event schedule --branch main" in run  # only the nights, not branch dispatches
+    assert "nightly_report(nights, night, results, gone)" in run  # tonight's missing seeds too
+    assert job["if"] == "${{ !cancelled() }}" and "SEEDS" in job["env"]
     upload = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload"))
     assert upload["with"]["name"] == "nightly-report" and upload["if"] == "always()"
     assert "report" not in jobs["nightly"]["needs"]

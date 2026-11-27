@@ -57,7 +57,31 @@ def test_the_report_has_the_pass_rate_coverage_gaps_and_open_failures() -> None:
             "`bag regress --seed 4 --formal-budget 600` |") in text  # fmt: skip
 
 
-def test_a_night_with_no_failure_says_so() -> None:
-    text = nightly_report([], "2026-11-27", [SeedResult(1, "rnd1", "pass")])
+def test_a_night_with_no_failure_says_so_and_lists_what_was_never_drawn() -> None:
+    """D113: a value the draw can give but no seed has drawn is a gap too."""
+    text = nightly_report([], "2026-11-27", [SeedResult(1, "rnd1", "pass",
+                                                        dimensions={"map": "dense"})])  # fmt: skip
     assert "No open failures tonight." in text
-    assert "No gaps: every value drawn has passed at least once." in text
+    assert "- map: sparse (never drawn)" in text and "- map: dense" not in text
+    assert "- bridges: bag_ahb2apb (never drawn)" in text
+
+
+def test_tonights_missing_seeds_count_against_the_rate_and_are_listed() -> None:
+    """Review of #236: a seed a cut-off job left without a result is the most open failure."""
+    text = nightly_report([], "2026-11-27", [SeedResult(1, "rnd1", "pass")], missing=[2, 3])
+    assert "| 2026-11-27 | 3 | 1 | 0 | 0 | 0 | 2 | 33% |" in text
+    assert "Left no result (their job was cut off): 2, 3." in text
+    assert "No open failures tonight." not in text
+
+
+def test_coverage_buckets_empty_lists_and_orders_counts_as_numbers() -> None:
+    """Review of #236: "no bridges" is a bucket of its own, and 2 comes before 10."""
+    got = coverage([({"bridges": [], "masters": 10}, True), ({"bridges": [], "masters": 2}, False)])
+    assert got["bridges"] == {"(none)": (2, 1)}
+    assert list(got["masters"]) == ["2", "10"]
+
+
+def test_a_finding_stays_on_one_table_row() -> None:
+    bad = SeedResult(5, "rnd5", "fail", "sim", findings=["line one\nline | two"])
+    text = nightly_report([], "2026-11-27", [bad])
+    assert "| 5 | fail | sim | line one line \\| two |" in text

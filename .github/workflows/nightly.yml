@@ -192,7 +192,7 @@ jobs:
     # history lives in the artifacts), so this job reads actions. It only reports: the night's
     # result below does not wait for it.
     needs: [prep, regress]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -200,7 +200,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      RUN_ID: ${{ github.run_id }}
+      SEEDS: ${{ inputs.seeds || '50' }}
       SEED_BASE: ${{ needs.prep.outputs.base }}
     steps:
       - uses: actions/checkout@v4
@@ -215,14 +215,15 @@ jobs:
           path: out/regress
           merge-multiple: true
       - name: Earlier nights
+        # The scheduled nights on main only: a dispatch to test a branch is not a night.
         run: |
           mkdir -p out/history
-          gh run list -R "$REPO" --workflow nightly.yml --status completed --limit 30 \
+          gh run list -R "$REPO" --workflow nightly.yml --event schedule --branch main \
+            --status completed --limit 30 \
             --json databaseId,createdAt -q '.[] | "\(.databaseId) \(.createdAt[:10])"' |
           while read -r id day; do
-            [ "$id" = "$RUN_ID" ] && continue
             gh run download "$id" -R "$REPO" -n regress-summary -D "out/history/$day-$id" \
-              2>/dev/null || true
+              || echo "no regress-summary for run $id ($day)"
           done
       - name: Report
         run: |
@@ -233,7 +234,7 @@ jobs:
           from pathlib import Path
 
           from hdl_bag.regress.report import nightly_report
-          from hdl_bag.regress.run import SeedResult
+          from hdl_bag.regress.run import SeedResult, missing_seeds, seeds
 
           nights = [(p.parent.name[:10], json.loads(p.read_text(encoding="utf-8")))
                     for p in sorted(Path("out/history").glob("*/summary.json"))]
@@ -241,7 +242,8 @@ jobs:
                      for p in sorted(Path("out/regress").glob("*/result.json"))]
           base = os.environ["SEED_BASE"]  # YYYYMMDD, or a seed base given by hand
           night = f"{base[:4]}-{base[4:6]}-{base[6:]}" if len(base) == 8 else base
-          text = nightly_report(nights, night, results)
+          gone = missing_seeds(Path("out/regress"), seeds(int(base), int(os.environ["SEEDS"])))
+          text = nightly_report(nights, night, results, gone)
           Path("out/report/nightly.md").write_text(text, encoding="utf-8")
           EOF
           uv run python out/report.py
