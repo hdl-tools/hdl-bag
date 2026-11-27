@@ -16,5 +16,4 @@ sources:
   - rtl/inhouse/bag_axi2ahb.sv
   - rtl/inhouse/bag_axi2ahb_core.sv
   - rtl/inhouse/bag_axi_from_flat.sv
-qualification: unqualified
 rtl: true

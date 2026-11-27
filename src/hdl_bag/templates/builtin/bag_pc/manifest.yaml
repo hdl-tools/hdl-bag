@@ -17,5 +17,4 @@ sources:
   - rtl/inhouse/bag_axil_from_flat.sv
   - rtl/inhouse/bag_axil_to_axi.sv
   - rtl/inhouse/bag_axil_to_flat.sv
-qualification: unqualified
 rtl: true

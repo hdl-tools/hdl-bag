@@ -56,7 +56,6 @@ sources:
   - bender:axi:axi_dw_converter
   - rtl/inhouse/bag_axi2apb.sv
   - rtl/inhouse/bag_axi_from_flat.sv
-qualification: unqualified
 rtl: true
 ```
 
@@ -78,7 +77,6 @@ rtl: true
 | `opaque` | bool, default `false` | no | The user supplies the RTL. See below |
 | `fifo_depth` | bool, default `true` | no | `false` for a bridge that handles one transfer at a time: `bag check` then warns (`BRIDGE-FIFO-IGNORED`) when the workbook sets a FIFO depth above zero for it |
 | `down_id_width` | int | no | Bridge only: the AXI ID width the bridge drives on an AXI4 downstream bus, where it is a master. `build_netlist` uses it for the bridge's downstream bus, and the checks' ID-width derivation assumes the same value. `bag_ahb2axi` and `bag_apb2axi` set it to 1 |
-| `qualification` | `unqualified` (default) or `qualified` | no | Provenance for a human reader; no code reads it. Every built-in template is `unqualified` |
 
 A manifest key the model does not name is refused when the file is loaded (`extra="forbid"`).
 `licence`, `data_widths`, `param_map` and `port_map` were removed because no code read them and they
@@ -179,7 +177,6 @@ deterministic, as everything BAG generates must be.
 | `fabric`, `bridge`, `adapter` | The IR object of the instance's kind, `None` for the others. Fields are those of `ir/model.py`: for example `fabric.addr_width`, `fabric.arbitration`, `fabric.domain`, `bridge.upstream`, `bridge.window_base`, `bridge.cdc`, `bridge.fifo_depth`, `adapter.fabric` |
 | `spec` | The whole IR. A bridge or adapter template uses it to find its fabric: `spec.fabrics \| selectattr("name", "equalto", adapter.fabric) \| first` |
 | `pkg`, `p` | The parameter package name, and the CamelCase instance name. The generated package declares `<Instance><Param>` constants, so `{{ pkg }}::{{ p }}DataWidth` is the data width of this instance. `bag_axi_xbar` builds that prefix as `{% set t = pkg ~ "::" ~ p %}` |
-| `tables` | The decode tables of a fabric (`None` otherwise) |
 | `bridge_offset(name)` | The pass-through address offset of bridge `name` |
 | `lit(width, value)` | A sized SystemVerilog literal; `-1` means all ones; a value that does not fit is an error |
 | `unit(name)` | The emitted name of an in-house or PULP module, with the project's Module prefix applied. Instantiate a module as `{{ unit("bag_axi_xbar") }}`, never by its bare name |

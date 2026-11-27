@@ -87,11 +87,3 @@ def unused(tool: str, waivers: list[Waiver], linted: list[str]) -> list[Finding]
                 f"waiver for {w.rule} on {w.file} matched nothing")
         for w in waivers if any(fnmatchcase(p, w.file) for p in linted)
     ]  # fmt: skip
-
-
-def apply_waivers(
-    tool: str, findings: list[Finding], waivers: list[Waiver], linted: list[str]
-) -> list[Finding]:
-    """Mark waived findings and add a WAIVER-UNUSED finding per stale waiver."""
-    out, idle = waive(findings, waivers)
-    return out + unused(tool, idle, linted)

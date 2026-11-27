@@ -19,5 +19,4 @@ sources:
   - bender:axi:axi_xbar
   - bender:axi:axi_demux_simple
   - bender:axi:axi_err_slv
-qualification: unqualified
 rtl: true

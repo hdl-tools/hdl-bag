@@ -155,18 +155,11 @@ class Watch:
 def _active(spec: Spec) -> dict[str, set[str]]:
     """Per slave, the accesses some master can bring to it ("read", "write"): the route
     model over its probe addresses, both security states and every alias pin setting."""
-    from hdl_bag.tests_gen.route_model import pin_sets, probes, route
+    from hdl_bag.formal_gen.depth import reaching
 
     out: dict[str, set[str]] = {s.name: set() for s in spec.slaves}
-    addrs = probes(spec)
-    for m in spec.masters:
-        for addr in (a for a in addrs if a < 1 << m.addr_width):
-            for write in (False, True):
-                for nonsec in (False, True):
-                    for pins in pin_sets(spec):
-                        slave = route(spec, m.name, addr, write, nonsec, pins).slave
-                        if slave is not None:
-                            out[slave].add("write" if write else "read")
+    for (_, slave), kinds in reaching(spec).items():
+        out[slave] |= kinds
     return out
 
 

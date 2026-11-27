@@ -19,5 +19,4 @@ arbitration:
   - round-robin
   - fixed-priority
   - single-master
-qualification: unqualified
 opaque: true

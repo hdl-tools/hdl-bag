@@ -14,5 +14,4 @@ arbitration:
 sources:
   - rtl/inhouse/bag_addr_decode.sv
   - rtl/inhouse/bag_apb_mux.sv
-qualification: unqualified
 rtl: true

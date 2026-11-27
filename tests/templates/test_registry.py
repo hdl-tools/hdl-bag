@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The hdl-bag Authors
-from typing import get_args
 
 import pytest
 
@@ -61,18 +60,13 @@ def test_protocol_tables() -> None:
     assert "awid" not in axi and "awuser" not in axi and "awqos" not in axi and "arqos" in axi
 
 
-@pytest.mark.parametrize("key", ["licence", "data_widths", "param_map", "port_map"])
+@pytest.mark.parametrize(
+    "key", ["licence", "data_widths", "param_map", "port_map", "qualification"]
+)
 def test_a_key_no_code_reads_is_refused_rather_than_ignored(key: str) -> None:
-    """These four were once accepted and read by nothing; the licence lives in docs/bom.md."""
+    """These were once accepted and read by nothing; the licence lives in docs/bom.md, and
+    qualification had one value in every built-in manifest (#192)."""
     with pytest.raises(ValueError, match=key):
         Manifest.model_validate({
             "name": "x", "kind": "adapter", "api_version": 1, "description": "",
             "protocols": ["AXI4"], "adapter_type": "cut", key: "x"})  # fmt: skip
-
-
-def test_qualification_is_a_value_the_schema_allows() -> None:
-    """`qualification` is documentation for a human, so its shape is the only thing to keep."""
-    allowed = set(get_args(Manifest.model_fields["qualification"].annotation))
-    reg = builtin_registry()
-    used = {m.qualification for n in reg.names() if (m := reg.get(n))}
-    assert used and used <= allowed
