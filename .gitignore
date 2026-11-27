@@ -47,3 +47,5 @@ docs/manual/*.lof
 docs/manual/*.lot
 docs/manual/*.synctex.gz
 .~lock.*#
+# mutmut's working copy (D112)
+mutants/

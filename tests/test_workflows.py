@@ -331,11 +331,21 @@ def test_the_nightly_runs_mutmut_on_the_checks_and_only_reports() -> None:
     import tomllib
 
     jobs = _load("nightly.yml")["jobs"]
-    run = "\n".join(str(s.get("run", "")) for s in jobs["mutmut"]["steps"])
-    assert "uv pip install mutmut==3.8.1" in run
-    assert "timeout 5h uv run --no-sync mutmut run" in run and "|| status=$?" in run
-    assert "mutmut" not in jobs["nightly"]["needs"]
+    job = jobs["mutmut"]
+    run = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "uv sync --locked --group mutation" in run  # the whole closure is locked
+    assert "timeout -k 5m 5h uv run --no-sync mutmut run" in run and "|| status=$?" in run
+    assert "exit $status" not in run  # report only: the status is shown, never raised
+    assert job["timeout-minutes"] * 60 > 5 * 3600 + 5 * 60  # the inner limit ends it first
+    assert job["continue-on-error"] is True and "mutmut" not in jobs["nightly"]["needs"]
+    upload = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload"))
+    assert upload["if"] == "always()"
+    assert {"out/mutmut/results.txt", "mutants/mutmut-stats.json"} <= set(
+        upload["with"]["path"].split()
+    )
     with open(Path(__file__).parents[1] / "pyproject.toml", "rb") as f:
-        config = tomllib.load(f)["tool"]["mutmut"]
+        project = tomllib.load(f)
+    config = project["tool"]["mutmut"]
+    assert project["dependency-groups"]["mutation"] == ["mutmut==3.8.1"]
     assert config["source_paths"] == ["src/hdl_bag/checks/"]
     assert config["pytest_add_cli_args_test_selection"] == ["tests/checks/"]

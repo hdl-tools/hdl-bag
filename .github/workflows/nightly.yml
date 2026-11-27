@@ -262,6 +262,7 @@ jobs:
     if: ${{ !inputs.regress_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    continue-on-error: true  # report only: even a failed setup leaves the run's result alone
     container:
       image: ghcr.io/hdl-tools/hdl-bag-tools:main
       credentials:
@@ -272,15 +273,14 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
-      - run: uv sync --locked
+      - run: uv sync --locked --group mutation
       - name: mutmut (report only)
         run: |
-          uv pip install mutmut==3.8.1
           mkdir -p out/mutmut
           status=0
-          timeout 5h uv run --no-sync mutmut run --max-children 4 > out/mutmut/run.log 2>&1 \
-            || status=$?
-          uv run --no-sync mutmut results > out/mutmut/results.txt 2>&1 || true
+          timeout -k 5m 5h uv run --no-sync mutmut run --max-children 4 \
+            > out/mutmut/run.log 2>&1 || status=$?
+          { uv run --no-sync mutmut results 2>&1 || true; } | sort > out/mutmut/results.txt
           survived=$(grep -c ': survived' out/mutmut/results.txt || true)
           {
             echo "## mutmut (D112, report only): src/hdl_bag/checks/ against tests/checks"
@@ -294,6 +294,7 @@ jobs:
           name: mutmut
           path: |
             out/mutmut/results.txt
+            out/mutmut/run.log
             mutants/mutmut-stats.json
           if-no-files-found: ignore
           retention-days: 90

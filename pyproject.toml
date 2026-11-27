@@ -39,6 +39,8 @@ bag = "hdl_bag.cli:main"
 hdl-bag = "hdl_bag.cli:main"
 
 [dependency-groups]
+# D112: the nightly's mutation testing (uv sync --group mutation), locked like the rest.
+mutation = ["mutmut==3.8.1"]
 dev = [
     "hypothesis>=6.100",
     "mypy>=1.10",
@@ -89,7 +91,7 @@ markers = [
 # tests; mutmut copies only what it mutates, so the rest the tests import is copied too.
 source_paths = ["src/hdl_bag/checks/"]
 pytest_add_cli_args_test_selection = ["tests/checks/"]
-also_copy = ["tests/", "src/hdl_bag/", "README.md", "docs/", "pyproject.toml"]
+also_copy = ["tests/", "src/hdl_bag/", "README.md", "pyproject.toml"]
 
 [tool.ruff.lint.per-file-ignores]
 # Header comments, notes and formulas are schema text; keep them verbatim on one line.
