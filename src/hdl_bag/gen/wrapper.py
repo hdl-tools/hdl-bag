@@ -358,7 +358,6 @@ def render_instance_ctx(scope: Scope, inst: Instance) -> tuple[str, InstanceCont
         adapter=inst.adapter,
         spec=scope.spec,
         bridge_offset=lambda name: bridge_offset(scope.spec, name),
-        tables=decode_tables(fab, fabric_offset(scope.spec, fab)) if fab else None,
         lit=lit,
         unit=lambda n: unit(scope.spec, n),
         opaque_module=lambda f: opaque_module(scope.spec, f),

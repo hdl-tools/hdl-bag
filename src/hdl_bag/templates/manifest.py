@@ -39,8 +39,6 @@ class Manifest(BaseModel):
     # bridge: False when it handles one transfer at a time and ignores Bridges > FIFO depth.
     fifo_depth: bool = True
     sources: tuple[str, ...] = ()  # Bender target "bender:<pkg>:<module>" or repo file paths
-    # Provenance for a human reader; no code reads it.
-    qualification: Literal["unqualified", "qualified"] = "unqualified"
     opaque: bool = False  # True: user supplies the RTL (bag_external)
     # Generation: a template with RTL has an instance.sv.j2 next to its manifest that
     # renders one instantiation; templates without RTL yet stop `bag generate`.

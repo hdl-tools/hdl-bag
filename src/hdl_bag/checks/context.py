@@ -240,10 +240,6 @@ class Context:
         row = self.fabric_row(fabric)
         return self.protocol(row["Protocol"]) if row else None
 
-    def fabric_topology(self, fabric: str) -> str | None:
-        row = self.fabric_row(fabric)
-        return self.text(row["Topology"]) if row else None
-
     def port_protocol(self, port: str, side: Literal["master", "slave"]) -> Protocol | None:
         """Protocol of a master/slave, or of a bridge end (= that fabric's protocol)."""
         kind = self.kinds.get(port)

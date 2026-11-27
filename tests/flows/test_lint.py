@@ -10,7 +10,7 @@ import pytest
 from hdl_bag.flows import Finding, Report, WaiverError, lint, load_waivers
 from hdl_bag.flows.backends import BACKENDS, Slang, Verible, Verilator, parse_flags, slang_flags
 from hdl_bag.flows.formal import SymbiYosys
-from hdl_bag.flows.waivers import Waiver, apply_waivers
+from hdl_bag.flows.waivers import Waiver, unused, waive
 
 ROOT = Path("/run")
 
@@ -86,12 +86,15 @@ def _waiver(**kw: object) -> Waiver:
 def test_waiver_marks_finding_and_reports_stale_ones() -> None:
     findings = Verilator().parse(VERILATOR_OUT, ROOT)
     used, stale = _waiver(match="spare"), _waiver(rule="WIDTH")
-    out = apply_waivers("verilator", findings, [used, stale], ["rtl/top.sv"])
+    # The composition lint() performs: waive, then report the idle waivers as unused.
+    out, idle = waive(findings, [used, stale])
     assert [f.waived_by for f in out[:2]] == ["r", None]
-    assert out[2].rule == "WAIVER-UNUSED" and "WIDTH" in out[2].message
+    assert idle == [stale]
+    [stale_finding] = unused("verilator", idle, ["rtl/top.sv"])
+    assert stale_finding.rule == "WAIVER-UNUSED" and "WIDTH" in stale_finding.message
     # A waiver for a file that was not linted is not stale.
     other = _waiver(file="rtl/other.sv")
-    assert apply_waivers("verilator", [], [other], ["rtl/top.sv"]) == []
+    assert unused("verilator", waive([], [other])[1], ["rtl/top.sv"]) == []
 
 
 @pytest.mark.parametrize(

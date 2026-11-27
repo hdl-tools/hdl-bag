@@ -29,5 +29,4 @@ sources:
   - bender:axi:axi_fifo
   - bender:axi:axi_cut
   - bender:axi:axi_multicut
-qualification: unqualified
 rtl: true

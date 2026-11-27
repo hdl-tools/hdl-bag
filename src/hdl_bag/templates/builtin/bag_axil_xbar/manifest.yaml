@@ -19,5 +19,4 @@ sources:
   - rtl/inhouse/bag_axil_xbar.sv
   - bender:axi:axi_lite_xbar
   - bender:axi:axi_lite_demux
-qualification: unqualified
 rtl: true
