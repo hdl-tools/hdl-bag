@@ -1603,3 +1603,33 @@ def test_two_masters_never_plan_the_same_slave_word(tmp_path: Path) -> None:
             assert (e.slave, e.address) not in seen, (m.name, hex(a), seen[e.slave, e.address])
             seen[e.slave, e.address] = m.name
     assert set(seen.values()) == {"m0", "m1"}
+
+
+def test_a_word_split_by_an_earlier_narrow_bus_is_no_narrow_apb_word(tmp_path: Path) -> None:
+    """Seed 202611210018: an 8-bit APB4 bus on the way splits every word write into byte writes,
+    so the 16-bit APB4 slave behind it takes one write per byte, not one per 16-bit word: the
+    narrow-APB test's word check does not apply on such a path."""
+    from hdl_bag.tests_gen.route_model import narrow_apb_path
+
+    c = Cfg("narrowsplit", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p8", "APB4", 8, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b0", 0).link("b0", "p8", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x1_0000)
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_apb2axi")
+    c.link("p8", "b1", 0).link("b1", "l", 0).decode("b1", "DECERR").option("b1", **AXIL_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("p16", "APB4", 16, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("l", "b2", 0).link("b2", "p16", 0).decode("b2", "PSLVERR").option("b2", **APB4_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 16, 32, "D0").link("p16", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    assert narrow_apb_path(spec, spec.masters[0], spec.slaves[0]) is None
