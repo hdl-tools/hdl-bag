@@ -854,6 +854,8 @@ The rules for each region:
   (\ruleid{MM-SMALL-AHB}). AHB bursts stop only at a 1~KB boundary, so a burst could run on
   from a small region into the next one, whose target would then see a SEQ transfer with no
   NONSEQ first. A slave there therefore needs an address width of at least 10 bits.
+\item A slave region smaller than the slave's data word gives a warning
+  (\ruleid{MM-REGION-WORD}): every access of a whole word spills past the region.
 \item A connected slave without any region gives a warning (\ruleid{MM-PATH-NO-REGION}).
 \end{itemize}
 

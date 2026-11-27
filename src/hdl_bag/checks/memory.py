@@ -197,6 +197,13 @@ def check_memory_map(ctx: Context) -> list[Region]:
         if size < 1024 and ctx.fabric_protocol(fabric) == "AHB-Lite":
             ctx.report("MM-SMALL-AHB", row["Size (hex)"],
                        f"{target} region {rname} is smaller than 1 KB on AHB-Lite fabric {fabric}: an AHB burst may run on into the next region")  # fmt: skip
+        # D115: a region smaller than its slave's data word: a word access to it always spills
+        # past the region (seed 202611240034's shrink left a 1-byte one).
+        if ctx.kinds[target] == "slave":
+            word = ctx.integer(ctx.defs[target]["Data width (bits)"], minimum=8)
+            if isinstance(word, int) and size < word // 8:
+                ctx.report("MM-REGION-WORD", row["Size (hex)"],
+                           f"{target} region {rname} ({size} bytes) is smaller than its {word}-bit data word: every word access to it spills past the region")  # fmt: skip
         regions.append(r)
 
     listed = {r["Slave / bridge"].value for r in ctx.raw.memory_map}

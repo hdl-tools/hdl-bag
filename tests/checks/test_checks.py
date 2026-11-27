@@ -533,6 +533,8 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Memory_Map row 9: pmu0 region regs is smaller than 4 KB on AXI fabric cfg_bus (MM-SMALL-AXI)"]),
     ("MM-SMALL-AHB", [("Memory_Map", 15, "Size (hex)", "0x0000_0200")],
      ["Memory_Map row 15: itcm0 region mem is smaller than 1 KB on AHB-Lite fabric ahb_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)"]),
+    ("MM-REGION-WORD", [("Memory_Map", 11, "Size (hex)", "0x0000_0002")],
+     ["Memory_Map row 11: uart0 region regs (2 bytes) is smaller than its 32-bit data word: every word access to it spills past the region (MM-REGION-WORD)"]),
     ("MM-SMALL-AHB-window", [("Memory_Map", 16, "Size (hex)", "0x0000_0200")],
      ["Memory_Map row 16: br_ahb2aon region aon is smaller than 1 KB on AHB-Lite fabric ahb_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)"]),
     ("MM-SMALL-AHB-alias", [("Address_Decode", 10, "Alias base (hex)", "0x2000_0000"),
