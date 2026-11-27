@@ -83,6 +83,7 @@ from hdl_bag.tests_gen.route_model import (
     prot_tied,
     pslverr_tied,
     pstrb_path,
+    queued_master,
     reads_per_word,
     refused_access,
     region_edges,
@@ -1055,28 +1056,40 @@ async def axi_arbitration_rounds_starvation_and_lock(dut: Any) -> None:
                     )
         first = by_prio[0] if fixed else order[0]
         last = by_prio[-1] if fixed else order[-1]
+        # A master behind a width converter sends one write at a time, and the arbiter rightly
+        # serves the low request in the gaps (seed 202611900021): starve with the highest
+        # master whose writes stay queued, else check only that the high one comes first
+        # (weaker: round robin would pass it too; the rounds check above still tells them
+        # apart where serves_by_priority holds).
+        queued_by = queued_master(SPEC, f, by_prio) if fixed else None
+        high = queued_by or first
         # Starvation needs every request waiting at the arbiter when the slave opens; a
         # shared-bus mid-point instead absorbs requests during the stall, as they arrive.
         if not buffered:
             # Behind adapters the last-served request can arrive long after the first-served
             # master's writes: queue more than that master's path absorbs while the slave is
             # stalled (measured), so some still wait at the arbiter when it arrives.
-            absorbed = 0 if direct else await _absorbed(masters, slave, clk, first, base[first],
+            absorbed = 0 if direct else await _absorbed(masters, slave, clk, high, base[high],
                                                          slots - 5)  # fmt: skip
             queued = absorbed + 4
             # Jobs use slots 3 to 2 + queued, and the lock check the last one.
-            assert queued <= slots - 3, f"{f.name}: {first} absorbs {absorbed} writes; address plan"
-            jobs = [(first, base[first] + 16 * (3 + k)) for k in range(queued)]
+            assert queued <= slots - 3, f"{f.name}: {high} absorbs {absorbed} writes; address plan"
+            jobs = [(high, base[high] + 16 * (3 + k)) for k in range(queued)]
             jobs.append((last, base[last] + 16 * 3))
             # Behind adapters, the low request also starts after the _FILL cycles in which the
             # first master's path fills, or it can win any cycle that path's next request is
             # still on its way (seed 202611220033); the slave opens once it has arrived.
-            starve, hold = None, None
+            starve: dict[str, int] | None = None
+            hold: int | None = None
             if delay is not None:
-                starve, hold = {first: 0, last: _FILL}, 20 + _FILL + max(took.values())
+                # Aligned by path latency as the rounds are, then the low one _FILL later.
+                starve = {high: delay[high], last: delay[last] + _FILL}
+                hold = 20 + _FILL + max(took.values())
             order = await _served(masters, slave, clk, owner, jobs, starve, hold)
             pos = order.index(last)
-            if fixed:
+            if fixed and queued_by is None:
+                assert pos > 0, f"{f.name}: low-priority {last} served before {high}: {order}"
+            elif fixed:
                 assert pos == len(order) - 1, f"{f.name}: low-priority {last} at {pos} in {order}"
             elif direct:
                 assert pos <= 1, f"{f.name}: round robin starved {last}: {order}"

@@ -93,6 +93,10 @@ SEEDS = {
                    "an APB master that reaches no slave gets no wait cover: the decoder-mux "
                    "answers every transfer itself, with PREADY high (a minimal config: no "
                    "region, where the seed's Access_Rules denied m0)"),
+    202611900021: ("sim", "axi_arbitration_rounds_starvation_and_lock", "serial-writes",
+                   "a fixed-priority shared bus whose highest master sits behind a width "
+                   "converter, which sends one write at a time: the low master is rightly served "
+                   "in the gaps (the shrink stopped at its 40-run budget)"),
     202611260015: ("sim", "every_master_reaches_what_the_model_says", "#222",
                    "an AXI4-Lite fabric drops a master's tied AxCACHE, so a pc onto an AXI4 "
                    "slave drives 0b11 (the shrink cut every region; one 4 KB region for s0 was "
@@ -281,6 +285,22 @@ def _reads_a_word_again(spec: Spec) -> bool:
                for m, _, e in _accesses(spec, False))  # fmt: skip
 
 
+def _fixed_priority_top_sends_one_write_at_a_time(spec: Spec) -> bool:
+    """A fixed-priority AXI fabric's contention test where every master but the last reaches it
+    through an AXI4 width converter, so the starvation check has no master whose writes stay
+    queued (queued_master, as the test body): PULP's converters take an AW only once the last
+    write's W has left, so the arbiter sees gaps in each queue."""
+    for f in spec.fabrics:
+        if f.protocol not in ("AXI4", "AXI4-Lite") or f.arbitration != "fixed-priority":
+            continue
+        found = rm.contention(spec, f)
+        if found:
+            by_prio = [p.port for p in sorted(found[1], key=lambda p: p.priority or 0)]
+            if rm.queued_master(spec, f, by_prio) is None:
+                return True
+    return False
+
+
 def _contention_behind_adapters(spec: Spec) -> bool:
     """#200: an AXI fabric's contention test whose masters sit behind deep adapters (a clock
     crossing, a FIFO or a multi-stage cut), which absorb more writes than 16 slots per master
@@ -371,6 +391,7 @@ SIM_CASES: dict[int, Callable[[Spec], bool]] = {
     # #209: the downsizer after an 8-bit split and an AXI4-Lite re-widening.
     202611250040: lambda spec: _narrow_then(spec, "AXI4-Lite"),
     202611260015: _lite_drops_cache,
+    202611900021: _fixed_priority_top_sends_one_write_at_a_time,
     327: _reads_a_word_again,
 }
 

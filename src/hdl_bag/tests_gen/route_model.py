@@ -531,6 +531,29 @@ def serves_by_priority(f: Any, direct: bool, same_clock: bool) -> bool:
     return direct or (same_clock and not midpoint_buffers(f))
 
 
+def serialises_writes(spec: Spec, f: Any, port: str) -> bool:
+    """Whether master PORT's adapter chain to fabric F converts data width on AXI4: PULP's
+    axi_dw_upsizer and axi_dw_downsizer take a new AW only once the last write's W has left
+    (W_IDLE), so between two of its writes the arbiter sees no request of PORT's (seed
+    202611900021). On AXI4-Lite, axi_lite_dw_converter passes AW on through a FIFO. Only the
+    width converters were checked; a small MaxTrans may gap writes too (review of #243)."""
+    chain = sorted((a for a in spec.adapters if a.port == port and a.fabric == f.name),
+                   key=lambda a: a.chain_index)  # fmt: skip
+    protocol = next(m.protocol for m in spec.masters if m.name == port)
+    for a in chain:
+        if a.type == "pc":
+            protocol = str(a.params["to"])
+        elif a.type == "dw" and protocol == "AXI4":
+            return True
+    return False
+
+
+def queued_master(spec: Spec, f: Any, by_prio: list[str]) -> str | None:
+    """The highest of BY_PRIO (fixed-priority order on F) but the last whose writes stay queued
+    at the arbiter (not serialises_writes): the starvation check starves the last with it."""
+    return next((p for p in by_prio[:-1] if not serialises_writes(spec, f, p)), None)
+
+
 def on_fabric_clock(spec: Spec, f: Any, ports: list[Any], slave: str) -> bool:
     """Whether every master of PORTS and SLAVE run on fabric F's clock."""
     domains = {m.domain for m in spec.masters if m.name in {p.port for p in ports}}

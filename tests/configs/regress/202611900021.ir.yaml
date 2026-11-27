@@ -1,0 +1,386 @@
+schema: '0.7'
+project:
+  name: rnd202611900021
+  module_prefix: null
+  revision: seed 202611900021
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/rnd202611900021
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_0
+    mhz: 100
+    source: top port
+    domain: D0
+    reset: rst_0_n
+resets:
+  - name: rst_0_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D0
+fabrics:
+  - name: f0
+    protocol: AXI4
+    topology: shared-bus
+    data_width: 64
+    addr_width: 32
+    domain: D0
+    arbitration: fixed-priority
+    latency_mode: null
+    max_mst_trans: 2
+    max_slv_trans: 1
+    midpoint:
+      fifo_depth: 0
+      slice: none
+    template: bag_axi_shared_bus
+    backing_ip: PULP
+    external_module: null
+    master_ports:
+      - index: 0
+        port: m1
+        priority: 0
+      - index: 1
+        port: m2
+        priority: 2
+    slave_ports:
+      - index: 0
+        port: s2
+        priority: null
+      - index: 1
+        port: br1
+        priority: null
+    id_width:
+      master_side: 1
+      slave_side: 2
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 1
+        slave: br1
+        region: win
+        base: '0x5000_0000'
+        end: '0x50FF_FFFF'
+        access: RW
+        secure: false
+      - slave_port: 0
+        slave: s2
+        region: r0
+        base: '0x7000_0000'
+        end: '0x70FF_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: m1
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+      - master: m2
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+  - name: f2
+    protocol: AXI4-Lite
+    topology: shared-bus
+    data_width: 32
+    addr_width: 32
+    domain: D0
+    arbitration: round-robin
+    latency_mode: null
+    max_mst_trans: 1
+    max_slv_trans: 2
+    midpoint:
+      fifo_depth: 2
+      slice: none
+    template: bag_axil_shared_bus
+    backing_ip: PULP
+    external_module: null
+    master_ports:
+      - index: 0
+        port: br1
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s5
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s5
+        region: r0
+        base: '0x5080_0000'
+        end: '0x5080_003F'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br1
+        miss: SLVERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: m1
+    protocol: AXI4-Lite
+    fabric: f0
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D0
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+  - name: m2
+    protocol: AXI4
+    fabric: f0
+    data_width: 32
+    addr_width: 32
+    id_width: 1
+    user_width: 0
+    domain: D0
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: s2
+    protocol: AXI4-Lite
+    fabric: f0
+    data_width: 32
+    addr_width: 24
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D0
+    error_response: SLVERR
+    wait_states: 0
+  - name: s5
+    protocol: AXI4-Lite
+    fabric: f2
+    data_width: 32
+    addr_width: 16
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D0
+    error_response: SLVERR
+    wait_states: 0
+bridges:
+  - name: br1
+    template: bag_axi2axil
+    upstream: f0
+    downstream: f2
+    window_base: '0x5000_0000'
+    pass_through: true
+    fifo_depth: 0
+    upstream_protocol: AXI4
+    downstream_protocol: AXI4-Lite
+    upstream_width: 64
+    downstream_width: 32
+    cdc: false
+adapters:
+  - name: m1_pc_2_f0
+    type: pc
+    port: m1
+    fabric: f0
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4-Lite
+      to: AXI4
+    placed_in: rnd202611900021_top
+    rtl_name: u_m1_pc_2_f0
+  - name: m1_dw_2_f0
+    type: dw
+    port: m1
+    fabric: f0
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 32
+      to: 64
+    placed_in: rnd202611900021_top
+    rtl_name: u_m1_dw_2_f0
+  - name: m2_dw_2_f0
+    type: dw
+    port: m2
+    fabric: f0
+    chain_index: 0
+    template: bag_dw
+    params:
+      from: 32
+      to: 64
+    placed_in: rnd202611900021_top
+    rtl_name: u_m2_dw_2_f0
+  - name: f0_pc_2_s2
+    type: pc
+    port: s2
+    fabric: f0
+    chain_index: 0
+    template: bag_pc
+    params:
+      from: AXI4
+      to: AXI4-Lite
+    placed_in: rnd202611900021_top
+    rtl_name: u_f0_pc_2_s2
+  - name: f0_dw_2_s2
+    type: dw
+    port: s2
+    fabric: f0
+    chain_index: 1
+    template: bag_dw
+    params:
+      from: 64
+      to: 32
+    placed_in: rnd202611900021_top
+    rtl_name: u_f0_dw_2_s2
+port_options:
+  - port: br1
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: m1
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: m2
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: drive
+    region: drive
+    cache: drive
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: s2
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: s5
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+user_ports: []
+memory_map:
+  - slave: br1
+    region: win
+    base: '0x5000_0000'
+    size: '0x0100_0000'
+    access: RW
+    secure: false
+    fabric: f0
+  - slave: s5
+    region: r0
+    base: '0x5080_0000'
+    size: '0x0000_0040'
+    access: RW
+    secure: false
+    fabric: f2
+  - slave: s2
+    region: r0
+    base: '0x7000_0000'
+    size: '0x0100_0000'
+    access: RW
+    secure: false
+    fabric: f0
+hierarchy:
+  top: rnd202611900021_top
+  wrappers: []
+  placement:
+    - instance: br1
+      kind: bridge
+      wrapper: rnd202611900021_top
+      rtl_name: u_br1
+    - instance: f0
+      kind: fabric
+      wrapper: rnd202611900021_top
+      rtl_name: u_f0
+    - instance: f0_dw_2_s2
+      kind: adapter
+      wrapper: rnd202611900021_top
+      rtl_name: u_f0_dw_2_s2
+    - instance: f0_pc_2_s2
+      kind: adapter
+      wrapper: rnd202611900021_top
+      rtl_name: u_f0_pc_2_s2
+    - instance: f2
+      kind: fabric
+      wrapper: rnd202611900021_top
+      rtl_name: u_f2
+    - instance: m1_dw_2_f0
+      kind: adapter
+      wrapper: rnd202611900021_top
+      rtl_name: u_m1_dw_2_f0
+    - instance: m1_pc_2_f0
+      kind: adapter
+      wrapper: rnd202611900021_top
+      rtl_name: u_m1_pc_2_f0
+    - instance: m2_dw_2_f0
+      kind: adapter
+      wrapper: rnd202611900021_top
+      rtl_name: u_m2_dw_2_f0
+wrapper:
+  top: rnd202611900021_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: rnd202611900021_pkg
+  file_header: null
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br1
+      exposed: false
+      prefix: null
+    - port: m1
+      exposed: true
+      prefix: null
+    - port: m2
+      exposed: true
+      prefix: null
+    - port: s2
+      exposed: true
+      prefix: null
+    - port: s5
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 1.0.0
+  source: rnd202611900021.ir.yaml
+  sha256: 7274d72c9c0c6dc9960528648b6aab3fdbfa92815bba2d7bf4c6c197e8c07702
