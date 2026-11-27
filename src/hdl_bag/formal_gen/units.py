@@ -47,7 +47,7 @@ from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, res
 from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
-from hdl_bag.tests_gen.route_model import window
+from hdl_bag.tests_gen.route_model import decide, window
 
 if TYPE_CHECKING:
     from hdl_bag.formal_gen import Checker
@@ -701,6 +701,16 @@ class _Harness:
                 f"  always @(posedge {clk}) cover_{label}: cover (bag_live_{d} && {resp});",
             ]
 
+    def _contends(self, master: str, ch: str) -> bool:
+        """Whether MASTER sends some request on CH (aw: a write, ar: a read) that this fabric
+        routes to a slave port rather than answering it with an error: only such requests
+        reach the arbiter."""
+        fab = self.inst.fabric
+        assert fab is not None
+        write = ch == "aw"
+        return any(decide(self.spec, fab, master, r.base, write, ns) is not None
+                   for r in fab.addr_rules for ns in (False, True))  # fmt: skip
+
     def arbitration(self) -> None:
         """D70: of two masters that start at the same edge, the one with the lower priority
         value goes first. On a shared bus that is the first address handshake (the mux
@@ -781,6 +791,11 @@ class _Harness:
             for i, mi in enumerate(order):
                 for j, mj in enumerate(order):
                     if i == j or not prio[mi] < prio[mj]:
+                        continue
+                    if axi and not (self._contends(mi, ch) and self._contends(mj, ch)):
+                        # Its _cont term never holds for a master with no slave to send
+                        # this channel to, so the race (and its cover) could not happen
+                        # (seed 202611210011).
                         continue
                     a, b = f"bag_{ch}{i}", f"bag_{ch}{j}"
                     race = f"bag_race_{ch}_{i}_{j}"
