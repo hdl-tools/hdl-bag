@@ -12,7 +12,7 @@ at the commit before its fix (the PR that added it says how). Where the fix was 
 no longer applies (its predicate claimed a config its body could not check), the entry's step
 is "absent" and the test must not be generated for the config. Where the fix was that formal_gen
 no longer emits a cover the config can never reach, the step is "no-cover" and the entry names
-the cover.
+the cover. A "formal" entry names the job and task ("reset:cover") it must now pass.
 """
 
 from collections.abc import Callable, Iterator
@@ -22,11 +22,12 @@ from typing import Any
 import pytest
 
 from hdl_bag import formal_gen, ir
-from hdl_bag.flows import run_tests
+from hdl_bag.flows import run_sby, run_tests
 from hdl_bag.flows.sim import cocotb_tests
 from hdl_bag.gen import generate
 from hdl_bag.ir import Spec
 from hdl_bag.ir.to_workbook import to_spec_data
+from hdl_bag.regress.run import formal_tasks
 from hdl_bag.shrink.evaluate import build, lint_step
 from hdl_bag.tests_gen import TESTS, applicable_tests
 from hdl_bag.tests_gen import route_model as rm
@@ -42,6 +43,9 @@ SEEDS = {
     202611180040: ("lint", None, "#233",
                    "an UNOPTFLAT through whole-struct ports (bag_axi2axil, bag_axi_dw, the PULP "
                    "xbar) is no loop at bit level, so Yosys's check waives it (D111)"),
+    202611170026: ("formal", "reset:cover", "#201",
+                   "the reset job's covers are reached at step 40, one past a cover depth of "
+                   "40: COVER_DEPTH is 80"),
     202611250040: ("sim", "every_master_reaches_what_the_model_says", "#209",
                    "a downsizer after an 8-bit split and an AXI4-Lite re-widening starts each "
                    "transfer at its own byte"),
@@ -158,7 +162,9 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
 
 
 @pytest.mark.eda
-@pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] in ("lint", "sim")))
+@pytest.mark.parametrize(
+    "seed", sorted(s for s, e in SEEDS.items() if e[0] in ("lint", "sim", "formal"))
+)
 def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> None:
     step, test, fix, bug = SEEDS[seed]
     built = build(to_spec_data(ir.load(REGRESS / f"{seed}.ir.yaml")), tmp_path, REGRESS)
@@ -167,6 +173,16 @@ def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> N
     again = f"{seed} fails {step} {test or ''} again ({fix}: {bug})"
     if step == "lint":
         assert lint_step()(spec, out) is None, again
+        return
+    if step == "formal":
+        assert test is not None, f"{seed}: a formal entry names its job:task"
+        job, task = test.split(":")
+        stem = f"{spec.project.name}_{job}"
+        rel = next((r for r, t in formal_tasks(out) if Path(r).stem == stem and t == task), None)
+        assert rel is not None, f"{seed}: {test} is no longer generated, so it checks nothing"
+        root = out.root.resolve()
+        report = run_sby(root / rel, root, task=task)
+        assert report.ok, f"{again}: {[f.format() for f in report.unwaived]}"
         return
     assert out.tests is not None and test in cocotb_tests(out.root.resolve() / out.tests), (
         f"{seed}: {test} is no longer generated for it, so it checks nothing"

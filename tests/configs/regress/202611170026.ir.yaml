@@ -1,0 +1,329 @@
+schema: '0.7'
+project:
+  name: rnd202611170026
+  module_prefix: null
+  revision: seed 202611170026
+  author: BAG
+  sv_std: IEEE 1800-2017
+  output_dir: out/rnd202611170026
+  outputs:
+    rtl: true
+    c_header: true
+    doc: true
+    tests: true
+    formal: true
+  lint_tools:
+    - slang
+    - verilator
+    - verible
+  simulator: verilator
+clocks:
+  - name: clk_0
+    mhz: 100
+    source: top port
+    domain: D0
+    reset: rst_0_n
+  - name: clk_1
+    mhz: 100
+    source: top port
+    domain: D1
+    reset: rst_1_n
+  - name: clk_2
+    mhz: 100
+    source: top port
+    domain: D2
+    reset: rst_2_n
+resets:
+  - name: rst_0_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D0
+  - name: rst_1_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D1
+  - name: rst_2_n
+    polarity: active-low
+    assertion: async
+    deassertion: sync
+    source: top port
+    domain: D2
+fabrics:
+  - name: f0
+    protocol: AHB-Lite
+    topology: single-layer
+    data_width: 32
+    addr_width: 32
+    domain: D0
+    arbitration: single-master
+    latency_mode: null
+    max_mst_trans: null
+    max_slv_trans: null
+    midpoint: null
+    template: bag_ahb_lite_bus
+    backing_ip: in-house template
+    external_module: null
+    master_ports:
+      - index: 0
+        port: m0
+        priority: null
+    slave_ports:
+      - index: 0
+        port: br0
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: br0
+        region: win
+        base: '0x4000_0000'
+        end: '0x5FFF_FFFF'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: m0
+        miss: HRESP_ERROR
+        default_slave: null
+        aliases: []
+  - name: f1
+    protocol: AXI4-Lite
+    topology: shared-bus
+    data_width: 32
+    addr_width: 32
+    domain: D1
+    arbitration: round-robin
+    latency_mode: null
+    max_mst_trans: 2
+    max_slv_trans: 1
+    midpoint:
+      fifo_depth: 2
+      slice: multicut-3
+    template: bag_axil_shared_bus
+    backing_ip: PULP
+    external_module: null
+    master_ports:
+      - index: 0
+        port: br0
+        priority: null
+    slave_ports:
+      - index: 0
+        port: s3
+        priority: null
+    id_width: null
+    max_parallel: 1
+    addr_rules:
+      - slave_port: 0
+        slave: s3
+        region: r0
+        base: '0x5800_0000'
+        end: '0x5800_0000'
+        access: RW
+        secure: false
+    access_rules: []
+    decode:
+      - master: br0
+        miss: DECERR
+        default_slave: null
+        aliases: []
+masters:
+  - name: m0
+    protocol: AHB-Lite
+    fabric: f0
+    data_width: 32
+    addr_width: 32
+    id_width: null
+    user_width: 0
+    domain: D0
+    max_outstanding_rd: 1
+    max_outstanding_wr: 1
+slaves:
+  - name: s3
+    protocol: AXI4-Lite
+    fabric: f1
+    data_width: 32
+    addr_width: 12
+    id_width: null
+    id_width_auto: false
+    user_width: 0
+    domain: D0
+    error_response: SLVERR
+    wait_states: 0
+bridges:
+  - name: br0
+    template: bag_ahb2axi
+    upstream: f0
+    downstream: f1
+    window_base: '0x4000_0000'
+    pass_through: true
+    fifo_depth: 1
+    upstream_protocol: AHB-Lite
+    downstream_protocol: AXI4-Lite
+    upstream_width: 32
+    downstream_width: 32
+    cdc: true
+adapters:
+  - name: br0_fifo_2_f1
+    type: fifo
+    port: br0
+    fabric: f1
+    chain_index: 0
+    template: bag_fifo
+    params:
+      depth: 2
+    placed_in: rnd202611170026_top
+    rtl_name: u_br0_fifo_2_f1
+  - name: br0_cut_2_f1
+    type: cut
+    port: br0
+    fabric: f1
+    chain_index: 1
+    template: bag_cut
+    params:
+      stages: 1
+    placed_in: rnd202611170026_top
+    rtl_name: u_br0_cut_2_f1
+  - name: f1_cdc_2_s3
+    type: cdc
+    port: s3
+    fabric: f1
+    chain_index: 0
+    template: bag_cdc
+    params:
+      from: D1
+      to: D0
+    placed_in: rnd202611170026_top
+    rtl_name: u_f1_cdc_2_s3
+  - name: f1_fifo_2_s3
+    type: fifo
+    port: s3
+    fabric: f1
+    chain_index: 1
+    template: bag_fifo
+    params:
+      depth: 2
+    placed_in: rnd202611170026_top
+    rtl_name: u_f1_fifo_2_s3
+  - name: f1_cut_2_s3
+    type: cut
+    port: s3
+    fabric: f1
+    chain_index: 2
+    template: bag_cut
+    params:
+      stages: 2
+    placed_in: rnd202611170026_top
+    rtl_name: u_f1_cut_2_s3
+port_options:
+  - port: br0
+    fifo_depth: 2
+    slice: cut
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+  - port: m0
+    fifo_depth: 0
+    slice: none
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: drive
+    pstrb: n/a
+    pslverr: n/a
+  - port: s3
+    fifo_depth: 2
+    slice: multicut-2
+    prot: drive
+    qos: n/a
+    region: n/a
+    cache: n/a
+    lock: n/a
+    pstrb: n/a
+    pslverr: n/a
+user_ports: []
+memory_map:
+  - slave: br0
+    region: win
+    base: '0x4000_0000'
+    size: '0x2000_0000'
+    access: RW
+    secure: false
+    fabric: f0
+  - slave: s3
+    region: r0
+    base: '0x5800_0000'
+    size: '0x0000_0001'
+    access: RW
+    secure: false
+    fabric: f1
+hierarchy:
+  top: rnd202611170026_top
+  wrappers: []
+  placement:
+    - instance: br0
+      kind: bridge
+      wrapper: rnd202611170026_top
+      rtl_name: u_br0
+    - instance: br0_cut_2_f1
+      kind: adapter
+      wrapper: rnd202611170026_top
+      rtl_name: u_br0_cut_2_f1
+    - instance: br0_fifo_2_f1
+      kind: adapter
+      wrapper: rnd202611170026_top
+      rtl_name: u_br0_fifo_2_f1
+    - instance: f0
+      kind: fabric
+      wrapper: rnd202611170026_top
+      rtl_name: u_f0
+    - instance: f1
+      kind: fabric
+      wrapper: rnd202611170026_top
+      rtl_name: u_f1
+    - instance: f1_cdc_2_s3
+      kind: adapter
+      wrapper: rnd202611170026_top
+      rtl_name: u_f1_cdc_2_s3
+    - instance: f1_cut_2_s3
+      kind: adapter
+      wrapper: rnd202611170026_top
+      rtl_name: u_f1_cut_2_s3
+    - instance: f1_fifo_2_s3
+      kind: adapter
+      wrapper: rnd202611170026_top
+      rtl_name: u_f1_fifo_2_s3
+wrapper:
+  top: rnd202611170026_top
+  port_style: flat
+  signal_pattern: '{port}_{proto}_{signal}'
+  clock_reset_ports: one per domain
+  package: rnd202611170026_pkg
+  file_header: null
+  extra_inputs: []
+  adapter_placement: with fabric
+  adapter_naming: '{from}_{type}_2_{to}'
+  subwrapper_port_naming: '{instance}_{proto}_{signal}'
+  ports:
+    - port: br0
+      exposed: false
+      prefix: null
+    - port: m0
+      exposed: true
+      prefix: null
+    - port: s3
+      exposed: true
+      prefix: null
+provenance:
+  bag_version: 1.0.0
+  source: rnd202611170026.ir.yaml
+  sha256: 6e97769321de1fd39694e8923ae952b970a4acbeb3c00a2d4add29dde30fef13
