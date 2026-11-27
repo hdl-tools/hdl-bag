@@ -534,7 +534,11 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
     ("MM-SMALL-AHB", [("Memory_Map", 15, "Size (hex)", "0x0000_0200")],
      ["Memory_Map row 15: itcm0 region mem is smaller than 1 KB on AHB-Lite fabric ahb_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)"]),
     ("MM-REGION-WORD", [("Memory_Map", 11, "Size (hex)", "0x0000_0002")],
-     ["Memory_Map row 11: uart0 region regs (2 bytes) is smaller than its 32-bit data word: every word access to it spills past the region (MM-REGION-WORD)"]),
+     ["Memory_Map row 11: uart0 region regs (0x0000_0002) is smaller than its 32-bit data word: every word access to it spills past the region. Make it at least 0x0000_0004 (MM-REGION-WORD)"]),
+    # An illegal width is WIDTH-DATA's to report, once (D23; review of #240).
+    ("MM-REGION-WORD-bad-width", [("Slaves", 7, "Data width (bits)", 4),
+                                  ("Memory_Map", 11, "Size (hex)", "0x0000_0002")],
+     ["Slaves row 7: data width 4 is not legal for APB4 (8, 16, 32) (WIDTH-DATA)"]),
     ("MM-SMALL-AHB-window", [("Memory_Map", 16, "Size (hex)", "0x0000_0200")],
      ["Memory_Map row 16: br_ahb2aon region aon is smaller than 1 KB on AHB-Lite fabric ahb_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)"]),
     ("MM-SMALL-AHB-alias", [("Address_Decode", 10, "Alias base (hex)", "0x2000_0000"),
