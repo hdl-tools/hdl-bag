@@ -78,6 +78,23 @@ mount your checkout and install BAG in it. The image is published for
 \code{linux/amd64} and \code{linux/arm64}, so the same tag runs natively on an
 x86-64 Linux machine and on an Apple Silicon Mac.
 
+If you installed BAG from PyPI and have no checkout, use the image tagged with your
+release: \texttt{ghcr.io/hdl-tools/hdl-bag-tools:v\bagversion} for this one. Each release
+tags the image its tools were validated with. The image does not hold BAG, so
+\cmd{uv tool run} installs the same version from PyPI inside the container, with the
+\code{sim} extra that \cmd{bag sim} needs, and a named volume keeps uv's cache between
+runs. Run this from the directory that holds \file{out/}, after \cmd{bag generate} has
+written it there; replace \cmd{bag lint out/} with any other \cmd{bag} command that needs
+the tools:
+
+\lstinputlisting{examples/files/docker-pypi.sh}
+
+For another release, change both versions in it, the image tag and the one after
+\code{==}, to that release. Only the current directory is visible in the container: a
+spec or output directory elsewhere needs its own mount. The container runs as root, so on
+a Linux host the files it writes under \file{out/} belong to root; take them back with
+\cmd{sudo chown -R "$USER" out/} before you write \file{out/} again on the host.
+
 \subsection{Installing the tools on a host}
 \label{sec:install-tools}
 

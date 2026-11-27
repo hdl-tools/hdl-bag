@@ -286,3 +286,24 @@ def test_a_shrink_uses_the_current_shrinker_on_the_failing_commits_code() -> Non
     checkout = next(i for i, u in enumerate(uses) if u.startswith("actions/checkout"))
     first_use = next(i for i, r in enumerate(runs) if "bag shrink" in r)
     assert checkout < overlay < first_use
+
+
+def test_the_manuals_pypi_docker_command_names_this_release() -> None:
+    """The manual's container command for PyPI users (docs/manual/examples/files/docker-pypi.sh)
+    runs this release's BAG in the image the release tags (release.yml tags the validated
+    :main image with the version tag). It is never replayed, as docker cannot run inside the
+    test, so pin both to the package version: a release bump must update it."""
+    from hdl_bag import __version__
+
+    script = (
+        Path(__file__).parents[1] / "docs" / "manual" / "examples" / "files" / "docker-pypi.sh"
+    ).read_text(encoding="utf-8")
+    assert f"ghcr.io/hdl-tools/hdl-bag-tools:v{__version__} " in script, script
+    assert f"--from 'hdl-bag[sim]=={__version__}' " in script, script
+    runs = [str(st.get("run", "")) for job in _load("release.yml")["jobs"].values()
+            for st in job.get("steps", [])]  # fmt: skip
+    # The release tags this image, from the :main image the tag was validated against.
+    tag = '--tag "$repo:${GITHUB_REF_NAME}" "$repo:main"'
+    assert any("repo=ghcr.io/hdl-tools/hdl-bag-tools" in r and tag in r for r in runs), (
+        "release.yml no longer tags the tools image the manual names"
+    )
