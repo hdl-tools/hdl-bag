@@ -1693,3 +1693,45 @@ def test_an_apb_master_whose_accesses_enter_a_bridge_keeps_its_wait_cover(tmp_pa
     generate(resolve(result), tmp_path / "out", tmp_path)
     text = (tmp_path / "out" / "formal" / "apbbridge_protocol.sv").read_text(encoding="utf-8")
     assert "proto_wait_m0: cover" in text
+
+
+def test_no_race_property_for_a_channel_a_master_has_no_target_on(tmp_path: Path) -> None:
+    """Seed 202611210011: D70's race property for two masters on a channel needs both to send
+    a request a slave takes (its _cont term). A master that can write nowhere (here the only
+    region is read-only) never races on AW, so the pair's cover was unreachable (FORMAL-COVER);
+    it is not emitted. The AR pair stays."""
+    c = Cfg("racero", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "fixed-priority", topology="shared-bus")
+    for k, name in enumerate(("m0", "m1")):
+        c.master(name, "AXI4-Lite", 32, 32, "D0").link(name, "f", k, k).decode(name, "DECERR")
+        c.option(name, **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000, access="RO")
+    _, result = check(c, tmp_path)
+    assert not result.errors, [f.message for f in result.errors]
+    spec = resolve(result)
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "racero_route_f.sv").read_text(encoding="utf-8")
+    assert "f_ar_m0_before_m1: assert" in text
+    assert "f_aw_m0_before_m1" not in text
+
+
+def test_a_master_whose_misses_reach_a_default_slave_still_races(tmp_path: Path) -> None:
+    """Review of #239: a write that misses every region goes to the master's default slave, a
+    slave port, so the master contends on AW even when its only region (the default slave's
+    own, read-only) refuses writes. The race pair must stay."""
+    c = Cfg("racedef", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "fixed-priority", topology="shared-bus")
+    for k, name in enumerate(("m0", "m1")):
+        c.master(name, "AXI4-Lite", 32, 32, "D0").link(name, "f", k, k)
+        c.decode(name, "default-slave", default="s0").option(name, **AXIL_NA)
+    c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("f", "s0", 0).option("s0", **AXIL_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000, access="RO")
+    _, result = check(c, tmp_path)
+    assert not result.errors, [f.message for f in result.errors]
+    spec = resolve(result)
+    generate(spec, tmp_path / "out", tmp_path)
+    text = (tmp_path / "out" / "formal" / "racedef_route_f.sv").read_text(encoding="utf-8")
+    assert "f_aw_m0_before_m1: assert" in text
