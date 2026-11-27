@@ -49,6 +49,7 @@ from hdl_bag.tests_gen.route_model import (
     rewrites_words,
     route,
     saw_access,
+    serialises_writes,
     serves_by_priority,
     split_error_word,
     split_refused,
@@ -888,6 +889,24 @@ def test_a_round_is_judged_by_priority_where_every_request_meets_the_arbiter(
     depends on the phase (#204 review)."""
     mid = None if midpoint is None else SimpleNamespace(fifo_depth=midpoint[0], slice=midpoint[1])
     assert serves_by_priority(SimpleNamespace(midpoint=mid), direct, same_clock) is by_priority
+
+
+def test_a_master_behind_a_width_converter_sends_its_writes_one_at_a_time() -> None:
+    """Seed 202611900021: PULP's width converters take an AW only once the last write's W has
+    left, so the arbiter sees gaps in such a master's queue; the fixed-priority starvation
+    check then starves with a master whose writes stay queued."""
+    f = SimpleNamespace(name="f0")
+    spec = SimpleNamespace(adapters=[
+        SimpleNamespace(fabric="f0", port="m1", template="bag_pc"),
+        SimpleNamespace(fabric="f0", port="m1", template="bag_dw"),
+        SimpleNamespace(fabric="f0", port="m0", template="bag_cut"),
+        SimpleNamespace(fabric="f1", port="m2", template="bag_dw"),
+    ])  # fmt: skip
+    assert serialises_writes(spec, f, "m1")  # type: ignore[arg-type]
+    assert not serialises_writes(spec, f, "m0")  # type: ignore[arg-type]
+    assert not serialises_writes(spec, f, "m2")  # type: ignore[arg-type]
+    route = ROUTE.read_text(encoding="utf-8")
+    assert "if not serialises_writes(SPEC, f, p)), first)" in route
 
 
 @pytest.mark.parametrize(

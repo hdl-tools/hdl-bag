@@ -531,6 +531,15 @@ def serves_by_priority(f: Any, direct: bool, same_clock: bool) -> bool:
     return direct or (same_clock and not midpoint_buffers(f))
 
 
+def serialises_writes(spec: Spec, f: Any, port: str) -> bool:
+    """Whether master PORT's adapter chain to fabric F holds a data-width converter: PULP's
+    axi_dw_upsizer and axi_dw_downsizer take a new AW only once the last write's W has left
+    (W_IDLE), so between two of its writes the arbiter sees no request of PORT's (seed
+    202611900021)."""
+    return any(a.fabric == f.name and a.port == port and a.template == "bag_dw"
+               for a in spec.adapters)  # fmt: skip
+
+
 def on_fabric_clock(spec: Spec, f: Any, ports: list[Any], slave: str) -> bool:
     """Whether every master of PORTS and SLAVE run on fabric F's clock."""
     domains = {m.domain for m in spec.masters if m.name in {p.port for p in ports}}
