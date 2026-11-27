@@ -962,15 +962,16 @@ def test_a_port_s_covers_split_into_a_write_task_and_a_read_task(tmp_path: Path)
 
 def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path) -> None:
     """D77, D79: the bmc runs at PROTOCOL_DEPTH; each checked port's covers run in a task of
-    their own, at its path depth (never below 16), reading only that port's covers: its macro
-    keeps BAG's, and chformal drops those inside the other ports' ZipCPU checkers. On
-    bridges_inhouse (one domain, one clock) spi sits behind three bridges from the nearest
-    master that reaches it: 8 edges for one component and 4 for each of the other four."""
+    their own, at 1.5 times its path depth (never below 16; D116), reading only that port's
+    covers: its macro keeps BAG's, and chformal drops those inside the other ports' ZipCPU
+    checkers. On bridges_inhouse (one domain, one clock) spi sits behind three bridges from the
+    nearest master that reaches it: 8 edges for one component and 4 for each of the other four,
+    24 in all and 36 with the margin; cpu's 16 becomes 24."""
     assert (PROTOCOL_DEPTH, PATH_EDGES, PATH_EDGES_PER_HOP) == (16, 8, 4)
     generate(load(P2 / "apb4_rules.ir.yaml"), tmp_path / "a", P2)
     job = (tmp_path / "a" / "formal" / "apb4_rules_protocol.sby").read_text(encoding="utf-8")
     assert "[tasks]\nbmc\ncover_cpu\ncover_dual0\ncover_ro0\ncover_sec0\ncover_wo0\n\n" in job
-    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert f"bmc: depth {PROTOCOL_DEPTH}\ncover_cpu: mode cover\ncover_cpu: depth 24\n" in job
     assert "\ncover_ro0: read_slang -D BAG_COVER_ro0 -D BAG_IDLE_ro0 --extern-modules " in job
     assert "\nbmc: read_slang --extern-modules " in job
     assert ("cover_cpu: chformal -remove -cover bag_apb4_rules_fapb_master_dual0 "
@@ -986,8 +987,8 @@ def test_each_port_covers_at_its_own_path_depth_and_the_bmc_at_16(tmp_path: Path
     assert props.count(": cover (") == sum(b.count(": cover (") for b in inside)
     generate(load(P3 / "bridges_inhouse.ir.yaml"), tmp_path / "b", P3)
     job = (tmp_path / "b" / "formal" / "bridges_inhouse_protocol.sby").read_text(encoding="utf-8")
-    assert "cover_spi: mode cover\ncover_spi: depth 24\n" in job
-    assert "cover_cpu: mode cover\ncover_cpu: depth 16\n" in job
+    assert "cover_spi: mode cover\ncover_spi: depth 36\n" in job
+    assert "cover_cpu: mode cover\ncover_cpu: depth 24\n" in job
     assert f"bmc: mode bmc\nbmc: depth {PROTOCOL_DEPTH}\n" in job
 
 
@@ -1197,10 +1198,10 @@ def test_a_design_in_one_clock_domain_checks_its_ports_on_one_clock(tmp_path: Pa
     generate(load(P3 / "mixed_ahb_secure.ir.yaml"), tmp_path / "one", P3)
     one = tmp_path / "one" / "formal" / "mixed_ahb_secure_protocol.sby"
     job = one.read_text(encoding="utf-8")
-    assert "cover_tcm: depth 16\nmulticlock off\n" in job
+    assert "cover_tcm: depth 24\nmulticlock off\n" in job
     generate(load(P3 / "axil_adapters.ir.yaml"), tmp_path / "two", P3)
     job = (tmp_path / "two" / "formal" / "axil_adapters_protocol.sby").read_text(encoding="utf-8")
-    assert "cover_mem: depth 48\nmulticlock on\n" in job
+    assert "cover_mem: depth 72\nmulticlock on\n" in job
 
 
 def test_a_bridge_in_one_domain_may_forward_the_request_it_is_presented(
@@ -1525,7 +1526,7 @@ def test_a_port_is_as_deep_as_the_longest_kind_of_access_needs(
     costs = {"near": 20, "far": 44}
     monkeypatch.setattr(path_depth, "reaching", lambda spec: pairs)
     monkeypatch.setattr(path_depth, "_cost", lambda s, n, a, b: costs[b if a == "s3" else a])
-    assert path_depth.port_depths(None, None, ["s3"]) == {"s3": 44}  # type: ignore[arg-type]
+    assert path_depth.port_depths(None, None, ["s3"]) == {"s3": 66}  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(("kinds", "place", "found"), [
@@ -1735,3 +1736,15 @@ def test_a_master_whose_misses_reach_a_default_slave_still_races(tmp_path: Path)
     generate(spec, tmp_path / "out", tmp_path)
     text = (tmp_path / "out" / "formal" / "racedef_route_f.sv").read_text(encoding="utf-8")
     assert "f_aw_m0_before_m1: assert" in text
+
+
+def test_a_protocol_cover_runs_at_one_and_a_half_times_its_path_depth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D116 (seed 202611900026): the path model put m0's nearest write at 22 steps, but its
+    downsizer split each write in two across a bridge and the B-stall cover took 24. A cover
+    search ends at its last reached cover, so the margin costs only an unreachable cover."""
+    pairs = {("m0", "s1"): {"read", "write"}}
+    monkeypatch.setattr(path_depth, "reaching", lambda spec: pairs)
+    monkeypatch.setattr(path_depth, "_cost", lambda s, n, a, b: 22)
+    assert path_depth.port_depths(None, None, ["m0"]) == {"m0": 33}  # type: ignore[arg-type]
