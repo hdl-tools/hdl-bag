@@ -51,6 +51,7 @@ from hdl_bag.tests_gen.bfm import (
 )
 from hdl_bag.tests_gen.bfm_axi import ROUNDS, AxiPortMaster, AxiPortSlave, bus
 from hdl_bag.tests_gen.route_model import (
+    ERROR_WORD,
     TRAFFIC_HPROT,
     access_bytes,
     attributes,
@@ -301,7 +302,7 @@ def _expected_resp(m: Any, exp: Any, write: bool, slave_code: int | None = None)
         code = 0 if exp.masked else AXI_RESP[exp.miss]
     elif slave_code is not None:
         code = slave_code
-    elif exp.partial and not exp.hits_error_word:
+    elif exp.partial and exp.slave_error and not exp.hits_error_word:
         # The missing transfers' answer. shortcut: taken as what the merged response reports;
         # an AXI4 downsizer merging DECERR with OKAY is not seen in sim yet, check it if a
         # config with such a miss on an all-AXI path comes up.
@@ -454,7 +455,9 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: {exp.slave} saw AxCACHE {cache:#b}, "
                                 f"expected {want_cache:#b}"
                             )
-                            errors += exp.slave_error
+                            errors += exp.slave_error and (
+                                exp.hits_error_word or not exp.partial
+                            )  # a slave's
                             if write and not exp.slave_error:
                                 written = exp
                             elif not write and written == exp and not exp.slave_error:
@@ -465,7 +468,10 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             coverage.hit(kind, key)
     # A slave with PSLVERR tied never answers an error, so a design of only those shows none;
     # nor does one whose error words only accesses a converter refuses would reach (D104).
-    can_err = not all(pslverr_tied(SPEC, s.name) for s in SPEC.slaves)
+    # A slave error needs a slave that can answer one and a region holding its error word
+    # (ERROR_WORD before the end): a smaller region has none (review of #226).
+    can_err = any(r.size >= ERROR_WORD and not pslverr_tied(SPEC, r.slave)
+                  for r in SPEC.memory_map if r.slave in {s.name for s in SPEC.slaves})  # fmt: skip
     assert checked > 0 and (errors > 0 or refused_errors > 0 or not can_err), (checked, errors)
     assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)

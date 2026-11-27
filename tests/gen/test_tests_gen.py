@@ -1460,8 +1460,54 @@ def test_a_split_read_whose_second_transfer_misses_is_an_error(tmp_path: Path) -
     assert spec is not None, findings
     read = route(spec, "m0", 0x4000_0000, False, False, {})
     assert (read.slave, read.slave_error, read.partial) == ("s0", True, "PSLVERR")
+    assert read.words == {0x4000_0000 // 4}  # the second word misses: it never reaches s0
     write = route(spec, "m0", 0x4000_0000, True, False, {})  # its 4 bytes: one transfer
     assert (write.slave, write.slave_error, write.partial) == ("s0", False, None)
     # Bytes 2 to 5 cross the 32-bit beat: bytes 4 and 5 are a second transfer, and miss.
     late = route(spec, "m0", 0x4000_0002, True, False, {})
     assert (late.slave, late.slave_error, late.partial) == ("s0", True, "PSLVERR")
+
+
+def _split_shapes(tmp_path: Path, shape: str) -> Spec:
+    """Review of #226: variants of the split-miss config. "axi4": s0 straight on the AXI4
+    fabric, which decodes a burst once (bag_axi_guard), so its beats all reach s0. "next":
+    s1's region right after s0's, so the second transfer reaches s1, not a miss. "masked":
+    PSLVERR tied on b0's APB end, which hides the miss behind it."""
+    from hdl_bag.regress.generate import check
+
+    c = Cfg(f"split{shape}", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f0", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 64, 32, "D0").link("m0", "f0", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    if shape == "axi4":
+        c.slave("s0", "AXI4", 32, 32, "D0").link("f0", "s0", 0).option("s0", **AXI4_NA)
+        c.region("s0", "r0", 0x4000_0000, 0x4)
+    else:
+        c.fabric("p", "APB4", 32, 32, "D0")
+        c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+        tie = {"pslverr": "tie-0"} if shape == "masked" else {}
+        c.link("f0", "b0", 0).link("b0", "p", 0).decode("b0", "PSLVERR")
+        c.option("b0", **{**APB4_NA, **tie}).region("b0", "w0", 0x4000_0000, 0x1000)
+        c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+        c.region("s0", "r0", 0x4000_0000, 0x4)
+        if shape == "next":
+            c.slave("s1", "APB4", 32, 32, "D0").link("p", "s1", 1).option("s1", **APB4_NA)
+            c.region("s1", "r0", 0x4000_0004, 0x4)
+    _, result = check(c, tmp_path)
+    assert not result.errors, [f.message for f in result.errors]
+    return resolve(result)
+
+
+@pytest.mark.parametrize("shape", ["axi4", "next", "masked"])
+def test_a_split_access_is_an_error_only_where_a_transfer_really_misses(
+    tmp_path: Path, shape: str
+) -> None:
+    """Review of #226: only a fabric that decodes each transfer (AHB-Lite, APB, AXI4-Lite)
+    can miss one; a transfer another slave takes is not a miss; a tied PSLVERR on the way
+    hides it."""
+    from hdl_bag.tests_gen.route_model import route
+
+    read = route(_split_shapes(tmp_path, shape), "m0", 0x4000_0000, False, False, {})
+    want = {"axi4": (None, False), "next": (None, False), "masked": ("PSLVERR", False)}[shape]
+    assert (read.slave, read.partial, read.slave_error) == ("s0", *want)

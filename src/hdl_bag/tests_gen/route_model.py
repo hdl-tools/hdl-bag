@@ -199,6 +199,8 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # it starts back at the transfer's address (seed 202611250040).
     split = False
     partial = None  # the miss response of a fabric where some of its transfers miss
+    partial_masked = False  # whether an error from there is hidden on its way back
+    reached: list[tuple[int, int]] = []  # [start, end) of the transfers that did not miss
     # The narrowest bus so far, and the bytes of the access it carries (reads_per_word).
     narrowest, carried = fabric.data_width, hi - lo
     # Where the access now starts, relative to addr: a read that crossed AHB-Lite starts at its
@@ -224,18 +226,23 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         if target is None:
             decode = next(d for d in fabric.decode if d.master == master)
             return Outcome(None, masked=masked, bridges=tuple(crossed), miss=decode.miss)
-        # A fabric carries an access its beats cannot hold in one (wider, or unaligned across a
-        # beat) as transfers of its width, each decoded on its own address: one past the
-        # target's region misses, and the merged response is an error (#216, shrunk
-        # 202611200006 and 202611250042).
-        t = fabric.data_width // 8
-        beats = range((addr + lo) // t * t, addr + hi, t)
-        if (
-            partial is None
-            and len(beats) > 1
-            and any(decide(spec, fabric, master, a, write, nonsec) != target for a in beats)
-        ):
-            partial = next(d for d in fabric.decode if d.master == master).miss
+        # A fabric that decodes each transfer (AHB-Lite, APB, AXI4-Lite: separate transactions)
+        # carries an access its beats cannot hold in one (wider, or unaligned across a beat)
+        # as transfers of its width, each decoded on its own address: one past every region
+        # misses, and the merged response is an error (#216, shrunk 202611200006). An AXI4
+        # fabric decodes a burst once (bag_axi_guard), so its beats follow the first (review
+        # of #226). shortcut: a transfer another slave takes is not modelled (that slave is
+        # not expected to see it); revisit if a config packs regions smaller than a beat.
+        beat = fabric.data_width // 8
+        first = (addr + lo) // beat * beat
+        beats = [addr + lo, *range(first + beat, addr + hi, beat)]
+        if partial is None and len(beats) > 1 and fabric.protocol != "AXI4":
+            ends = [*beats[1:], addr + hi]
+            hit = [decide(spec, fabric, master, a, write, nonsec) is not None for a in beats]
+            if not all(hit):
+                partial = next(d for d in fabric.decode if d.master == master).miss
+                partial_masked = masked
+                reached = [(a, e) for a, e, h in zip(beats, ends, hit, strict=True) if h]
         if target in bridges:
             b = bridges[target]
             # The nearest pass-through N window sets what the slaves behind it see; a
@@ -285,13 +292,13 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         # The access reaches every slave word its byte interval touches.
         first = (visible + lo) // word * word
         words = {a // word for a in range(first, visible + hi, word)}
-        if partial is not None:  # only the words in the target's region reach it (#216)
-            words = {w for w in words
-                     if decide(spec, fabric, master, addr + w * word - visible, write, nonsec)
-                     == target}  # fmt: skip
+        if partial is not None:  # only the words of the transfers that did not miss (#216)
+            words = {w for w in words if any(a <= addr + w * word - visible + word - 1 and
+                                             addr + w * word - visible < e for a, e in reached)}  # fmt: skip
         error = bool(words & {e // word for e in error_words(spec, target)})
         return Outcome(
-            target, visible, masked=masked, slave_error=(error or partial is not None) and not masked,
+            target, visible, masked=masked,
+            slave_error=(error and not masked) or (partial is not None and not partial_masked),
             nonsec=nonsec, bridges=tuple(crossed), hits_error_word=error, word_bytes=word,
             words=frozenset(words), may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
             span=carried, partial=partial,
@@ -990,7 +997,14 @@ def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, 
         outside = [(a, v) for a, v in got.items() if a // exp.word_bytes not in words]
         assert not outside, f"{where}: stored {_bytes(outside)}, outside the words written"
         got = {a: v for a, v in got.items() if a in want}
-    if exp.hits_error_word or exp.partial:  # the transfers that missed stored nothing (#216)
+    if exp.partial and not exp.hits_error_word:
+        # The transfers that missed stored nothing; the ones that reached it stored their
+        # bytes (#216, review of #226).
+        inside = {a: v for a, v in want.items() if a // exp.word_bytes in exp.words}
+        assert inside.items() <= got.items() <= want.items(), (
+            f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
+        )
+    elif exp.hits_error_word:
         assert got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
         )
