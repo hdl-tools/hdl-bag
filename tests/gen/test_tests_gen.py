@@ -1641,3 +1641,34 @@ def test_a_word_split_by_an_earlier_narrow_bus_is_no_narrow_apb_word(
     assert found is not None and found[1].bridges == ("b0", "b1", "b2")
     assert splits_word_writes(spec, found[1]) == (width == 8)
     assert (narrow_apb_path(spec, m, s) is None) == (width == 8)
+
+
+@pytest.mark.parametrize("tie", ["tie-0", "tie-default"])
+def test_no_single_byte_check_behind_a_tied_pstrb_even_onto_an_8_bit_slave(
+    tmp_path: Path, tie: str
+) -> None:
+    """Review of #228: since #228 byte_write_lands is stores_single_bytes, so a bridge with PSTRB
+    tied keeps the narrow-APB test's single-byte check off an 8-bit APB4 slave too. With tie-0
+    that is required (no write stores any byte); with tie-default the byte would land (the word
+    is the byte), so this only gives up coverage, which is accepted."""
+    from hdl_bag.tests_gen.route_model import byte_write_lands, plain_word
+
+    c = Cfg("tied8", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB4", 8, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b0", 0).link("b0", "p", 0).decode("b0", "PSLVERR")
+    c.option("b0", **{**APB4_NA, "pstrb": tie}).region("b0", "w0", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB4", 8, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    from hdl_bag.regress.generate import check
+
+    _, result = check(c, tmp_path)
+    assert not result.errors, [f.message for f in result.errors]
+    spec = resolve(result)
+    found = plain_word(spec, spec.masters[0], spec.slaves[0])
+    assert found is not None
+    assert not byte_write_lands(spec, spec.slaves[0], found[1])
