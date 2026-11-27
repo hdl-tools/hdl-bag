@@ -5,8 +5,14 @@
 Vendored third-party RTL (``rtl/vendor/``) is compiled so that its instantiations are
 checked, but its warnings are not judged: they go to ``Report.third_party`` (P3-2).
 Errors anywhere still fail. Verible, which only checks style, skips vendored files.
+
+A Verilator UNOPTFLAT still judged is checked at bit level by Yosys on the flattened design
+(D111): Verilator sees a struct holding signals both ways as one node, so it can report a
+loop that is not there (#196, #215).
 """
 
+import shutil
+import subprocess
 from collections.abc import Sequence
 from importlib.resources import as_file
 from pathlib import Path
@@ -23,6 +29,51 @@ from hdl_bag.flows.base import (
 from hdl_bag.flows.waivers import Waiver, load_waivers, unused, waive
 
 DEFAULT_TOOLS = ("slang", "verilator", "verible")
+
+NO_BIT_LOOP = (
+    "no combinational loop at bit level: Yosys check on the flattened design finds none (D111)"
+)
+
+
+def logic_loop(output: str) -> bool | None:
+    """Whether Yosys's output from check names a combinational loop; None when it holds no
+    CHECK pass (Yosys or its slang plugin stopped before it)."""
+    if "Executing CHECK pass" not in output:
+        return None
+    return "found logic loop" in output
+
+
+def bit_level_loop(files: Sequence[Path], top: str, root: Path,
+                   incdirs: Sequence[Path]) -> bool | None:  # fmt: skip
+    """Whether TOP, flattened, has a combinational loop at bit level (D111): Yosys reads FILES
+    with its slang plugin, as the formal flow does, then prep, flatten and check. None when
+    Yosys is not on PATH or did not finish."""
+    exe = shutil.which("yosys")
+    if exe is None:
+        return None
+    read = " ".join([*(f"-I {d.as_posix()}" for d in incdirs), *(f.as_posix() for f in files)])
+    script = f"plugin -i slang; read_slang {read} --top {top}; prep -top {top}; flatten; check"
+    proc = subprocess.run([exe, "-p", script], cwd=root, capture_output=True, text=True,
+                          check=False)  # fmt: skip
+    return logic_loop(proc.stdout + proc.stderr) if proc.returncode == 0 else None
+
+
+def judge_loops(findings: list[Finding], files: Sequence[Path], top: str, root: Path,
+                incdirs: Sequence[Path], notes: list[str]) -> list[Finding]:  # fmt: skip
+    """Waive the unwaived UNOPTFLAT findings when Yosys finds no loop at bit level (D111);
+    keep them when it finds one, or cannot tell (with a note)."""
+    loops = [f for f in findings if f.rule == "UNOPTFLAT" and f.waived_by is None]
+    if not loops:
+        return findings
+    found = bit_level_loop(files, top, root, incdirs)
+    if found is None:
+        notes.append(
+            "Yosys could not check the UNOPTFLAT loop(s) at bit level (yosys with the slang "
+            "plugin, as in the tools image): they are judged as Verilator reports them"
+        )
+    if found is not False:
+        return findings
+    return [f.waive(NO_BIT_LOOP) if f in loops else f for f in findings]
 
 
 def builtin_waivers(tool: str) -> list[Waiver]:
@@ -68,6 +119,8 @@ def lint(
         ours, theirs = split_third_party(raw)
         third_party += theirs
         marked, idle = waive(ours, waivers)
+        if name == "verilator":
+            marked = judge_loops(marked, list(files), top, root, list(incdirs), notes)
         findings += marked
         stale = unused(name, idle, linted)
         if not stale or any(f.severity == "error" and f.waived_by is None for f in marked):
