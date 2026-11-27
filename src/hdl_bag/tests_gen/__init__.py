@@ -30,7 +30,7 @@ from hdl_bag.tests_gen.route_model import (
     midpoint_path,
     narrow_apb_path,
     plain_word,
-    private_words,
+    private_plans,
     pstrb_path,
     region_edges,
     route,
@@ -98,9 +98,9 @@ TESTS: tuple[GeneratedTest, ...] = (
     GeneratedTest("arbitration_follows_the_fabric_policy", 50, lambda s: any(
         f.protocol == "AHB-Lite" and contention(s, f, secure_too=True) for f in s.fabrics)),
     GeneratedTest("concurrent_traffic_keeps_every_masters_data", 500, lambda s: any(
-        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+        private_plans(s, 8).values())),
     GeneratedTest("traffic_survives_back_pressure_on_every_channel", 500, lambda s: any(
-        private_words(s, m, i, 8) for i, m in enumerate(s.masters))),
+        private_plans(s, 8).values())),
     # The body resets around each slave plain_word reaches (seeds 202611240036, 048).
     GeneratedTest("reset_during_traffic_leaves_nothing_behind", 1000,
                   lambda s: _any_pair(s, plain_word)),

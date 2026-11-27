@@ -385,8 +385,9 @@ def crossing_masters(spec: Spec) -> list[str]:
     """Masters whose own traffic words (private_words, as _traffic uses them) cross a clock
     domain boundary."""
     out = []
-    for i, m in enumerate(spec.masters):
-        words = private_words(spec, m, i, 8)
+    plans = private_plans(spec, 8)
+    for m in spec.masters:
+        words = plans[m.name]
         if words and len(path_domains(spec, m, route(spec, m.name, words[0], True, False, {}))) > 1:
             out.append(m.name)
     return out
@@ -469,10 +470,12 @@ def contention(spec: Spec, fabric: Any, secure_too: bool = False) -> tuple[Any, 
 
 
 def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = False,
-                  unadapted: bool = False) -> list[int]:  # fmt: skip
+                  unadapted: bool = False,
+                  taken: frozenset[tuple[str | None, int]] = frozenset()) -> list[int]:  # fmt: skip
     """COUNT words only master M uses (offset by INDEX) in the lowest region it can write and
     read back without errors; with DIRECT, of an AXI slave on M's own fabric (no bridge); with
-    UNADAPTED, of a slave with no adapter in front of it."""
+    UNADAPTED, of a slave with no adapter in front of it. None of TAKEN, (slave, address)
+    words other masters use (private_plans)."""
     axi_slaves = {s.name for s in spec.slaves if s.protocol in ("AXI4", "AXI4-Lite")}
     adapted = {a.port for a in spec.adapters}
     for r in sorted(spec.memory_map, key=lambda r: r.base):
@@ -488,6 +491,7 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
             ok &= wr.slave is not None and not wr.slave_error and not wr.masked
             ok &= (wr.slave, wr.address, wr.slave_error) == (rd.slave, rd.address, rd.slave_error)
             ok &= not wr.may_refuse and not rd.may_refuse
+            ok &= (wr.slave, wr.address) not in taken
             if direct:
                 ok &= not wr.bridges and wr.slave in axi_slaves
             if unadapted:
@@ -495,6 +499,20 @@ def private_words(spec: Spec, m: Any, index: int, count: int, direct: bool = Fal
         if ok:
             return words
     return []
+
+
+def private_plans(spec: Spec, count: int, first: int = 0) -> dict[str, list[int]]:
+    """Every master's private_words (offset by FIRST plus its place), planned in turn: a master
+    may plan from another region than the ones before it (a bridge window, say) whose offset
+    lands on a slave word they took, so those are left out (seed 202611270046)."""
+    taken: set[tuple[str | None, int]] = set()
+    out: dict[str, list[int]] = {}
+    for i, m in enumerate(spec.masters):
+        out[m.name] = words = private_words(spec, m, first + i, count, taken=frozenset(taken))
+        for a in words:
+            e = route(spec, m.name, a, True, False, {})
+            taken.add((e.slave, e.address))
+    return out
 
 
 def midpoint_buffers(f: Any) -> bool:
@@ -594,10 +612,11 @@ def splits_word_writes(spec: Spec, exp: Outcome) -> bool:
 
 
 def byte_write_lands(spec: Spec, s: Any, exp: Outcome) -> bool:
-    """Whether a byte write that EXP routes onto APB slave S stores only that byte: an 8-bit
-    slave's word is that byte; otherwise S needs PSTRB, and the path must keep the strobes
-    (no PSTRB tie, no APB3 bus on the way: stores_single_bytes)."""
-    return bool(s.data_width == 8 or (s.protocol == "APB4" and stores_single_bytes(spec, exp)))
+    """Whether a byte write that EXP routes onto APB slave S stores only that byte: S takes
+    partial writes (an 8-bit slave's word is that byte; a wider one needs PSTRB), and the path
+    keeps the strobes (no PSTRB tie, no APB3 bus wider than a byte on the way, even before an
+    8-bit slave: seed 202611270035). That is stores_single_bytes."""
+    return stores_single_bytes(spec, exp)
 
 
 def pstrb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
