@@ -9,6 +9,8 @@ name: nightly
 #   with the date as --seed-base, on 10 jobs.
 # - the nightly report (#59): the pass rate over time from earlier nights' summaries,
 #   configuration-space coverage and its gaps, and tonight's open failures.
+# - mutation testing of src/hdl_bag/checks/ against tests/checks (D112), report only: its
+#   counts go to the run summary and its survivors to an artifact, for triage.
 # It only reports (D56): each regress job uploads its seeds' results, workbooks and IR, and
 # the summary job writes one table of every seed to the run summary and an artifact, naming
 # any seed a job cut off by its limit left without a result. Its history lives in the
@@ -253,6 +255,48 @@ jobs:
         with:
           name: nightly-report
           path: out/report/nightly.md
+  mutmut:
+    # D112: report only. The survivors are test gaps to triage, not failures, so this job
+    # passes whatever they are, and the night's result below does not wait for it. Its limit is
+    # inside the step (timeout), so a run cut short still reports what it had.
+    if: ${{ !inputs.regress_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    continue-on-error: true  # report only: even a failed setup leaves the run's result alone
+    container:
+      image: ghcr.io/hdl-tools/hdl-bag-tools:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: uv sync --locked --group mutation
+      - name: mutmut (report only)
+        run: |
+          mkdir -p out/mutmut
+          status=0
+          timeout -k 5m 5h uv run --no-sync mutmut run --max-children 4 \
+            > out/mutmut/run.log 2>&1 || status=$?
+          { uv run --no-sync mutmut results 2>&1 || true; } | sort > out/mutmut/results.txt
+          survived=$(grep -c ': survived' out/mutmut/results.txt || true)
+          {
+            echo "## mutmut (D112, report only): src/hdl_bag/checks/ against tests/checks"
+            echo
+            echo "- mutmut exit status: $status (124: the 5 h limit cut it short)"
+            echo "- survivors: $survived (out/mutmut/results.txt in the mutmut artifact)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutmut
+          path: |
+            out/mutmut/results.txt
+            out/mutmut/run.log
+            mutants/mutmut-stats.json
+          if-no-files-found: ignore
           retention-days: 90
 
   nightly:
