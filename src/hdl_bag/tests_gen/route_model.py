@@ -184,15 +184,20 @@ def _downsizes_on_axi4(bridge: Any, up: Any, down: Any) -> bool:
 
 
 def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
-          pins: dict[str, bool]) -> Outcome:  # fmt: skip
+          pins: dict[str, bool], length: int = 4) -> Outcome:  # fmt: skip
+    """Where an access of LENGTH bytes (a 32-bit word unless a test sends less) from MASTER at
+    ADDR goes, and what it gets."""
     fabrics = {f.name: f for f in spec.fabrics}
     bridges = {b.name: b for b in spec.bridges}
     slaves = {s.name: s for s in spec.slaves}
     origin = master
     fabric = next(f for f in spec.fabrics if any(p.port == master for p in f.master_ports))
-    # Bytes the access covers, relative to addr: [lo, hi). A write covers its 4 bytes
+    # Bytes the access covers, relative to addr: [lo, hi). A write covers its LENGTH bytes
     # (added zero-strobe beats write nothing); a read can cover more (_read_cover).
-    lo, hi = _read_cover(spec, master, fabric, addr) if not write else (0, 4)
+    lo, hi = _read_cover(spec, master, fabric, addr) if not write else (0, length)
+    # What it sends: a narrow read where _read_cover takes the bytes addressed sends LENGTH,
+    # so only those can miss (CI on #226: a single byte at a region's last byte).
+    sent = length if not write and (lo, hi) == (0, 4) else None
     nonsec = nonsec or prot_tied(spec, master)
     masked = pslverr_tied(spec, master)  # a master-side tied PSLVERR hides errors
     offset = 0  # subtracted by pass-through N bridges on the way
@@ -239,9 +244,10 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         # not expected to see it); revisit if a config packs regions smaller than a beat.
         beat = fabric.data_width // 8
         first = (addr + lo) // beat * beat
-        beats = [addr + lo, *range(first + beat, addr + hi, beat)]
+        end = addr + (hi if sent is None else min(hi, lo + sent))
+        beats = [addr + lo, *range(first + beat, end, beat)]
         if partial is None and len(beats) > 1 and fabric.protocol != "AXI4":
-            ends = [*beats[1:], addr + hi]
+            ends = [*beats[1:], end]
             hit = [decide(spec, fabric, master, a, write, nonsec) is not None for a in beats]
             if not all(hit):
                 partial = next(d for d in fabric.decode if d.master == master).miss
@@ -897,8 +903,8 @@ def region_edges(spec: Spec, m: Any) -> list[tuple[int, Outcome, Outcome]]:
             if not 0 <= a < 1 << m.addr_width or a in out:
                 continue
             w, rd = (
-                route(spec, m.name, a, True, False, {}),
-                route(spec, m.name, a, False, False, {}),
+                route(spec, m.name, a, True, False, {}, length=1),
+                route(spec, m.name, a, False, False, {}, length=1),
             )
             out[a] = (a, w, rd)
     return [out[a] for a in sorted(out)]

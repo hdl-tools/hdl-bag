@@ -1514,3 +1514,27 @@ def test_a_split_access_is_an_error_only_where_a_transfer_really_misses(
     read = route(_split_shapes(tmp_path, shape), "m0", 0x4000_0000, False, False, {})
     want = {"axi4": (None, False), "next": (None, False), "masked": ("PSLVERR", False)}[shape]
     assert (read.slave, read.partial, read.slave_error) == ("s0", *want)
+
+
+def test_a_single_byte_at_a_regions_last_byte_is_one_transfer(tmp_path: Path) -> None:
+    """CI on #226: a byte written at a region's last byte is one transfer, so the bytes past the
+    region a 4-byte access would cover never miss (single_bytes_reach_both_ends_of_every_region,
+    p2/ahb_single, examples/mcu_ahb). route() takes the access's length."""
+    from hdl_bag.tests_gen.route_model import region_edges
+
+    c = Cfg("lastbyte", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f0", "AXI4", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "f0", 0).decode("m0", "DECERR")
+    c.option("m0", **AXI4_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("f0", "b0", 0).link("b0", "p", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x2000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    edges = {a: (w, r) for a, w, r in region_edges(spec, spec.masters[0])}
+    write, read = edges[0x4000_0FFF]
+    assert (write.slave, write.partial, read.partial) == ("s0", None, None)
