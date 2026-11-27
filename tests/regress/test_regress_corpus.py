@@ -23,10 +23,11 @@ from hdl_bag import formal_gen, ir
 from hdl_bag.flows import run_tests
 from hdl_bag.flows.sim import cocotb_tests
 from hdl_bag.gen import generate
+from hdl_bag.ir import Spec
 from hdl_bag.ir.to_workbook import to_spec_data
 from hdl_bag.shrink.evaluate import build, lint_step
 from hdl_bag.tests_gen import TESTS, applicable_tests
-from hdl_bag.tests_gen.route_model import plain_word, private_words
+from hdl_bag.tests_gen.route_model import plain_word, private_words, stores_single_bytes
 
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 
@@ -42,6 +43,27 @@ SEEDS = {
                    "a split access whose later transfer misses the slave's region is an error "
                    "(shrunk at 13a322e for #214's route test, it drifted to this: a 4-byte "
                    "region)"),
+    202611220001: ("absent", "apb_byte_writes_carry_pstrb", "#200",
+                   "the PSTRB test runs only on a path that keeps the strobes "
+                   "(stores_single_bytes): here a bag_ahb2apb with PSTRB tied stores whole words"),
+    202611220012: ("sim", "axi_shared_bus_midpoint_buffers_reads", "#200",
+                   "with Max mst trans 1 the guard's axi_demux_simple admits one read in all "
+                   "(D80), not the mid-point's depth (midpoint_reads)"),
+    202611220017: ("sim", "every_master_reaches_what_the_model_says", "#198",
+                   "APB3 has no PPROT: the bridge after an APB3 bus drives the default PROT "
+                   "(D28), whatever the master sent (it also needs #226: a write split past "
+                   "its 4-byte region)"),
+    202611220021: ("sim", "axi_arbitration_rounds_starvation_and_lock", "#200",
+                   "a deep adapter path absorbs more writes than 16 slots per master left room "
+                   "for: up to 64, as the region allows (the shrink cut s1's region to 512 "
+                   "bytes, under even that; it was set back to 4 KB by hand)"),
+    202611220028: ("sim", "every_master_reaches_what_the_model_says", "#200",
+                   "a read split by a narrow bus (bag_axi2apb's bag_axil2apb onto 16-bit APB) "
+                   "is several transfers: a later AXI4 downsizer no longer trims the word below "
+                   "the address"),
+    202611220042: ("sim", "axi_ports_take_every_handshake_ordering", "#200",
+                   "a default slave whose own region is denied (D32) is reached only by misses: "
+                   "the ordering test falls back to the probe addresses"),
     202611240002: ("sim", "narrow_apb_behind_axi2apb_keeps_lanes_strobes_and_errors", "#202",
                    "the narrow-APB byte write takes only a path that keeps the strobes "
                    "(a bridge with PSTRB tied stores the whole word)"),
@@ -73,17 +95,40 @@ def test_every_config_in_the_regress_corpus_has_an_entry() -> None:
     )
 
 
+def _reset_case(spec: Spec) -> bool:
+    """The reset test resets around each slave plain_word reaches: traffic (private_words, what
+    its old predicate asked) but no plain word is the case that predicate wrongly claimed."""
+    return not any(plain_word(spec, m, s) for m in spec.masters for s in spec.slaves) and any(
+        private_words(spec, m, i, 8) for i, m in enumerate(spec.masters)
+    )
+
+
+def _pstrb_case(spec: Spec) -> bool:
+    """The PSTRB test's old predicate took any plain word of an AXI master on a 32-bit APB4
+    slave; the case it wrongly claimed is one whose path does not keep the strobes."""
+    found = [plain_word(spec, m, s) for m in spec.masters if m.protocol in ("AXI4", "AXI4-Lite")
+             for s in spec.slaves if s.protocol == "APB4" and s.data_width == 32]  # fmt: skip
+    hits = [f for f in found if f]
+    return bool(hits) and not any(stores_single_bytes(spec, f[1]) for f in hits)
+
+
+# Per test an "absent" entry may name: the case its old predicate wrongly claimed.
+ABSENT_CASES = {
+    "reset_during_traffic_leaves_nothing_behind": _reset_case,
+    "apb_byte_writes_carry_pstrb": _pstrb_case,
+}
+
+
 @pytest.mark.parametrize("seed", sorted(s for s, e in SEEDS.items() if e[0] == "absent"))
 def test_a_shrunk_seed_no_longer_gets_the_test_it_failed(seed: int) -> None:
     """Host, no EDA. The fix was that the test does not apply to such a config: it has nothing
-    to check. Pinned to why (review of #221): the reset test resets around each slave plain_word
-    reaches, and these configs have traffic (private_words, what the old predicate asked) but no
-    plain word, the case its predicate wrongly claimed."""
+    to check. Pinned to why (review of #221): the config is still the case the test's old
+    predicate wrongly claimed (ABSENT_CASES)."""
     _, test, fix, bug = SEEDS[seed]
     spec = ir.load(REGRESS / f"{seed}.ir.yaml")
     assert test in {t.name for t in TESTS}, f"{test} is gone, so this entry guards nothing"
-    assert not any(plain_word(spec, m, s) for m in spec.masters for s in spec.slaves)
-    assert any(private_words(spec, m, i, 8) for i, m in enumerate(spec.masters))
+    assert test in ABSENT_CASES, f"{seed}: no ABSENT_CASES entry says why {test} is absent"
+    assert ABSENT_CASES[test](spec), f"{seed} is no longer the case {test}'s old predicate took"
     assert test not in applicable_tests(spec), f"{seed} gets {test} again ({fix}: {bug})"
 
 
