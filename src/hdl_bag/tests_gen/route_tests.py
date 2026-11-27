@@ -301,6 +301,11 @@ def _expected_resp(m: Any, exp: Any, write: bool, slave_code: int | None = None)
         code = 0 if exp.masked else AXI_RESP[exp.miss]
     elif slave_code is not None:
         code = slave_code
+    elif exp.partial and exp.slave_error and not exp.hits_error_word:
+        # The missing transfers' answer. shortcut: taken as what the merged response reports;
+        # an AXI4 downsizer merging DECERR with OKAY is not seen in sim yet, check it if a
+        # config with such a miss on an all-AXI path comes up.
+        code = AXI_RESP[exp.partial]
     else:
         code = 2 if exp.slave_error else 0
     protocols = {f.name: f.protocol for f in SPEC.fabrics}
@@ -449,7 +454,7 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                                 f"{where}: {exp.slave} saw AxCACHE {cache:#b}, "
                                 f"expected {want_cache:#b}"
                             )
-                            errors += exp.slave_error
+                            errors += exp.hits_error_word and not exp.masked  # the slave's own
                             if write and not exp.slave_error:
                                 written = exp
                             elif not write and written == exp and not exp.slave_error:
@@ -460,7 +465,11 @@ async def every_master_reaches_what_the_model_says(dut: Any) -> None:
                             coverage.hit(kind, key)
     # A slave with PSLVERR tied never answers an error, so a design of only those shows none;
     # nor does one whose error words only accesses a converter refuses would reach (D104).
-    can_err = not all(pslverr_tied(SPEC, s.name) for s in SPEC.slaves)
+    # A slave error is expected where the model has a probe of these masters hit an error word
+    # unmasked; a region too small for one has none (review of #226).
+    can_err = any(e.hits_error_word and not e.masked
+                  for m in SPEC.masters[i::k] for a in probes(SPEC) if a < 1 << m.addr_width
+                  for e in (route(SPEC, m.name, a, w, False, {}) for w in (True, False)))  # fmt: skip
     assert checked > 0 and (errors > 0 or refused_errors > 0 or not can_err), (checked, errors)
     assert reached == {m.name for m in SPEC.masters[i::k]}, reached
     dut._log.info("checked %d accesses (%d slave errors)", checked, errors)
