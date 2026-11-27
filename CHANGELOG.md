@@ -6,37 +6,63 @@ All notable changes to hdl-bag are recorded here. The format follows
 
 ## [Unreleased]
 
+**Upgrading from 1.0.0:** a workbook that 1.0.0 accepted can now fail `bag check` and
+`bag generate`. Three new rules are errors (`FAB-APB3-SPLIT`, `PORTOPT-PSTRB-SPLIT`,
+`MM-SMALL-AHB`), and `WRAP-FILE-HEADER` refuses a File header outside the workbook's folder.
+The `demo_ss` sample now gives four warnings instead of two (two `PORTOPT-PSTRB-WORD`).
+
 ### Added
 
-- New `bag check` rules from the random regression:
-  - `FAB-APB3-SPLIT` (error): a narrower bus splits writes on the way to an APB3 bus that has no PSTRB.
-  - `AXI-SPLIT-REFUSED` (warning): a master with CACHE tied to 0 gets SLVERR wherever a converter must split its transfers.
-  - `PORTOPT-PSTRB-WORD` (warning): a tied PSTRB on a path that carries partial writes.
-  - `PORTOPT-PSTRB-SPLIT` (error): a tied PSTRB behind a converter that turns writes into byte writes.
-  - `MM-SMALL-AHB` (error): an AHB-Lite region smaller than 1 KB.
+- New `bag check` rules:
+  - `FAB-APB3-SPLIT` (error): a bus narrower than an APB3 bus's word, and than the master,
+    splits each write into narrower writes. APB3 has no PSTRB, so each one stores the whole
+    word, and even full-word writes are corrupted.
+  - `AXI-SPLIT-REFUSED` (warning): a master or bridge has CACHE tied to 0, so the AXI4 to
+    AXI4-Lite converter on its way answers SLVERR to bursts and to transfers it must split.
+  - `PORTOPT-PSTRB-WORD` (warning): PSTRB is tied on an APB4 port wider than 8 bits. Tied to
+    the default, a write of part of a word overwrites the rest of it; tied to 0, no write
+    stores anything.
+  - `PORTOPT-PSTRB-SPLIT` (error): PSTRB is tied on an APB4 port, and `bag_axi2ahb` (or a
+    narrower bus) on the way turns writes into byte writes, each of which stores the whole
+    word.
+  - `MM-SMALL-AHB` (error): an AHB-Lite region, or alias, smaller than 1 KB.
   - `MM-REGION-WORD` (warning): a region smaller than its slave's data word.
-- `ACC-UNREACHABLE-SLAVE` also covers read-only and write-only combinations, and paths through bridges.
-- The template's Memory_Map status shows the AHB-Lite 1 KB limit. Its 4 KB warning now shows on AXI4 and AXI4-Lite fabrics only.
+- The template's Memory_Map status shows "AHB < 1 KB" for a small AHB-Lite region.
+- The manual's install chapter covers installing from PyPI (`pip install hdl-bag`, with the
+  `sim` extra for cocotb) and running the release's tools image with it.
 
 ### Changed
 
-- `WRAP-FILE-HEADER` refuses a File header path outside the workbook's folder: an absolute path, or one that climbs out with `..`.
-- `bag lint`, `bag sim` and `bag flow` refuse a file-list entry, or an include directory, that starts with `-`, because the tool would take it as an option.
-- A Verilator UNOPTFLAT finding counts only if Yosys finds the loop at bit level on the flattened design.
-- A lint or compile tool that crashes is a failure, even when it printed a finding first.
-- `bag shrink` keeps a candidate only when it fails with the same messages, not only with the same rule IDs.
-- Formal: protocol cover tasks search to 1.5 times the path model's depth, and the reset job's covers search to depth 80.
-
-### Removed
-
-- The `qualification` key of template manifests, and the `tables` variable of the instance-template context. Neither was read by anything.
+- `ACC-UNREACHABLE-SLAVE` also warns when no access of any master gets into a slave for
+  another reason: a write-only region that every master may only read, a slave behind a
+  bridge that no master may use, a secure-only region whose masters all have PROT tied, or a
+  region above every master's address range. The generated tests leave such a slave out.
+- `WRAP-FILE-HEADER` refuses a File header path outside the workbook's folder: an absolute
+  path, or one that climbs out with `..`.
+- `bag lint`, `bag sim` and `bag flow` refuse a file-list entry or include directory that
+  starts with `-`, because the tool would take it as an option.
+- A Verilator UNOPTFLAT warning is waived when Yosys finds no real loop in the flattened
+  design. Without Yosys, or if it fails, the warning still counts, with a note.
+- `TOOL-FAILED` is reported for an exit status other than 0 or 1, or for 1 with no finding
+  BAG could read, even when the tool printed a finding first.
+- A `TEST-FAILED` finding of `bag sim` gives the first line of the test's failure message.
+- `bag shrink` keeps a smaller configuration only when it fails the same step, rules and test
+  or formal task, with at least one of the same messages (addresses and other numbers aside).
+- The template's 4 KB warning on Memory_Map shows on AXI4 and AXI4-Lite fabrics only.
+- Formal: protocol cover tasks search 1.5 times as deep as the depth BAG estimates for the
+  path (at least 24 steps), and the reset job's covers search to depth 80.
+- `bag regress` records each seed's configuration dimensions in `summary.json`.
 
 ### Fixed
 
 - `bag_axi_dw` no longer gives a Verilator UNOPTFLAT on its request and response structs.
-- Generated tests and formal jobs: many reference-model and property fixes found by the nightly random seeds. A shrunk seed for each bug is now in the regression corpus (`tests/configs/regress/`).
+- Generated tests and formal jobs no longer fail falsely on some configurations, among them:
+  an APB3 bus on the path (it drops PROT and stores whole words), AHB read alignment behind an
+  AXI4-Lite master, an access split across a region's end, a master with no target on a
+  channel, and an AXI4-Lite converter that sends one write at a time.
 
-[Unreleased]: https://github.com/hdl-tools/hdl-bag/compare/v1.0.0...main
+<!-- At a release, rename this section and point this link at the new tag. -->
+[Unreleased]: https://github.com/hdl-tools/hdl-bag/compare/v1.0.0...HEAD
 
 ## [1.0.0] - 2026-11-23
 
