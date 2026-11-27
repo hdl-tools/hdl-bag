@@ -307,3 +307,18 @@ def test_the_manuals_pypi_docker_command_names_this_release() -> None:
     assert any("repo=ghcr.io/hdl-tools/hdl-bag-tools" in r and tag in r for r in runs), (
         "release.yml no longer tags the tools image the manual names"
     )
+
+
+def test_the_nightly_writes_its_report_from_the_artifacts_and_only_reports() -> None:
+    """#59 (plan PR 7): the report job reads the earlier nights' regress-summary artifacts (D55),
+    so it may read actions and nothing more, renders nightly_report, publishes it, and the
+    night's result does not wait for it (D56)."""
+    jobs = _load("nightly.yml")["jobs"]
+    job = jobs["report"]
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    run = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "gh run download" in run and "-n regress-summary" in run
+    assert "nightly_report(nights" in run
+    upload = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload"))
+    assert upload["with"]["name"] == "nightly-report" and upload["if"] == "always()"
+    assert "report" not in jobs["nightly"]["needs"]

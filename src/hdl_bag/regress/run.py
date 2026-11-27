@@ -283,7 +283,8 @@ def seed_for_sim(seed: int) -> int:
 
 def summary(results: list[SeedResult]) -> tuple[str, str]:
     """The run's summary.json and summary.md: one line per seed, failures first, with the
-    first finding and the formal tasks per outcome."""
+    first finding and the formal tasks per outcome. summary.json also keeps each seed's
+    dimensions, for the nightly report's coverage over the nights (#59)."""
     order = {"generator": 0, "fail": 1, "timeout": 2, "pass": 3}
     rows = sorted(results, key=lambda r: (order[r.status], r.seed))
     counts = {s: sum(r.status == s for r in results) for s in order}
@@ -291,7 +292,8 @@ def summary(results: list[SeedResult]) -> tuple[str, str]:
         "counts": counts,
         "seeds": [{"seed": r.seed, "status": r.status, "step": r.step,
                    "finding": r.findings[0] if r.findings else None,
-                   "formal": r.formal_counts(), "repro": r.repro} for r in rows],
+                   "formal": r.formal_counts(), "repro": r.repro,
+                   "dimensions": r.dimensions} for r in rows],
     }  # fmt: skip
     lines = [
         "# bag regress",
