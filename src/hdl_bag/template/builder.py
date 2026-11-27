@@ -614,7 +614,8 @@ class _Builder:
             'IF(ABS(LOG(K{r},2)-ROUND(LOG(K{r},2),0))>0.000001,"SIZE NOT 2^n",'
             'IF(MOD(J{r},K{r})<>0,"MISALIGNED",'
             f'IF(AND({fab_lookup("B", "I{r}")}="AHB-Lite",K{{r}}<1024),"AHB < 1 KB",'
-            'IF(K{r}<4096,"WARN < 4 KB","ok")))))))'
+            f'IF(AND(OR({fab_lookup("B", "I{r}")}="AXI4",{fab_lookup("B", "I{r}")}="AXI4-Lite"),'
+            'K{r}<4096),"WARN < 4 KB","ok")))))))'
         )  # fmt: skip
         self.table(ws, [
             _in("Slave / bridge", 14, "Must exist on Slaves or Bridges and be connected in Topology."),
@@ -630,7 +631,7 @@ class _Builder:
             _drv("Base (dec)", 13, "Helper for checks.", "=" + hexd.format(c="C")),
             _drv("Size (dec)", 13, "Helper for checks.", "=" + hexd.format(c="D")),
             _drv("End (dec)", 13, "Helper for checks.", "=J{r}+K{r}-1"),
-            _drv("Check", 15, "UNKNOWN SLAVE | NOT CONNECTED | OVERLAP (same fabric) | SIZE NOT 2^n | MISALIGNED | AHB < 1 KB (MM-SMALL-AHB) | WARN < 4 KB | ok",
+            _drv("Check", 15, "UNKNOWN SLAVE | NOT CONNECTED | OVERLAP (same fabric) | SIZE NOT 2^n | MISALIGNED | AHB < 1 KB (MM-SMALL-AHB) | WARN < 4 KB (AXI, MM-SMALL-AXI) | ok",
                  mm_check),
         ], "memory_map")  # fmt: skip
         self.dv(ws, self.lref["Access"], "F")
