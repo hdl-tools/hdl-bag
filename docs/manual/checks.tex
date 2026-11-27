@@ -48,6 +48,7 @@
 \checkrule{MM-NOT-CONNECTED}{error}{Slaves row 16: slave spare0 has no Topology link (TOPO-NOT-CONNECTED)}
 \checkrule{MM-OVERLAP}{error}{Memory\_Map row 12: gpio0 0x4000\_0000..0x4000\_0FFF overlaps uart0 (Memory\_Map row 11) on periph\_apb (MM-OVERLAP)}
 \checkrule{MM-PATH-NO-REGION}{warning}{Slaves row 13: slave rtc0 has no region in Memory\_Map (MM-PATH-NO-REGION)}
+\checkrule{MM-REGION-WORD}{warning}{Memory\_Map row 11: uart0 region regs (0x0000\_0002) is smaller than its 32-bit data word: every word access to it spills past the region. Make it at least 0x0000\_0004 (MM-REGION-WORD)}
 \checkrule{MM-SIZE-NOT-POW2}{error}{Memory\_Map row 20: size 0x0000\_3000 is not a power of 2 (MM-SIZE-NOT-POW2)}
 \checkrule{MM-SLAVE-ALIGN}{error}{Memory\_Map row 21: uart0 0x4000\_8000..0x4000\_8FFF is outside the 12-bit block 0x4000\_0000..0x4000\_0FFF of its region regs (Memory\_Map row 11) (MM-SLAVE-ALIGN)}
 \checkrule{MM-SMALL-AHB}{error}{Memory\_Map row 15: itcm0 region mem is smaller than 1 KB on AHB-Lite fabric ahb\_bus: an AHB burst may run on into the next region (MM-SMALL-AHB)}

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from hdl_bag.checks.basics import extra_inputs
 from hdl_bag.checks.context import Context
-from hdl_bag.protocols import AXI_FAMILY, MISS_RESPONSES, OPTIONAL_SIGNALS
+from hdl_bag.protocols import AXI_FAMILY, DATA_WIDTHS, MISS_RESPONSES, OPTIONAL_SIGNALS
 from hdl_bag.reader.model import Row
 
 if TYPE_CHECKING:
@@ -197,6 +197,17 @@ def check_memory_map(ctx: Context) -> list[Region]:
         if size < 1024 and ctx.fabric_protocol(fabric) == "AHB-Lite":
             ctx.report("MM-SMALL-AHB", row["Size (hex)"],
                        f"{target} region {rname} is smaller than 1 KB on AHB-Lite fabric {fabric}: an AHB burst may run on into the next region")  # fmt: skip
+        # D115: a region smaller than its slave's data word: a word access to it always spills
+        # past the region (seed 202611240034's shrink left a 1-byte one). Slaves only: a
+        # bridge has no data width of its own. An illegal width is WIDTH-DATA's alone (D23).
+        if ctx.kinds[target] == "slave":
+            sdef = ctx.defs[target]
+            word = ctx.integer(sdef["Data width (bits)"], minimum=1)
+            proto = ctx.protocol(sdef["Protocol"])
+            legal = isinstance(word, int) and proto is not None and word in DATA_WIDTHS[proto]
+            if legal and isinstance(word, int) and size < word // 8:
+                ctx.report("MM-REGION-WORD", row["Size (hex)"],
+                           f"{target} region {rname} ({_hex(size)}) is smaller than its {word}-bit data word: every word access to it spills past the region. Make it at least {_hex(word // 8)}")  # fmt: skip
         regions.append(r)
 
     listed = {r["Slave / bridge"].value for r in ctx.raw.memory_map}
