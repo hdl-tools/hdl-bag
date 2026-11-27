@@ -36,8 +36,9 @@ from hdl_bag.tests_gen.route_model import plain_word, private_words, stores_sing
 REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 
 # seed: (step, generated test or cover, fixing PR, the bug). The step is "lint" or "sim" (EDA:
-# the config must pass it), "absent" (host: the test must no longer be generated for it) or
-# "no-cover" (host: formal_gen must no longer emit the cover). The shrink run is in the PR that
+# the config must pass it), "formal" (EDA: the named job:task must pass), "absent" (host: the
+# test must no longer be generated for it) or "no-cover" (host: formal_gen must no longer emit
+# the cover). The shrink run is in the PR that
 # added the config.
 SEEDS = {
     202611180040: ("lint", None, "#233",
@@ -181,6 +182,10 @@ def test_a_shrunk_seed_passes_the_step_it_failed(tmp_path: Path, seed: int) -> N
         rel = next((r for r, t in formal_tasks(out) if Path(r).stem == stem and t == task), None)
         assert rel is not None, f"{seed}: {test} is no longer generated, so it checks nothing"
         root = out.root.resolve()
+        # The cover #201's depth was about is still there (review of #237: a task with no
+        # covers would show nothing).
+        job_sv = (root / rel).with_suffix(".sv").read_text(encoding="utf-8")
+        assert "reset_mid_s3_axil_arvalid" in job_sv, f"{seed}: the cover #201 needed is gone"
         report = run_sby(root / rel, root, task=task)
         assert report.ok, f"{again}: {[f.format() for f in report.unwaived]}"
         return
