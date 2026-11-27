@@ -84,6 +84,13 @@ markers = [
     "alone: a deep formal test the nightly runs one per runner, with a longer limit (D93)",
 ]
 
+[tool.mutmut]
+# D112: the nightly's mutation testing, report only. The checks against their broken-workbook
+# tests; mutmut copies only what it mutates, so the rest the tests import is copied too.
+source_paths = ["src/hdl_bag/checks/"]
+pytest_add_cli_args_test_selection = ["tests/checks/"]
+also_copy = ["tests/", "src/hdl_bag/", "README.md", "docs/", "pyproject.toml"]
+
 [tool.ruff.lint.per-file-ignores]
 # Header comments, notes and formulas are schema text; keep them verbatim on one line.
 "src/hdl_bag/template/*.py" = ["E501"]

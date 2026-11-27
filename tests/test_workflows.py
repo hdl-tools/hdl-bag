@@ -324,3 +324,18 @@ def test_the_nightly_writes_its_report_from_the_artifacts_and_only_reports() -> 
     upload = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload"))
     assert upload["with"]["name"] == "nightly-report" and upload["if"] == "always()"
     assert "report" not in jobs["nightly"]["needs"]
+def test_the_nightly_runs_mutmut_on_the_checks_and_only_reports() -> None:
+    """D112: mutation testing of src/hdl_bag/checks/ against tests/checks runs every night with a
+    pinned mutmut, inside a limit that still lets it report; it reports and never gates: the
+    night's result does not wait for it, and its run cannot fail the step."""
+    import tomllib
+
+    jobs = _load("nightly.yml")["jobs"]
+    run = "\n".join(str(s.get("run", "")) for s in jobs["mutmut"]["steps"])
+    assert "uv pip install mutmut==3.8.1" in run
+    assert "timeout 5h uv run --no-sync mutmut run" in run and "|| status=$?" in run
+    assert "mutmut" not in jobs["nightly"]["needs"]
+    with open(Path(__file__).parents[1] / "pyproject.toml", "rb") as f:
+        config = tomllib.load(f)["tool"]["mutmut"]
+    assert config["source_paths"] == ["src/hdl_bag/checks/"]
+    assert config["pytest_add_cli_args_test_selection"] == ["tests/checks/"]
