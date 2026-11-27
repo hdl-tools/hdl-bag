@@ -49,6 +49,10 @@ SEEDS = {
     202611220012: ("sim", "axi_shared_bus_midpoint_buffers_reads", "#200",
                    "with Max mst trans 1 the guard's axi_demux_simple admits one read in all "
                    "(D80), not the mid-point's depth (midpoint_reads)"),
+    202611220017: ("sim", "every_master_reaches_what_the_model_says", "#198",
+                   "APB3 has no PPROT: the bridge after an APB3 bus drives the default PROT "
+                   "(D28), whatever the master sent (it also needs #226: a write split past "
+                   "its 4-byte region)"),
     202611220021: ("sim", "axi_arbitration_rounds_starvation_and_lock", "#200",
                    "a deep adapter path absorbs more writes than 16 slots per master left room "
                    "for: up to 64, as the region allows (the shrink cut s1's region to 512 "
