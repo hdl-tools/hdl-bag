@@ -4,6 +4,40 @@ All notable changes to hdl-bag are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- New `bag check` rules from the random regression:
+  - `FAB-APB3-SPLIT` (error): a narrower bus splits writes on the way to an APB3 bus that has no PSTRB.
+  - `AXI-SPLIT-REFUSED` (warning): a master with CACHE tied to 0 gets SLVERR wherever a converter must split its transfers.
+  - `PORTOPT-PSTRB-WORD` (warning): a tied PSTRB on a path that carries partial writes.
+  - `PORTOPT-PSTRB-SPLIT` (error): a tied PSTRB behind a converter that turns writes into byte writes.
+  - `MM-SMALL-AHB` (error): an AHB-Lite region smaller than 1 KB.
+  - `MM-REGION-WORD` (warning): a region smaller than its slave's data word.
+- `ACC-UNREACHABLE-SLAVE` also covers read-only and write-only combinations, and paths through bridges.
+- The template's Memory_Map status shows the AHB-Lite 1 KB limit. Its 4 KB warning now shows on AXI4 and AXI4-Lite fabrics only.
+
+### Changed
+
+- `WRAP-FILE-HEADER` refuses a File header path outside the workbook's folder: an absolute path, or one that climbs out with `..`.
+- `bag lint`, `bag sim` and `bag flow` refuse a file-list entry, or an include directory, that starts with `-`, because the tool would take it as an option.
+- A Verilator UNOPTFLAT finding counts only if Yosys finds the loop at bit level on the flattened design.
+- A lint or compile tool that crashes is a failure, even when it printed a finding first.
+- `bag shrink` keeps a candidate only when it fails with the same messages, not only with the same rule IDs.
+- Formal: protocol cover tasks search to 1.5 times the path model's depth, and the reset job's covers search to depth 80.
+
+### Removed
+
+- The `qualification` key of template manifests, and the `tables` variable of the instance-template context. Neither was read by anything.
+
+### Fixed
+
+- `bag_axi_dw` no longer gives a Verilator UNOPTFLAT on its request and response structs.
+- Generated tests and formal jobs: many reference-model and property fixes found by the nightly random seeds. A shrunk seed for each bug is now in the regression corpus (`tests/configs/regress/`).
+
+[Unreleased]: https://github.com/hdl-tools/hdl-bag/compare/v1.0.0...main
+
 ## [1.0.0] - 2026-11-23
 
 First release. hdl-bag (BAG, the Bus Architecture Generator) turns an Excel spec workbook into
