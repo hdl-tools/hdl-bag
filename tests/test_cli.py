@@ -246,6 +246,35 @@ def test_a_missing_file_list_is_an_error_not_a_traceback(tmp_path: Path, command
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize(
+    ("line", "flag"),
+    [
+        ("--command-file=/etc/shadow", "--command-file=/etc/shadow"),
+        # pathlib drops the "./", so the tool still got a flag (review of #244).
+        ("./--command-file=/etc/shadow", "--command-file=/etc/shadow"),
+        # An include directory reaches each backend as -I <dir>, glued or not.
+        ("+incdir+--top", "--top"),
+    ],
+)
+@pytest.mark.parametrize("command", ["lint", "sim"])
+def test_a_file_list_entry_that_looks_like_a_flag_is_refused(
+    tmp_path: Path, command: str, line: str, flag: str
+) -> None:
+    """Each file list entry becomes one argv element of the EDA tool, so `--command-file=x`
+    reached slang as a flag (#193). No file BAG writes starts with '-', so such an entry is
+    refused; absolute and `..` paths a user adds by hand keep working (D122)."""
+    out = tmp_path / "out"
+    ir_path = _ir_copy(tmp_path)
+    assert CliRunner().invoke(main, ["generate", str(ir_path), "-o", str(out)]).exit_code == 0
+    with (out / "demo_ss.f").open("a", encoding="utf-8", newline="\n") as f:
+        f.write(line + "\n")
+    result = CliRunner().invoke(main, [command, str(out)])
+    assert (result.exit_code, result.output) == (
+        1, f"error: {out}: the file list demo_ss.f has an entry that is a flag, not a file: "
+        f"{flag}. Remove it, or rename the file\n"
+    )  # fmt: skip
+
+
 def test_formal_still_runs_when_the_file_list_is_gone(tmp_path: Path) -> None:
     """`bag formal` never reads the file list: each generated job carries its own sources. So
     the check belongs where the list is consumed, not in load_outputs, which refused a design

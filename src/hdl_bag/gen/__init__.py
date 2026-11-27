@@ -301,14 +301,31 @@ def _filelist(out: Outputs) -> list[str]:
         ) from exc
 
 
+def _no_flags(out: Outputs, paths: list[Path]) -> list[Path]:
+    """PATHS, refusing one that would reach an EDA tool as a flag.
+
+    Each path becomes an argv element (or a -I argument), so one starting with '-' is an
+    option: slang's --command-file reads more arguments from a file. The test is on the
+    Path, not the text, because pathlib drops a leading "./". BAG never writes one; a
+    hand-added absolute or `..` path is still a file and still works (D122, #193).
+    """
+    if flag := next((p for p in paths if p.as_posix().startswith("-")), None):
+        raise ValueError(
+            f"{out.root}: the file list {out.filelist} has an entry that is a flag, not a file: "
+            f"{flag.as_posix()}. Remove it, or rename the file"
+        )
+    return paths
+
+
 def sources(out: Outputs) -> list[Path]:
     """OUT's file list, relative to its root, in compile order."""
-    return [Path(t) for t in _filelist(out) if t[0] != "+"]
+    return _no_flags(out, [Path(t) for t in _filelist(out) if t[0] != "+"])
 
 
 def include_dirs(out: Outputs) -> list[Path]:
     """OUT's include directories (``+incdir+`` lines of the file list), relative to its root."""
-    return [Path(t.removeprefix("+incdir+")) for t in _filelist(out) if t.startswith("+incdir+")]
+    tokens = [t.removeprefix("+incdir+") for t in _filelist(out) if t.startswith("+incdir+")]
+    return _no_flags(out, [Path(t) for t in tokens])
 
 
 def _deletable(root: Path, rel: str) -> bool:
