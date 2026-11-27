@@ -275,6 +275,12 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Fabrics row 7: Max mst trans 'abc' does not apply to a non-AXI fabric; set n/a (FAB-NA-SETTING)"]),
     ("WRAP-FILE-HEADER", [("Wrapper", 10, "Value", "missing.txt")],
      ["Wrapper row 10: File header 'missing.txt' not found next to the workbook (WRAP-FILE-HEADER)"]),
+    # The manual says the path starts at the workbook's folder: one leaving it read any file
+    # into every output (#190, D123).
+    ("WRAP-FILE-HEADER-outside", [("Wrapper", 10, "Value", "../header.txt")],
+     ["Wrapper row 10: File header '../header.txt' is outside the workbook's folder; put the file in that folder or below it (WRAP-FILE-HEADER)"]),
+    ("WRAP-FILE-HEADER-absolute", [("Wrapper", 10, "Value", "/etc/header.txt")],
+     ["Wrapper row 10: File header '/etc/header.txt' is outside the workbook's folder; put the file in that folder or below it (WRAP-FILE-HEADER)"]),
     ("WRAP-PATTERN", [("Wrapper", 7, "Value", "{port}_{signal}")],
      ["Wrapper row 7: Signal naming pattern '{port}_{signal}' must use each of {port}, {proto}, {signal} exactly once (WRAP-PATTERN)"]),
     ("NAME-UNIQUE", [("Masters", 10, h, v) for h, v in (
