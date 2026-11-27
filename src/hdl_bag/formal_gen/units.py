@@ -47,7 +47,7 @@ from hdl_bag.gen.wrapper import InstanceContext, Scope, render_instance_ctx, res
 from hdl_bag.ir.model import Fabric, Spec
 from hdl_bag.naming import flat_signal_name, formal_name
 from hdl_bag.protocols import PROTO_TOKEN, TIE_WRITE_STROBE, Protocol, towards_slave
-from hdl_bag.tests_gen.route_model import decide, window
+from hdl_bag.tests_gen.route_model import decide, fallback, window
 
 if TYPE_CHECKING:
     from hdl_bag.formal_gen import Checker
@@ -704,10 +704,13 @@ class _Harness:
     def _contends(self, master: str, ch: str) -> bool:
         """Whether MASTER sends some request on CH (aw: a write, ar: a read) that this fabric
         routes to a slave port rather than answering it with an error: only such requests
-        reach the arbiter."""
+        reach the arbiter. A miss (an address in no region) counts too: it goes to the
+        master's default slave, if it has one (review of #239)."""
         fab = self.inst.fabric
         assert fab is not None
         write = ch == "aw"
+        if fallback(fab, master, None) is not None:
+            return True
         return any(decide(self.spec, fab, master, r.base, write, ns) is not None
                    for r in fab.addr_rules for ns in (False, True))  # fmt: skip
 
@@ -793,8 +796,9 @@ class _Harness:
                     if i == j or not prio[mi] < prio[mj]:
                         continue
                     if axi and not (self._contends(mi, ch) and self._contends(mj, ch)):
-                        # Its _cont term never holds for a master with no slave to send
-                        # this channel to, so the race (and its cover) could not happen
+                        # Its _cont term never holds for a master whose every request on
+                        # this channel is answered with an error (no region takes it, no
+                        # default slave), so the race (and its cover) could not happen
                         # (seed 202611210011).
                         continue
                     a, b = f"bag_{ch}{i}", f"bag_{ch}{j}"
