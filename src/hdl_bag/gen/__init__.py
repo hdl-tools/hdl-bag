@@ -302,8 +302,19 @@ def _filelist(out: Outputs) -> list[str]:
 
 
 def sources(out: Outputs) -> list[Path]:
-    """OUT's file list, relative to its root, in compile order."""
-    return [Path(t) for t in _filelist(out) if t[0] != "+"]
+    """OUT's file list, relative to its root, in compile order.
+
+    Each entry becomes one argv element of the EDA tool, so one starting with '-' would be a
+    flag (slang's --command-file reads more arguments from a file). BAG never writes one; a
+    hand-added absolute or `..` path is still a file and still works (D122, #193).
+    """
+    tokens = [t for t in _filelist(out) if t[0] != "+"]
+    if flag := next((t for t in tokens if t[0] == "-"), None):
+        raise ValueError(
+            f"{out.root}: the file list {out.filelist} has an entry that is a flag, not a file: "
+            f"{flag}. Remove it, or rename the file"
+        )
+    return [Path(t) for t in tokens]
 
 
 def include_dirs(out: Outputs) -> list[Path]:
