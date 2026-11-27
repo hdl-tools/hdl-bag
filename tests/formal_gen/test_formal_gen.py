@@ -728,28 +728,39 @@ def test_a_master_through_a_lite_converter_into_an_aw_spill_never_gets_its_data_
         assert "proto_w_first_dbg: cover" in text and "proto_no_w_first_dbg" not in text
 
 
-@pytest.mark.parametrize(("option", "after"), [({}, None), ({"fifo": 2}, "fifo"),
-                                               ({"slice": "cut"}, "cut")])  # fmt: skip
+@pytest.mark.parametrize(("option", "trans", "domain", "chain", "never"), [
+    ({}, 2, "D0", ["pc"], False),                       # straight into the crossbar
+    ({"fifo": 2}, 2, "D0", ["pc", "fifo"], True),
+    ({"slice": "cut"}, 2, "D0", ["pc", "cut"], True),
+    ({"fifo": 2}, 4, "D0", ["pc", "fifo"], False),      # more than one write at a time
+    ({"fifo": 2}, 2, "D1", ["cdc", "pc", "fifo"], False),  # the CDC takes writes of its own
+])  # fmt: skip
 def test_a_master_through_a_one_at_a_time_lite_converter_into_a_buffer_never_sends_w_first(
-    tmp_path: Path, option: dict[str, int | str], after: str | None
+    tmp_path: Path,
+    option: dict[str, int | str],
+    trans: int,
+    domain: str,
+    chain: list[str],
+    never: bool,
 ) -> None:
     """D117 (owner, 2026-11-27; seed 202611900032): a bag_pc to AXI4-Lite with MaxTrans 2
     arbitrates a new AW only with no write outstanding (D80); a FIFO or slice right after it is
     then empty and takes the AW that cycle, so W never comes first (unreached through step 37).
-    Straight into the crossbar it stays a cover: the crossbar may hold AW back and take W."""
+    Straight into the crossbar it stays a cover: the crossbar may hold AW back and take W. So
+    it does with more writes at a time, or with a CDC in front of the converter."""
     c = Cfg("pcbuf", phase=5)
-    c.domain("D0", "clk_0", "rst_0_n")
-    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin", max_trans=(2, 2))
-    c.master("m0", "AXI4", 32, 32, "D0").link("m0", "l", 0).decode("m0", "DECERR")
+    c.domain("D0", "clk_0", "rst_0_n").domain("D1", "clk_1", "rst_1_n")
+    c.fabric("l", "AXI4-Lite", 32, 32, "D0", "round-robin", max_trans=(trans, trans))
+    c.master("m0", "AXI4", 32, 32, domain).link("m0", "l", 0).decode("m0", "DECERR")
     c.option("m0", **option, **AXI4_NA)
     c.slave("s0", "AXI4-Lite", 32, 32, "D0").link("l", "s0", 0).option("s0", **AXIL_NA)
     c.region("s0", "regs", 0x4000_0000, 0x1000)
     spec, findings = resolve_cfg(c, tmp_path)
     assert findings == [] and spec is not None
-    assert [a.type for a in spec.adapters if a.port == "m0"] == ["pc", *([after] if after else [])]
+    assert [a.type for a in spec.adapters if a.port == "m0"] == chain
     generate(spec, tmp_path / "out", tmp_path)
     text = (tmp_path / "out" / "formal" / "pcbuf_protocol.sv").read_text(encoding="utf-8")
-    if after is None:
+    if not never:
         assert "proto_w_first_m0: cover" in text and "proto_no_w_first_m0" not in text
         return
     assert "proto_w_first_m0: cover" not in text

@@ -156,7 +156,10 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
     assert cover is not None, f"{seed}: a no-cover entry names its cover"
     # The kinds of cover this guards so far, each with how formal_gen names it, so that its
     # absence below means something.
-    labels = {"proto_wait_": '"proto_wait_', "proto_w_first_": '"w_first"'}
+    labels = {
+        "proto_wait_": '"proto_wait_',
+        "proto_w_first_": 'events = ("multi_write", "w_first", "same_id", "full")',
+    }
     prefix = next((p for p in labels if cover.startswith(p)), None)
     assert prefix is not None, cover
     assert labels[prefix] in Path(formal_gen.__file__).read_text(encoding="utf-8")
