@@ -187,9 +187,10 @@ compile two outputs together, resolve each list's paths from its own output dire
 The \file{LICENSE} files, the licence texts and the include files are not in the list: they are not
 compiled on their own.
 
-\cmd{bag lint} and \cmd{bag sim} read this list too, and hand each entry to the tool as a
-file. You may add your own files to it, by a relative or an absolute path. An entry that
-starts with \code{-} would reach the tool as an option, not a file, so they refuse it.
+\cmd{bag lint}, \cmd{bag sim} and \cmd{bag flow} read this list too, and hand each entry
+to the tool as a file or an include directory. You may add your own files to it, by a
+relative or an absolute path. An entry that starts with \code{-}, after any leading
+\code{./}, would reach the tool as an option, not a file, so BAG refuses it.
 
 \section{The manifest}
 \label{sec:manifest}
