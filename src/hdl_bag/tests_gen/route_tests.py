@@ -489,7 +489,10 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
         addrs = {p.port: region.base + 16 * i for i, p in enumerate(ports)}
         visible = {(a & ((1 << width) - 1)): p for p, a in addrs.items()}
         n = len(slaves[region.slave].log)
-        await Combine(*(cocotb.start_soon(_access(masters[p], "AHB-Lite", 32, a, True, i, False, 3))
+        # Plain traffic HPROT: 3 (not cacheable) is what a converter on the way refuses (D104,
+        # review of #228, as for seed 202611270039).
+        await Combine(*(cocotb.start_soon(_access(masters[p], "AHB-Lite", 32, a, True, i, False,
+                                                  TRAFFIC_HPROT))
                         for i, (p, a) in enumerate(addrs.items())))  # fmt: skip
         order = [visible[e.addr] for e in slaves[region.slave].log[n:] if e.write]
         if f.arbitration == "fixed-priority":
@@ -561,7 +564,8 @@ async def _bursts(
     masters: dict[str, Any], spawned: list[Any] | None = None, offset: int = 0
 ) -> int:
     """Every AXI4 master at once: an 8-beat INCR burst of its own words, written and read back.
-    OFFSET moves the words (private_words' index) clear of _traffic's, so both can run at once.
+    OFFSET moves the words (private_plans' first index) away from _traffic's; the tests run
+    the two one after the other.
     Every task it starts goes in SPAWNED. Returns the bursts checked."""
 
     async def one(m: Any, word: int) -> None:
