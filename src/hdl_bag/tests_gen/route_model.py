@@ -51,6 +51,9 @@ class Outcome:
     span: int = 0  # bytes of the access the narrowest bus on the way carries
     # A split access some of whose transfers miss: that fabric's miss response (#216).
     partial: str | None = None
+    # With PARTIAL: the bytes, as the slave sees them, of the transfers before the first miss,
+    # which surely reached it (after an error the later ones may not run; review of #226).
+    sure: frozenset[int] = frozenset()
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -201,6 +204,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     partial = None  # the miss response of a fabric where some of its transfers miss
     partial_masked = False  # whether an error from there is hidden on its way back
     reached: list[tuple[int, int]] = []  # [start, end) of the transfers that did not miss
+    kept: list[tuple[int, int]] = []  # those before the first miss
     # The narrowest bus so far, and the bytes of the access it carries (reads_per_word).
     narrowest, carried = fabric.data_width, hi - lo
     # Where the access now starts, relative to addr: a read that crossed AHB-Lite starts at its
@@ -243,6 +247,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 partial = next(d for d in fabric.decode if d.master == master).miss
                 partial_masked = masked
                 reached = [(a, e) for a, e, h in zip(beats, ends, hit, strict=True) if h]
+                kept = [(a, e) for a, e in zip(beats, ends, strict=True)][: hit.index(False)]
         if target in bridges:
             b = bridges[target]
             # The nearest pass-through N window sets what the slaves behind it see; a
@@ -295,13 +300,14 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
         if partial is not None:  # only the words of the transfers that did not miss (#216)
             words = {w for w in words if any(a <= addr + w * word - visible + word - 1 and
                                              addr + w * word - visible < e for a, e in reached)}  # fmt: skip
+        sure = frozenset(visible + b - addr for a, e in kept for b in range(max(a, addr + lo), e))
         error = bool(words & {e // word for e in error_words(spec, target)})
         return Outcome(
             target, visible, masked=masked,
             slave_error=(error and not masked) or (partial is not None and not partial_masked),
             nonsec=nonsec, bridges=tuple(crossed), hits_error_word=error, word_bytes=word,
             words=frozenset(words), may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
-            span=carried, partial=partial,
+            span=carried, partial=partial, sure=sure,
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -1000,7 +1006,7 @@ def check_write(where: str, exp: Outcome, data: bytes, written: list[tuple[int, 
     if exp.partial and not exp.hits_error_word:
         # The transfers that missed stored nothing; the ones that reached it stored their
         # bytes (#216, review of #226).
-        inside = {a: v for a, v in want.items() if a // exp.word_bytes in exp.words}
+        inside = {a: v for a, v in want.items() if a in exp.sure}
         assert inside.items() <= got.items() <= want.items(), (
             f"{where}: stored {_bytes(written)}, wrote {_bytes(want.items())}"
         )
@@ -1042,8 +1048,8 @@ def check_read(where: str, exp: Outcome, length: int, touched: list[int],
         f"{where}: read an address twice: {[hex(a) for a in touched]}"
     )
     need = {a // word for a in range(exp.address, exp.address + length)}
-    if exp.partial:  # the transfers that missed never reach it (#216)
-        need &= exp.words
+    if exp.partial:  # only the transfers before the first miss surely reach it (#216)
+        need &= {a // word for a in exp.sure}
     assert need <= seen, f"{where}: read words {_words(seen, word)}, needs {_words(need, word)}"
     extra = seen - exp.words - need
     assert not extra, f"{where}: read words {_words(extra, word)}, beyond {_words(exp.words, word)}"

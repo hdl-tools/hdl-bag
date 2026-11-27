@@ -1466,6 +1466,9 @@ def test_a_split_read_whose_second_transfer_misses_is_an_error(tmp_path: Path) -
     # Bytes 2 to 5 cross the 32-bit beat: bytes 4 and 5 are a second transfer, and miss.
     late = route(spec, "m0", 0x4000_0002, True, False, {})
     assert (late.slave, late.slave_error, late.partial) == ("s0", True, "PSLVERR")
+    # Only the transfers before the first miss surely reached s0, byte by byte (review of #226).
+    assert read.sure == set(range(0x4000_0000, 0x4000_0004))
+    assert late.sure == {0x4000_0002, 0x4000_0003}
 
 
 def _split_shapes(tmp_path: Path, shape: str) -> Spec:
