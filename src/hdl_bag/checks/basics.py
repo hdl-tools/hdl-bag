@@ -111,8 +111,18 @@ def check_wrapper_settings(ctx: Context) -> None:
         ctx.enum(c, ["one per domain"])
     if c := get("Parameter package"):
         ctx.name(c)
-    if (c := get("File header")) and (v := ctx.text(c)) and not (ctx.base_dir / v).is_file():
-        ctx.report("WRAP-FILE-HEADER", c, f"File header {v!r} not found next to the workbook")
+    if (c := get("File header")) and (v := ctx.text(c)):
+        # Its text goes into every output, so it must come from the workbook's folder, as the
+        # manual says; resolve() also catches an absolute path on every platform (D123).
+        if not (ctx.base_dir / v).resolve().is_relative_to(ctx.base_dir.resolve()):
+            ctx.report(
+                "WRAP-FILE-HEADER",
+                c,
+                f"File header {v!r} is outside the workbook's folder; put the file in that "
+                "folder or below it",
+            )
+        elif not (ctx.base_dir / v).is_file():
+            ctx.report("WRAP-FILE-HEADER", c, f"File header {v!r} not found next to the workbook")
     if (c := get("Extra top-level inputs")) and (v := ctx.text(c)):
         for name in (n.strip() for n in v.split(",")):
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
