@@ -324,3 +324,112 @@ def test_a_waived_error_does_not_stop_the_stale_waiver_check(
         [Path("rtl/top.sv")], "top", tmp_path, tools=["verilator"], extra_waivers=[waivers]
     )
     assert [f.rule for f in report.unwaived] == ["WAIVER-UNUSED"]
+
+
+YOSYS_LOOP = """\
+2.14. Executing CHECK pass (checking for obvious problems).
+Warning: found logic loop in module top:
+Found and reported 1 problems.
+"""
+YOSYS_CLEAN = """\
+4. Executing CHECK pass (checking for obvious problems).
+Found and reported 0 problems.
+"""
+
+
+def test_no_yosys_or_a_failed_run_gives_no_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D111, review of #233: without Yosys, or when it fails or runs out of time, there is no
+    verdict (None), so the UNOPTFLAT is kept with a note rather than waived."""
+    import subprocess
+
+    lint_module = import_module("hdl_bag.flows.lint")
+    monkeypatch.setattr(lint_module.shutil, "which", lambda exe: None)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+    monkeypatch.setattr(lint_module.shutil, "which", lambda exe: "/bin/yosys")
+    failed = subprocess.CompletedProcess([], 1, YOSYS_CLEAN, "ERROR: Can't load module")
+    monkeypatch.setattr(lint_module.subprocess, "run", lambda *a, **k: failed)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+
+    def slow(*a: object, **k: object) -> None:
+        raise subprocess.TimeoutExpired("yosys", 1)
+
+    monkeypatch.setattr(lint_module.subprocess, "run", slow)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, []) is None
+    ran = subprocess.CompletedProcess([], 0, YOSYS_CLEAN, "")
+    seen: list[list[str]] = []
+
+    def record(cmd: list[str], **k: object) -> subprocess.CompletedProcess[str]:
+        seen.append(cmd)
+        return ran
+
+    monkeypatch.setattr(lint_module.subprocess, "run", record)
+    assert lint_module.bit_level_loop([Path("a.sv")], "a", tmp_path, [Path("inc")]) is False
+    script = seen[0][-1]
+    assert "read_slang -I inc a.sv --top a; hierarchy -top a; proc; flatten; check" in script
+    assert "opt" not in script and "prep" not in script
+
+
+def test_yosys_check_output_says_whether_a_logic_loop_exists() -> None:
+    """D111: Yosys's check on the flattened design names a real combinational loop; output with
+    no CHECK pass (Yosys or its slang plugin failed) says nothing either way."""
+    from hdl_bag.flows.lint import logic_loop
+
+    assert logic_loop(YOSYS_LOOP) is True
+    assert logic_loop(YOSYS_CLEAN) is False
+    assert logic_loop("ERROR: Can't load module `slang'") is None
+
+
+UNOPTFLAT = Finding("verilator", "rtl/top.sv", 9, "UNOPTFLAT", "warning",
+                    "Signal unoptimizable: Circular combinational logic: 'top.x'")  # fmt: skip
+
+
+@pytest.mark.parametrize("loop", [True, False, None])
+def test_an_unoptflat_counts_only_if_yosys_finds_the_loop_at_bit_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loop: bool | None
+) -> None:
+    """D111 (#215, #196 option 2): Verilator sees a struct holding signals both ways as one node,
+    so it can report a loop that is not there. An UNOPTFLAT lint still judges is checked by
+    Yosys on the flattened design: no loop there waives it; a loop keeps it; no answer (Yosys
+    or its slang plugin missing) keeps it, with a note."""
+    lint_module = import_module("hdl_bag.flows.lint")
+    monkeypatch.setattr(lint_module, "run_backend", lambda *a, **k: [UNOPTFLAT])
+    monkeypatch.setattr(lint_module, "bit_level_loop", lambda *a, **k: loop)
+    report = lint([Path("rtl/top.sv")], "top", tmp_path, tools=["verilator"])
+    assert report.ok == (loop is False)
+    waived = [f.waived_by for f in report.findings]
+    if loop is False:
+        assert waived == [lint_module.NO_BIT_LOOP]
+    else:
+        assert waived == [None]
+    assert bool(report.notes) == (loop is None)
+
+
+REAL_LOOP = """\
+// SPDX-License-Identifier: Apache-2.0
+module loopy (
+    input  logic a,
+    output logic y
+);
+  logic b, c;
+  assign b = a & c;
+  assign c = b | a;
+  assign y = c;
+endmodule
+"""
+
+
+@pytest.mark.eda
+def test_a_real_combinational_loop_still_fails_the_lint(tmp_path: Path) -> None:
+    """D111: Yosys finds this loop at bit level too, so Verilator's UNOPTFLAT stays judged."""
+    (tmp_path / "loopy.sv").write_text(REAL_LOOP)
+    assert lint_module_bit_level_loop([Path("loopy.sv")], "loopy", tmp_path) is True
+    report = lint([Path("loopy.sv")], "loopy", tmp_path, tools=["verilator"])
+    assert [f.rule for f in report.unwaived] == ["UNOPTFLAT"], report.format()
+
+
+def lint_module_bit_level_loop(files: list[Path], top: str, root: Path) -> bool | None:
+    from hdl_bag.flows.lint import bit_level_loop
+
+    return bit_level_loop(files, top, root, [])

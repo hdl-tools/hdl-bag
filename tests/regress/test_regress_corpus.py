@@ -39,6 +39,9 @@ REGRESS = Path(__file__).parents[1] / "configs" / "regress"
 # "no-cover" (host: formal_gen must no longer emit the cover). The shrink run is in the PR that
 # added the config.
 SEEDS = {
+    202611180040: ("lint", None, "#233",
+                   "an UNOPTFLAT through whole-struct ports (bag_axi2axil, bag_axi_dw, the PULP "
+                   "xbar) is no loop at bit level, so Yosys's check waives it (D111)"),
     202611250040: ("sim", "every_master_reaches_what_the_model_says", "#209",
                    "a downsizer after an 8-bit split and an AXI4-Lite re-widening starts each "
                    "transfer at its own byte"),
@@ -141,6 +144,7 @@ def test_a_shrunk_seed_no_longer_gets_the_cover_it_failed(tmp_path: Path, seed: 
     reach. Pinned to why: the master's read and write covers are still there, so the protocol
     job still runs for it."""
     _, cover, fix, bug = SEEDS[seed]
+    assert cover is not None, f"{seed}: a no-cover entry names its cover"
     assert cover.startswith("proto_wait_"), cover  # the only kind of cover this guards so far
     # The label is still one formal_gen emits, so its absence below means something.
     assert '"proto_wait_' in Path(formal_gen.__file__).read_text(encoding="utf-8")
@@ -289,6 +293,19 @@ def _refused_miss(spec: Spec) -> bool:
     return False
 
 
+def _whole_struct_loop_path(spec: Spec) -> bool:
+    """#233 (D111): a bag_axi2axil off an AXI4 fabric whose ports have both an upsizing and a
+    downsizing width converter, the whole-struct nodes Verilator's false loop ran through."""
+    for b in spec.bridges:
+        if b.template != "bag_axi2axil":
+            continue
+        dws = [a for a in spec.adapters if a.fabric == b.upstream and a.type == "dw"]
+        up = [int(a.params["from"]) < int(a.params["to"]) for a in dws]
+        if any(up) and not all(up):
+            return True
+    return False
+
+
 def _narrow_then(spec: Spec, protocol: str) -> bool:
     """A read split by a bus narrower than 32 bits, then a PROTOCOL fabric wider than that bus
     and wider than something after it (a downsizer's way down: the next bus or the slave)."""
@@ -307,6 +324,7 @@ def _narrow_then(spec: Spec, protocol: str) -> bool:
 
 
 SIM_CASES: dict[int, Callable[[Spec], bool]] = {
+    202611180040: _whole_struct_loop_path,
     202611200006: _partial_miss,
     202611220012: _midpoint_one_read,
     # #198, and #226 for the write split past its 4-byte region.

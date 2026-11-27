@@ -78,6 +78,16 @@ loop and counts it as third-party. A loop that runs through any other generated 
 stays where it is and is judged: that is where a generator error could wire a READY
 back into a VALID.
 
+Verilator treats a struct as one signal, so a struct that carries signals both ways can
+look like a loop that is not there. So when a judged \code{UNOPTFLAT} remains, BAG asks
+Yosys whether the flattened design has a combinational loop at bit level (\cmd{yosys}
+with its slang plugin: \code{hierarchy}, \code{proc}, \code{flatten}, \code{check}, with no
+optimisation first). The answer is for the whole design. With no loop, every such warning
+is waived, with that reason; with a loop anywhere, they all count. When Yosys cannot
+answer (it is not there, as outside the tools image, or it cannot read the design), they
+count, and a note says they were not checked. The check is structural: it does not follow
+a loop through a latch or a memory.
+
 \subsection{Built-in configuration and waivers}
 
 BAG ships its lint configuration. Each option and each waiver carries its reason.
