@@ -7,6 +7,8 @@ name: nightly
 #   jobs of 5 hours, two tests at a time each, and the alone tasks one per runner (D93);
 # - 50 random seeds through bag regress (D96: the decode job, then formal within a budget),
 #   with the date as --seed-base, on 10 jobs.
+# - the nightly report (#59): the pass rate over time from earlier nights' summaries,
+#   configuration-space coverage and its gaps, and tonight's open failures.
 # It only reports (D56): each regress job uploads its seeds' results, workbooks and IR, and
 # the summary job writes one table of every seed to the run summary and an artifact, naming
 # any seed a job cut off by its limit left without a result. Its history lives in the
@@ -182,6 +184,75 @@ jobs:
           path: |
             out/regress/summary.md
             out/regress/summary.json
+          retention-days: 90
+
+  report:
+    # #59, plan PR 7: one page, nightly.md, in the nightly-report artifact and the run summary.
+    # Earlier nights come from their regress-summary artifacts through the API (D55: the
+    # history lives in the artifacts), so this job reads actions. It only reports: the night's
+    # result below does not wait for it.
+    needs: [prep, regress]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SEEDS: ${{ inputs.seeds || '50' }}
+      SEED_BASE: ${{ needs.prep.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.26"
+          python-version: "3.11"
+      - run: uv sync --locked
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: regress-*
+          path: out/regress
+          merge-multiple: true
+      - name: Earlier nights
+        # The scheduled nights on main only: a dispatch to test a branch is not a night.
+        run: |
+          mkdir -p out/history
+          gh run list -R "$REPO" --workflow nightly.yml --event schedule --branch main \
+            --status completed --limit 30 \
+            --json databaseId,createdAt -q '.[] | "\(.databaseId) \(.createdAt[:10])"' |
+          while read -r id day; do
+            gh run download "$id" -R "$REPO" -n regress-summary -D "out/history/$day-$id" \
+              || echo "no regress-summary for run $id ($day)"
+          done
+      - name: Report
+        run: |
+          mkdir -p out/regress out/report
+          cat > out/report.py <<'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          from hdl_bag.regress.report import nightly_report
+          from hdl_bag.regress.run import SeedResult, missing_seeds, seeds
+
+          nights = [(p.parent.name[:10], json.loads(p.read_text(encoding="utf-8")))
+                    for p in sorted(Path("out/history").glob("*/summary.json"))]
+          results = [SeedResult.from_json(p.read_text(encoding="utf-8"))
+                     for p in sorted(Path("out/regress").glob("*/result.json"))]
+          base = os.environ["SEED_BASE"]  # YYYYMMDD, or a seed base given by hand
+          night = f"{base[:4]}-{base[4:6]}-{base[6:]}" if len(base) == 8 else base
+          gone = missing_seeds(Path("out/regress"), seeds(int(base), int(os.environ["SEEDS"])))
+          text = nightly_report(nights, night, results, gone)
+          Path("out/report/nightly.md").write_text(text, encoding="utf-8")
+          EOF
+          uv run python out/report.py
+          cat out/report/nightly.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-report
+          path: out/report/nightly.md
           retention-days: 90
 
   nightly:
