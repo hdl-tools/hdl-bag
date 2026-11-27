@@ -1605,18 +1605,22 @@ def test_two_masters_never_plan_the_same_slave_word(tmp_path: Path) -> None:
     assert set(seen.values()) == {"m0", "m1"}
 
 
-def test_a_word_split_by_an_earlier_narrow_bus_is_no_narrow_apb_word(tmp_path: Path) -> None:
+@pytest.mark.parametrize("width", [8, 16])
+def test_a_word_split_by_an_earlier_narrow_bus_is_no_narrow_apb_word(
+    tmp_path: Path, width: int
+) -> None:
     """Seed 202611210018: an 8-bit APB4 bus on the way splits every word write into byte writes,
     so the 16-bit APB4 slave behind it takes one write per byte, not one per 16-bit word: the
-    narrow-APB test's word check does not apply on such a path."""
-    from hdl_bag.tests_gen.route_model import narrow_apb_path
+    narrow-APB test's word check does not apply on such a path. A 16-bit bus there is as wide
+    as the word, and the path stays (review of #229)."""
+    from hdl_bag.tests_gen.route_model import narrow_apb_path, plain_word, splits_word_writes
 
     c = Cfg("narrowsplit", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
     c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
     c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
     c.option("m0", **AXIL_NA)
-    c.fabric("p8", "APB4", 8, 32, "D0")
+    c.fabric("p8", "APB4", width, 32, "D0")
     c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
     c.link("a", "b0", 0).link("b0", "p8", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
     c.region("b0", "w0", 0x4000_0000, 0x1_0000)
@@ -1632,4 +1636,8 @@ def test_a_word_split_by_an_earlier_narrow_bus_is_no_narrow_apb_word(tmp_path: P
     c.region("s0", "r0", 0x4000_0000, 0x1000)
     spec, findings = resolve_cfg(c, tmp_path)
     assert spec is not None, findings
-    assert narrow_apb_path(spec, spec.masters[0], spec.slaves[0]) is None
+    m, s = spec.masters[0], spec.slaves[0]
+    found = plain_word(spec, m, s)  # the path is there: only the split can leave it out
+    assert found is not None and found[1].bridges == ("b0", "b1", "b2")
+    assert splits_word_writes(spec, found[1]) == (width == 8)
+    assert (narrow_apb_path(spec, m, s) is None) == (width == 8)
