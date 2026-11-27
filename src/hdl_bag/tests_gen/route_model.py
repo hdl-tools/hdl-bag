@@ -604,8 +604,14 @@ def narrow_apb_path(spec: Spec, m: Any, s: Any) -> tuple[int, Outcome] | None:
 def splits_word_writes(spec: Spec, exp: Outcome) -> bool:
     """Whether a word write that EXP routes becomes byte writes: a bag_axi2ahb fed by AXI4-Lite
     takes full-width beats, and one wider than the word is written with some strobes clear,
-    which bag_axi2ahb_core turns into one AHB write per set strobe (seed 202611240029)."""
+    which bag_axi2ahb_core turns into one AHB write per set strobe (seed 202611240029). Or a
+    bus on the way, before the slave's own, is narrower than the slave's word: it splits the
+    word into writes of its width, each reaching the slave on its own (seed 202611210018).
+    (An AXI master's own fabric is 32 bits or wider, so only the buses behind bridges count.)"""
     fabrics = {f.name: f for f in spec.fabrics}
+    downstream = {b.name: fabrics[b.downstream] for b in spec.bridges}
+    if any(downstream[b].data_width < 8 * exp.word_bytes for b in exp.bridges[:-1]):
+        return True
     return any(b.template == "bag_axi2ahb" and fabrics[b.upstream].protocol == "AXI4-Lite"
                and min(fabrics[b.upstream].data_width, fabrics[b.downstream].data_width) > 32
                for b in spec.bridges if b.name in exp.bridges)  # fmt: skip
