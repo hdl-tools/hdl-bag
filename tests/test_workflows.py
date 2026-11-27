@@ -299,7 +299,11 @@ def test_the_manuals_pypi_docker_command_names_this_release() -> None:
         Path(__file__).parents[1] / "docs" / "manual" / "examples" / "files" / "docker-pypi.sh"
     ).read_text(encoding="utf-8")
     assert f"ghcr.io/hdl-tools/hdl-bag-tools:v{__version__} " in script, script
-    assert f"--from hdl-bag=={__version__} " in script, script
+    assert f"--from 'hdl-bag[sim]=={__version__}' " in script, script
     runs = [str(st.get("run", "")) for job in _load("release.yml")["jobs"].values()
             for st in job.get("steps", [])]  # fmt: skip
-    assert any('--tag "$repo:${GITHUB_REF_NAME}"' in r for r in runs), "release no longer tags it"
+    # The release tags this image, from the :main image the tag was validated against.
+    tag = '--tag "$repo:${GITHUB_REF_NAME}" "$repo:main"'
+    assert any("repo=ghcr.io/hdl-tools/hdl-bag-tools" in r and tag in r for r in runs), (
+        "release.yml no longer tags the tools image the manual names"
+    )
