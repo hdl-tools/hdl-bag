@@ -103,13 +103,15 @@ def _expected_delta(sheet: str, coord: str, old: object, new: object) -> bool:
         return True
     if sheet == "Memory_Map" and coord[0] == "M" and isinstance(old, str) and isinstance(new, str):
         # MM-SMALL-AHB (#223, PR 231): the Check column flags an AHB-Lite region under 1 KB
-        # before the 4 KB warning, and its help names it.
+        # before the 4 KB warning, and its help names it. D114: the 4 KB warning is for AXI
+        # fabrics only, as MM-SMALL-AXI.
         r = coord[1:]
         lookup = f'IFERROR(INDEX(Fabrics!$B$5:$B$60,MATCH(I{r},Fabrics!$A$5:$A$60,0)),"?")'
         ahb = f'IF(AND({lookup}="AHB-Lite",K{r}<1024),"AHB < 1 KB",'
-        named = "MISALIGNED | AHB < 1 KB (MM-SMALL-AHB) | WARN"
-        help_text = old.replace("MISALIGNED | WARN", named)
-        return new in (old.replace(f"IF(K{r}<4096,", ahb + f"IF(K{r}<4096,") + ")", help_text)
+        axi = f'IF(AND(OR({lookup}="AXI4",{lookup}="AXI4-Lite"),K{r}<4096),'
+        named = "MISALIGNED | AHB < 1 KB (MM-SMALL-AHB) | WARN < 4 KB (AXI, MM-SMALL-AXI)"
+        help_text = old.replace("MISALIGNED | WARN < 4 KB", named)
+        return new in (old.replace(f"IF(K{r}<4096,", ahb + axi) + ")", help_text)
     if sheet == "Access_Rules":
         # New row 8; derived formulas extend one spare row further (to row 18).
         return coord in {"A8", "B8", "C8", "D8", "E18", "F18", "G18"} and old is None
