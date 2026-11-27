@@ -78,7 +78,7 @@ from hdl_bag.tests_gen.route_model import (
     on_fabric_clock,
     pin_sets,
     plain_word,
-    private_words,
+    private_plans,
     probes,
     prot_tied,
     pslverr_tied,
@@ -489,7 +489,10 @@ async def arbitration_follows_the_fabric_policy(dut: Any) -> None:
         addrs = {p.port: region.base + 16 * i for i, p in enumerate(ports)}
         visible = {(a & ((1 << width) - 1)): p for p, a in addrs.items()}
         n = len(slaves[region.slave].log)
-        await Combine(*(cocotb.start_soon(_access(masters[p], "AHB-Lite", 32, a, True, i, False, 3))
+        # Plain traffic HPROT: 3 (not cacheable) is what a converter on the way refuses (D104,
+        # review of #228, as for seed 202611270039).
+        await Combine(*(cocotb.start_soon(_access(masters[p], "AHB-Lite", 32, a, True, i, False,
+                                                  TRAFFIC_HPROT))
                         for i, (p, a) in enumerate(addrs.items())))  # fmt: skip
         order = [visible[e.addr] for e in slaves[region.slave].log[n:] if e.write]
         if f.arbitration == "fixed-priority":
@@ -524,7 +527,10 @@ async def _traffic(masters: dict[str, Any], spawned: list[Any] | None = None) ->
             await Combine(*reads)
             got = [r.result() for r in reads]
         else:
-            prot = 3 if m.protocol == "AHB-Lite" else 0  # secure (APB: PPROT[1] = non-secure)
+            # The HPROT private_words planned for (it leaves out what a converter refuses, D104;
+            # 3, not cacheable, was refused on its way: seed 202611270039). APB: PPROT 0 is
+            # a secure data access (PPROT[1] = non-secure).
+            prot = TRAFFIC_HPROT if m.protocol == "AHB-Lite" else 0
             for a, d in data.items():
                 err, _, _ = await _access(masters[m.name], m.protocol, m.data_width, a, True,
                                           d, False, prot)  # fmt: skip
@@ -538,7 +544,8 @@ async def _traffic(masters: dict[str, Any], spawned: list[Any] | None = None) ->
             assert not r.err and r.data == d, f"{m.name} {a:#x}: read {r.data:#x}, wrote {d:#x}"
         return len(data)
 
-    plans = {m.name: (m, private_words(SPEC, m, i, 8)) for i, m in enumerate(SPEC.masters)}
+    own = private_plans(SPEC, 8)
+    plans = {m.name: (m, own[m.name]) for m in SPEC.masters}
     tasks = [start(traffic(m, words)) for m, words in plans.values() if words]
     await Combine(*tasks)
     total = sum(t.result() for t in tasks)
@@ -557,7 +564,8 @@ async def _bursts(
     masters: dict[str, Any], spawned: list[Any] | None = None, offset: int = 0
 ) -> int:
     """Every AXI4 master at once: an 8-beat INCR burst of its own words, written and read back.
-    OFFSET moves the words (private_words' index) clear of _traffic's, so both can run at once.
+    OFFSET moves the words (private_plans' first index) away from _traffic's; the tests run
+    the two one after the other.
     Every task it starts goes in SPAWNED. Returns the bursts checked."""
 
     async def one(m: Any, word: int) -> None:
@@ -567,8 +575,8 @@ async def _bursts(
         assert not r.err and r.data == int.from_bytes(data, "little"), f"{m.name} burst read"
 
     count = len(SPEC.masters)
-    plans = [(m, private_words(SPEC, m, i + offset * count, 8)) for i, m in enumerate(SPEC.masters)
-             if m.protocol == "AXI4"]  # fmt: skip
+    own = private_plans(SPEC, 8, offset * count)
+    plans = [(m, own[m.name]) for m in SPEC.masters if m.protocol == "AXI4"]
     tasks = [cocotb.start_soon(one(m, words[0])) for m, words in plans if words]
     if spawned is not None:
         spawned += tasks

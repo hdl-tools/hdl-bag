@@ -1538,3 +1538,68 @@ def test_a_single_byte_at_a_regions_last_byte_is_one_transfer(tmp_path: Path) ->
     edges = {a: (w, r) for a, w, r in region_edges(spec, spec.masters[0])}
     write, read = edges[0x4000_0FFF]
     assert (write.slave, write.partial, read.partial) == ("s0", None, None)
+
+
+def test_a_byte_write_does_not_land_alone_after_a_wider_apb3_bus(tmp_path: Path) -> None:
+    """Seed 202611270035: an 8-bit APB3 slave's word is a byte, but the byte write first crosses
+    a 16-bit APB3 bus, which has no PSTRB: it becomes a halfword, and bag_axi2apb later writes
+    both bytes. The narrow-APB test's single-byte check must not run on such a path."""
+    from hdl_bag.tests_gen.route_model import byte_write_lands, narrow_apb_path
+
+    c = Cfg("byteapb3", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("a", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    c.master("m0", "AXI4-Lite", 32, 32, "D0").link("m0", "a", 0).decode("m0", "DECERR")
+    c.option("m0", **AXIL_NA)
+    c.fabric("p", "APB3", 16, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("a", "b0", 0).link("b0", "p", 0).decode("b0", "PSLVERR").option("b0", **APB3_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x1_0000)
+    c.fabric("x", "AXI4", 32, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_apb2axi")
+    c.link("p", "b1", 0).link("b1", "x", 0).decode("b1", "DECERR").option("b1", **AXI4_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("q", "APB3", 8, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("x", "b2", 0).link("b2", "q", 0).decode("b2", "PSLVERR").option("b2", **APB3_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB3", 8, 32, "D0").link("q", "s0", 0).option("s0", **APB3_NA)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    m, s = spec.masters[0], spec.slaves[0]
+    found = narrow_apb_path(spec, m, s)
+    assert found is not None
+    assert not byte_write_lands(spec, s, found[1])
+
+
+def test_two_masters_never_plan_the_same_slave_word(tmp_path: Path) -> None:
+    """Seed 202611270046: each master's private words are offset by 0x100 per master index in
+    the lowest region it can use. For m1 that was a bridge window, and its offset landed in the
+    slave region behind it that m0 had taken: they overwrote each other's words."""
+    from hdl_bag.tests_gen.route_model import private_plans, route
+
+    c = Cfg("twoplans", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("f", "AXI4-Lite", 32, 32, "D0", "round-robin")
+    for k, name in enumerate(("m0", "m1")):
+        c.master(name, "AXI4-Lite", 32, 32, "D0").link(name, "f", k).decode(name, "DECERR")
+        c.option(name, **AXIL_NA)
+    c.fabric("p", "APB4", 32, 32, "D0")
+    c.bridge("b0", 0x4000_0000, template="bag_axi2apb")
+    c.link("f", "b0", 0).link("b0", "p", 0).decode("b0", "PSLVERR").option("b0", **APB4_NA)
+    c.region("b0", "w0", 0x4000_0000, 0x1000)
+    c.slave("s0", "APB4", 32, 32, "D0").link("p", "s0", 0).option("s0", **APB4_NA)
+    c.region("s0", "r0", 0x4000_0100, 0x100)
+    c.slave("s1", "APB4", 32, 32, "D0").link("p", "s1", 1).option("s1", **APB4_NA)
+    c.region("s1", "r0", 0x4000_0800, 0x400)  # where m1 goes instead
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert spec is not None, findings
+    seen: dict[tuple[str | None, int], str] = {}
+    plans = private_plans(spec, 8)
+    for m in spec.masters:
+        for a in plans[m.name]:
+            e = route(spec, m.name, a, True, False, {})
+            assert (e.slave, e.address) not in seen, (m.name, hex(a), seen[e.slave, e.address])
+            seen[e.slave, e.address] = m.name
+    assert set(seen.values()) == {"m0", "m1"}
