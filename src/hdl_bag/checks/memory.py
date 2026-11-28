@@ -242,6 +242,16 @@ def check_bridge_windows(ctx: Context, regions: list[Region]) -> None:
         down = ctx.master_fabric.get(name)
         if down is None:
             continue
+        # D129: the bridge drives the low address bits of its downstream fabric, so a window
+        # wider than that space aliases its upper part onto the lower one.
+        drow = ctx.fabric_row(down)
+        d_addr = ctx.integer(drow["Addr width (bits)"], minimum=1) if drow else None
+        view = _bridge_view(ctx, name)
+        for r in own:
+            if isinstance(d_addr, int) and r.end - view >= 1 << d_addr:
+                seen = f" (offsets from {_hex(view)})" if view else ""
+                ctx.report("BRIDGE-WINDOW-RANGE", r.row["Size (hex)"],
+                           f"{name} window {r.span()} exceeds the {d_addr}-bit address space of {down}{seen}: accesses above it would reach its low addresses again. Make the window smaller or {down}'s address wider")  # fmt: skip
         for r in own:
             if not any(o.fabric == down and o.overlaps(r.base, r.end) for o in regions):
                 ctx.report("BRIDGE-WINDOW-EMPTY", r.row["Base (hex)"],

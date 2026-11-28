@@ -707,6 +707,11 @@ on \sheet{Fabrics}, naming each master and the addresses it sends
   (\ruleid{BRIDGE-WINDOW-BASE}).
 \item Each region of a bridge must reach at least one region on its downstream fabric
   (\ruleid{BRIDGE-WINDOW-EMPTY}).
+\item Each region of a bridge must fit in the address width of its downstream fabric,
+  counted from the offset its fabric decodes from (the window base for pass-through N)
+  (\ruleid{BRIDGE-WINDOW-RANGE}). The
+  bridge drives only the low address bits, so an access above them would reach the
+  fabric's low addresses again.
 \end{itemize}
 
 \section{Topology}

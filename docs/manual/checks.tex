@@ -8,6 +8,7 @@
 \checkrule{BRIDGE-FIFO-IGNORED}{warning}{Bridges row 7: bag\_ahb2axi handles one transfer at a time and ignores FIFO depth 2 (BRIDGE-FIFO-IGNORED)}
 \checkrule{BRIDGE-WINDOW-BASE}{error}{Bridges row 5: Window base 0x4000\_1000 differs from br\_main2per's lowest region 0x4000\_0000 (BRIDGE-WINDOW-BASE)}
 \checkrule{BRIDGE-WINDOW-EMPTY}{error}{Memory\_Map row 16: br\_ahb2aon window 0x5100\_0000..0x5100\_FFFF reaches no region on aon\_apb (BRIDGE-WINDOW-EMPTY)}
+\checkrule{BRIDGE-WINDOW-RANGE}{error}{Memory\_Map row 16: br\_ahb2aon window 0x5000\_0000..0x5000\_FFFF exceeds the 15-bit address space of aon\_apb (offsets from 0x5000\_0000): accesses above it would reach its low addresses again. Make the window smaller or aon\_apb's address wider (BRIDGE-WINDOW-RANGE)}
 \checkrule{CLK-CDC-RESET}{error}{Resets row 5: reset rst\_cpu\_n (async assertion, async deassertion) resets one side of the clock-domain crossing cpu0\_cdc\_2\_main\_xbar (D\_CPU -> D\_SYS); a crossing needs async assertion and sync deassertion on both sides (CLK-CDC-RESET)}
 \checkrule{CLK-DOMAIN-NO-RESET}{error}{Clocks row 9: domain D\_X has no reset on Resets (CLK-DOMAIN-NO-RESET)}
 \checkrule{CLK-DOMAIN-TWO-CLOCKS}{error}{Clocks row 9: domain D\_SYS already has a clock on Clocks row 6 (CLK-DOMAIN-TWO-CLOCKS)}

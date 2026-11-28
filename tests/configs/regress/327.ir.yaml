@@ -118,7 +118,7 @@ fabrics:
     protocol: AXI4-Lite
     topology: shared-bus
     data_width: 64
-    addr_width: 16
+    addr_width: 32
     domain: D0
     arbitration: round-robin
     latency_mode: null
