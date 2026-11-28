@@ -223,6 +223,11 @@ module bag_hs_axi_mst #(
 
   logic [InAddrWidth-1:0] axi_addr;
   assign axi_addr = sub_addr;
+  // The AXI address is the low AxiAddrWidth bits; the bits above it are dropped on purpose.
+  if (InAddrWidth > AxiAddrWidth) begin : gen_addr_unused
+    logic unused_addr;
+    assign unused_addr = ^axi_addr[InAddrWidth-1:AxiAddrWidth];
+  end
 
   assign m_awid_o     = 1'b0;
   assign m_awaddr_o   = AxiAddrWidth'(axi_addr);
