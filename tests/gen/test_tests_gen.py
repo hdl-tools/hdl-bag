@@ -667,7 +667,7 @@ def test_a_bus_narrower_than_the_slave_can_repeat_a_read(middle: int, repeats: i
                  SimpleNamespace(name="f1", data_width=middle, master_ports=[])],
         bridges=[SimpleNamespace(name="br0", downstream="f1")],
     )  # fmt: skip
-    exp = SimpleNamespace(bridges=("br0",), word_bytes=8, span=4)
+    exp = SimpleNamespace(bridges=("br0",), word_bytes=8, span=4, reads=1)
     m = SimpleNamespace(name="m0", data_width=64, protocol="AXI4")
     assert reads_per_word(spec, m, exp) == repeats  # type: ignore[arg-type]
 
@@ -696,7 +696,8 @@ def _split_read(widening: bool) -> tuple[SimpleNamespace, SimpleNamespace, Simpl
     bridges = [SimpleNamespace(name="br0", downstream="f1"),
                SimpleNamespace(name="br1", downstream="f2")]  # fmt: skip
     spec = SimpleNamespace(fabrics=fabrics, bridges=bridges)
-    exp = SimpleNamespace(bridges=("br0", "br1") if widening else ("br0",), word_bytes=2, span=4)
+    hops = ("br0", "br1") if widening else ("br0",)
+    exp = SimpleNamespace(bridges=hops, word_bytes=2, span=4, reads=1)
     return spec, SimpleNamespace(name="m0", data_width=64, protocol="AHB-Lite"), exp
 
 
@@ -1273,6 +1274,43 @@ def test_a_widening_after_the_split_adds_no_reads(
     64-bit AXI4-Lite bus widens it to later. A 32-bit Lite master's 4-byte read is four byte
     reads (each word at most four times); with no narrow bus at all, nothing repeats."""
     spec = _rewidened(tmp_path, master_bits, apb)
+    exp = route(spec, "m0", 0x4000_0100, False, False, {})
+    assert exp.slave == "s0" and reads_per_word(spec, spec.masters[0], exp) == repeats
+
+
+@pytest.mark.parametrize(("second", "repeats"), [(64, 2), (32, 1)])
+def test_a_split_rewidened_before_the_narrowest_bus_still_repeats_a_read(
+    tmp_path: Path, second: int, repeats: int
+) -> None:
+    """Seed 202611280008: a 32-bit AHB read becomes a 64-bit AXI4-Lite beat, a 32-bit APB3 bus
+    splits it in two, and the next 64-bit Lite bus makes each a full beat again, so the 16-bit
+    APB3 bus at the end reads every slave word twice, though it is the narrowest bus on the way.
+    With a 32-bit second Lite bus nothing widens back, and nothing repeats."""
+    c = Cfg("rewiden2", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("h", "AHB-Lite", 32, 32, "D0")
+    c.master("m0", "AHB-Lite", 32, 32, "D0").link("m0", "h", 0).decode("m0", "HRESP_ERROR")
+    c.option("m0", **AHB_MASTER_NA)
+    c.fabric("l1", "AXI4-Lite", 64, 32, "D0", "round-robin")
+    c.bridge("b1", 0x4000_0000, template="bag_ahb2axi")
+    c.link("h", "b1", 0).link("b1", "l1", 0).decode("b1", "DECERR").option("b1", **AXIL_NA)
+    c.region("b1", "w1", 0x4000_0000, 0x1_0000)
+    c.fabric("p1", "APB3", 32, 32, "D0")
+    c.bridge("b2", 0x4000_0000, template="bag_axi2apb")
+    c.link("l1", "b2", 0).link("b2", "p1", 0).decode("b2", "PSLVERR").option("b2", **APB3_NA)
+    c.region("b2", "w2", 0x4000_0000, 0x1_0000)
+    c.fabric("l2", "AXI4-Lite", second, 32, "D0", "round-robin")
+    c.bridge("b3", 0x4000_0000, template="bag_apb2axi")
+    c.link("p1", "b3", 0).link("b3", "l2", 0).decode("b3", "DECERR").option("b3", **AXIL_NA)
+    c.region("b3", "w3", 0x4000_0000, 0x1_0000)
+    c.fabric("p2", "APB3", 16, 32, "D0")
+    c.bridge("b4", 0x4000_0000, template="bag_axi2apb")
+    c.link("l2", "b4", 0).link("b4", "p2", 0).decode("b4", "PSLVERR").option("b4", **APB3_NA)
+    c.region("b4", "w4", 0x4000_0000, 0x1_0000)
+    c.slave("s0", "APB3", 16, 32, "D0").link("p2", "s0", 0).option("s0", **APB3_NA)
+    c.region("s0", "regs", 0x4000_0000, 0x1000)
+    spec, findings = resolve_cfg(c, tmp_path)
+    assert findings == [] and spec is not None
     exp = route(spec, "m0", 0x4000_0100, False, False, {})
     assert exp.slave == "s0" and reads_per_word(spec, spec.masters[0], exp) == repeats
 
