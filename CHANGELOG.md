@@ -56,6 +56,8 @@ The `demo_ss` sample now gives four warnings instead of two (two `PORTOPT-PSTRB-
 ### Fixed
 
 - `bag_axi_dw` no longer gives a Verilator UNOPTFLAT on its request and response structs.
+- `bag_ahb2axi` and `bag_apb2axi` no longer give a Verilator UNUSEDSIGNAL when the AXI side
+  has fewer address bits than the APB or AHB side.
 - Generated tests and formal jobs no longer fail falsely on some configurations, among them:
   an APB3 bus on the path (it drops PROT and stores whole words), AHB read alignment behind an
   AXI4-Lite master, an access split across a region's end, a master with no target on a

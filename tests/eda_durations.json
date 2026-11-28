@@ -956,6 +956,7 @@
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611170026]": 90.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[202611200006]": 60.0,
  "tests/regress/test_regress_corpus.py::test_a_shrunk_seed_passes_the_step_it_failed[327]": 60.0,
+ "tests/regress/test_regress_eda.py::test_a_bridge_into_axi_onto_a_narrower_address_fabric_lints_clean": 5.0,
  "tests/regress/test_regress_eda.py::test_a_design_whose_only_width_converter_is_axi4_lite_lints_clean": 0.99,
  "tests/regress/test_regress_eda.py::test_a_loop_verilator_sees_only_through_whole_structs_is_not_reported": 10.0,
  "tests/regress/test_regress_eda.py::test_a_seed_runs_the_whole_flow[0]": 74.37,

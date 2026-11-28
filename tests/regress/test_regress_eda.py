@@ -13,7 +13,7 @@ from hdl_bag.cli import main
 from hdl_bag.flows import lint
 from hdl_bag.gen import generate, include_dirs, sources
 from hdl_bag.ir import resolve
-from hdl_bag.regress.dsl import AXIL_NA, Cfg
+from hdl_bag.regress.dsl import APB3_NA, AXIL_NA, Cfg
 from hdl_bag.regress.generate import check, random_config
 
 # What each seed draws, pinned so a generator change that moves them shows here.
@@ -54,6 +54,28 @@ def test_a_design_whose_only_width_converter_is_axi4_lite_lints_clean(tmp_path: 
     c.slave("s0", "AXI4-Lite", 64, 32, "D0").link("x", "s0", 0)
     c.region("s0", "r0", 0x4000_0000, 0x1000)
     c.option("m0", **AXIL_NA).option("s0", **AXIL_NA)
+    _, result = check(c, tmp_path)
+    assert [f.message for f in result.errors] == []
+    out = generate(resolve(result), tmp_path / "out", tmp_path)
+    report = lint(sources(out), out.top, out.root, tools=out.lint_tools, incdirs=include_dirs(out))
+    assert [f.format() for f in report.unwaived] == []
+
+
+@pytest.mark.eda
+def test_a_bridge_into_axi_onto_a_narrower_address_fabric_lints_clean(tmp_path: Path) -> None:
+    """Seed 202611280008's shrink (46126937886) narrowed the fabric addresses, and Verilator
+    then reported UNUSEDSIGNAL for the address bits above the AXI side's width in
+    bag_hs_axi_mst.sv (axi_addr[31:20]), through bag_apb2axi and bag_ahb2axi. Cut down: an
+    APB3 master through bag_apb2axi onto an AXI4-Lite fabric with 20 address bits."""
+    c = Cfg("narrow_lite", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB3", 32, 32, "D0").fabric("x", "AXI4-Lite", 32, 20, "D0", "round-robin")
+    c.master("m0", "APB3", 32, 32, "D0").slave("s0", "AXI4-Lite", 32, 12, "D0")
+    c.bridge("b0", 0x4000_0000, pass_through=False, template="bag_apb2axi")
+    c.link("m0", "p", 0).link("p", "b0", 0).link("b0", "x", 0).link("x", "s0", 0)
+    c.region("b0", "win", 0x4000_0000, 0x1000).region("s0", "r0", 0x4000_0000, 0x1000)
+    c.decode("m0", "PSLVERR").decode("b0", "DECERR")
+    c.option("m0", **APB3_NA).option("b0", **AXIL_NA).option("s0", **AXIL_NA)
     _, result = check(c, tmp_path)
     assert [f.message for f in result.errors] == []
     out = generate(resolve(result), tmp_path / "out", tmp_path)
