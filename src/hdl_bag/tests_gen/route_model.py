@@ -287,7 +287,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
                 # An AXI4-Lite beat is full width: the read now covers whole aligned beats,
                 # and each transfer within one beat reads all of it again.
                 lite = size = fabric.data_width // 8
-                reads *= max(1, min(lite, got) // piece)
+                reads *= max(1, -(-min(lite, got) // piece))
                 piece = lite
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
@@ -904,6 +904,13 @@ def reads_per_word(spec: Spec, m: Any, exp: Outcome, covered: int = 0) -> int:
     return max(1, exp.word_bytes // (narrow // 8),
                min(max(access_bytes(m), exp.span, covered), after // 8) // (narrow // 8),
                exp.reads)  # fmt: skip
+
+
+def burst_read_repeats(spec: Spec, m: Any, addr: int, size: int) -> int:
+    """How many times a burst read from M at ADDR in beats of 2**SIZE bytes may read one slave
+    word (axi4_burst_shapes_match_the_model): what a read's route counts (Outcome.reads is
+    counted for reads only; review of #248)."""
+    return reads_per_word(spec, m, route(spec, m.name, addr, False, False, {}), covered=1 << size)
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:
