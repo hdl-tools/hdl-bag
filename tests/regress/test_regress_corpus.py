@@ -54,7 +54,8 @@ SEEDS = {
     202611200006: ("sim", "every_master_reaches_what_the_model_says", "#226",
                    "a split access whose later transfer misses the slave's region is an error "
                    "(shrunk at 13a322e for #214's route test, it drifted to this: a 4-byte "
-                   "region)"),
+                   "region; f1's address set back to 32 bits, as its 16 MB window aliased "
+                   "on 20, BRIDGE-WINDOW-RANGE, #250)"),
     202611220001: ("absent", "apb_byte_writes_carry_pstrb", "#200",
                    "the PSTRB test runs only on a path that keeps the strobes "
                    "(stores_single_bytes): here a bag_ahb2apb with PSTRB tied stores whole words"),
@@ -109,7 +110,8 @@ SEEDS = {
                    "in bag_hs_axi_mst, another finding; they were set back to 32 by hand)"),
     327: ("sim", "every_master_reaches_what_the_model_says", "#212",
           "a split read re-widened by an AXI4-Lite bus before a downsizer reads a word once "
-          "per byte at or below it"),
+          "per byte at or below it (f2's address set back to 32 bits, as br1's 256 KB "
+          "window aliased on 16, BRIDGE-WINDOW-RANGE, #250)"),
 }  # fmt: skip
 
 
