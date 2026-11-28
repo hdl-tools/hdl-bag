@@ -54,6 +54,9 @@ class Outcome:
     # With PARTIAL: the bytes, as the slave sees them, of the transfers before the first miss,
     # which surely reached it (after an error the later ones may not run; review of #226).
     sure: frozenset[int] = frozenset()
+    # Reads of one beat's bytes per read sent: each AXI4-Lite bus that widens split transfers
+    # back to a full beat multiplies them (seed 202611280008; reads_per_word).
+    reads: int = 1
 
 
 def _option(spec: Spec, port: str, column: str) -> str | None:
@@ -224,6 +227,10 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
     # burst whose start is not aligned to it (not reachable while AXI4 buses are 32 bits or
     # more and apb2axi issues single beats), revisit if narrower AXI4 buses are allowed.
     m = next(x for x in spec.masters if x.name == master)
+    # The bytes the read really carries (an APB or AHB master narrower than the word sends
+    # only its width), its bytes per transfer now, and how often each beat's bytes are read.
+    got = hi - lo if m.protocol in ("AXI4", "AXI4-Lite") else min(hi - lo, m.data_width // 8)
+    piece, reads = min(got, fabric.data_width // 8), 1
     size = max(hi - lo, m.data_width // 8 if m.protocol == "AXI4-Lite" else 0)
     # No bus carries a transfer wider than itself: a downsizer onto it splits the beat (seed 2).
     size = min(size, fabric.data_width // 8)
@@ -275,11 +282,16 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             # After this hop's own trim: a bus narrower than what is still covered splits it.
             if not split and fabric.data_width // 8 < hi - lo:
                 split, start = True, lo
+            piece, got = min(piece, fabric.data_width // 8), min(got, hi - lo)
             if not write and fabric.protocol == "AXI4-Lite":
-                # An AXI4-Lite beat is full width: the read now covers whole aligned beats.
+                # An AXI4-Lite beat is full width: the read now covers whole aligned beats,
+                # and each transfer within one beat reads all of it again.
                 lite = size = fabric.data_width // 8
+                reads *= max(1, -(-min(lite, got) // piece))
+                piece = lite
                 lo = (addr + lo) // lite * lite - addr
                 hi = -(-(addr + hi) // lite) * lite - addr
+                got = hi - lo
             if fabric.data_width < narrowest:
                 narrowest, carried = fabric.data_width, hi - lo
             if not write and fabric.protocol == "AHB-Lite":
@@ -313,7 +325,7 @@ def route(spec: Spec, master: str, addr: int, write: bool, nonsec: bool,
             slave_error=(error and not masked) or (partial is not None and not partial_masked),
             nonsec=nonsec, bridges=tuple(crossed), hits_error_word=error, word_bytes=word,
             words=frozenset(words), may_refuse=_may_refuse(spec, origin, tuple(crossed), target),
-            span=carried, partial=partial, sure=sure,
+            span=carried, partial=partial, sure=sure, reads=reads,
         )  # fmt: skip
     raise AssertionError("bridge chain longer than the number of fabrics")
 
@@ -885,8 +897,20 @@ def reads_per_word(spec: Spec, m: Any, exp: Outcome, covered: int = 0) -> int:
     # it comes back whole only as far as a wider bus behind the narrowest one widens it.
     narrow = min(widths)
     after = max(widths[widths.index(narrow) :])
+    # And each AXI4-Lite re-widening on the way multiplies the reads of a beat (EXP.reads), even
+    # one before the narrowest bus (seed 202611280008). shortcut: not multiplied by a slave word
+    # wider than the beat (a generator seed 206 upsizer reads it once per beat); revisit if a
+    # seed reads such a word more often.
     return max(1, exp.word_bytes // (narrow // 8),
-               min(max(access_bytes(m), exp.span, covered), after // 8) // (narrow // 8))  # fmt: skip
+               min(max(access_bytes(m), exp.span, covered), after // 8) // (narrow // 8),
+               exp.reads)  # fmt: skip
+
+
+def burst_read_repeats(spec: Spec, m: Any, addr: int, size: int) -> int:
+    """How many times a burst read from M at ADDR in beats of 2**SIZE bytes may read one slave
+    word (axi4_burst_shapes_match_the_model): what a read's route counts (Outcome.reads is
+    counted for reads only; review of #248)."""
+    return reads_per_word(spec, m, route(spec, m.name, addr, False, False, {}), covered=1 << size)
 
 
 def widest_on_path(spec: Spec, m: Any, exp: Outcome) -> int:

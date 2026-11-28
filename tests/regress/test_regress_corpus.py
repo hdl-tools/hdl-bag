@@ -16,6 +16,7 @@ the cover. A "formal" entry names the job and task ("reset:cover") it must now p
 """
 
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +102,11 @@ SEEDS = {
                    "an AXI4-Lite fabric drops a master's tied AxCACHE, so a pc onto an AXI4 "
                    "slave drives 0b11 (the shrink cut every region; one 4 KB region for s0 was "
                    "restored by hand, else the route test's error self-check has no error word)"),
+    202611280008: ("sim", "every_master_reaches_what_the_model_says", "#248",
+                   "a read split by a 32-bit APB3 bus between two 64-bit AXI4-Lite buses is "
+                   "widened back to the whole beat, so the 16-bit APB3 bus after reads each "
+                   "word twice (the shrink narrowed the address widths, which then failed lint "
+                   "in bag_hs_axi_mst, another finding; they were set back to 32 by hand)"),
     327: ("sim", "every_master_reaches_what_the_model_says", "#212",
           "a split read re-widened by an AXI4-Lite bus before a downsizer reads a word once "
           "per byte at or below it"),
@@ -285,6 +291,14 @@ def _reads_a_word_again(spec: Spec) -> bool:
                for m, _, e in _accesses(spec, False))  # fmt: skip
 
 
+def _rewidened_before_the_narrowest(spec: Spec) -> bool:
+    """#248: a read whose AXI4-Lite re-widenings (Outcome.reads) allow more repeats than the
+    other terms of reads_per_word, which look only at the narrowest bus and after."""
+    return any(e.slave and rm.reads_per_word(spec, m, e)
+               > rm.reads_per_word(spec, m, replace(e, reads=1))
+               for m, _, e in _accesses(spec, False))  # fmt: skip
+
+
 def _fixed_priority_top_sends_one_write_at_a_time(spec: Spec) -> bool:
     """A fixed-priority AXI fabric's contention test where every master but the last reaches it
     through an AXI4 width converter, so the starvation check has no master whose writes stay
@@ -392,6 +406,7 @@ SIM_CASES: dict[int, Callable[[Spec], bool]] = {
     202611250040: lambda spec: _narrow_then(spec, "AXI4-Lite"),
     202611260015: _lite_drops_cache,
     202611900021: _fixed_priority_top_sends_one_write_at_a_time,
+    202611280008: _rewidened_before_the_narrowest,
     327: _reads_a_word_again,
 }
 
