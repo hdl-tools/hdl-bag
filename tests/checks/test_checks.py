@@ -787,21 +787,53 @@ def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:
     assert _messages(tmp_path, [("Project", 18, "Value", "demo_ss")]) == []
 
 
-def test_a_pass_through_window_wider_than_the_fabric_behind_it_is_an_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("window", [0x20_0000, 0x10_0000])
+def test_a_pass_through_window_wider_than_the_fabric_behind_it_is_an_error(
+    tmp_path: Path, window: int
+) -> None:
     """D129, pass-through Y (review of #249): a 2 MB window at 0 onto a 20-bit AXI4-Lite fabric.
-    bag_apb2axi drives the low 20 bits, so an access at 0x10_0000 would reach s0 at 0."""
+    bag_apb2axi drives the low 20 bits, so an access at 0x10_0000 would reach s0 at 0. A 1 MB
+    window fits."""
     c = Cfg("alias", phase=5)
     c.domain("D0", "clk_0", "rst_0_n")
     c.fabric("p", "APB3", 32, 32, "D0").fabric("x", "AXI4-Lite", 32, 20, "D0", "round-robin")
     c.master("m0", "APB3", 32, 32, "D0").slave("s0", "AXI4-Lite", 32, 12, "D0")
     c.bridge("b0", 0, template="bag_apb2axi")
     c.link("m0", "p", 0).link("p", "b0", 0).link("b0", "x", 0).link("x", "s0", 0)
-    c.region("b0", "win", 0, 0x20_0000).region("s0", "r0", 0, 0x1000)
+    c.region("b0", "win", 0, window).region("s0", "r0", 0, 0x1000)
     c.decode("m0", "PSLVERR").decode("b0", "DECERR")
     c.option("m0", **APB3_NA).option("b0", **AXIL_NA).option("s0", **AXIL_NA)
     _, result = check(c, tmp_path)
-    assert [f.message for f in result.errors] == [
-        "Memory_Map row 5: b0 window 0x0000_0000..0x001F_FFFF exceeds the 20-bit address space of x: accesses above it would reach its low addresses again. Make the window smaller or x's address wider (BRIDGE-WINDOW-RANGE)"]  # fmt: skip
+    assert [f.message for f in result.errors] == (
+        ["Memory_Map row 5: b0 window 0x0000_0000..0x001F_FFFF exceeds the 20-bit address space of x: accesses above it would reach its low addresses again. Make the window smaller or x's address wider (BRIDGE-WINDOW-RANGE)"]
+        if window > 0x10_0000 else [])  # fmt: skip
+
+
+@pytest.mark.parametrize("window", [0x2_0000, 0x1_0000])
+def test_a_pass_through_window_behind_a_translating_bridge_counts_from_its_offset(
+    tmp_path: Path, window: int
+) -> None:
+    """D129 (review of #250): b0 (pass-through N at 0x4000_0000) feeds a 20-bit fabric, and
+    b1 (pass-through Y) behind it passes those offsets on to a 16-bit APB3 fabric. b1's
+    window counts from 0x4000_0000, so 64 KB fits and 128 KB does not."""
+    c = Cfg("chain", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB3", 32, 32, "D0").fabric("x", "AXI4-Lite", 32, 20, "D0", "round-robin")
+    c.fabric("q", "APB3", 32, 16, "D0")
+    c.master("m0", "APB3", 32, 32, "D0").slave("s0", "APB3", 32, 12, "D0")
+    c.bridge("b0", 0x4000_0000, pass_through=False, template="bag_apb2axi")
+    c.bridge("b1", 0x4000_0000, template="bag_axi2apb")
+    c.link("m0", "p", 0).link("p", "b0", 0).link("b0", "x", 0).link("x", "b1", 0)
+    c.link("b1", "q", 0).link("q", "s0", 0)
+    c.region("b0", "win", 0x4000_0000, 0x10_0000).region("b1", "win", 0x4000_0000, window)
+    c.region("s0", "r0", 0x4000_0000, 0x1000)
+    c.decode("m0", "PSLVERR").decode("b0", "DECERR").decode("b1", "PSLVERR")
+    c.option("m0", **APB3_NA).option("b0", **AXIL_NA).option("b1", **APB3_NA)
+    c.option("s0", **APB3_NA)
+    _, result = check(c, tmp_path)
+    assert [f.message for f in result.errors] == (
+        ["Memory_Map row 6: b1 window 0x4000_0000..0x4001_FFFF exceeds the 16-bit address space of q (offsets from 0x4000_0000): accesses above it would reach its low addresses again. Make the window smaller or q's address wider (BRIDGE-WINDOW-RANGE)"]
+        if window > 0x1_0000 else [])  # fmt: skip
 
 
 def test_every_rule_has_a_broken_workbook() -> None:
