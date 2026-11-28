@@ -26,6 +26,7 @@ from openpyxl import Workbook
 
 from hdl_bag.checks import RULES, run_checks
 from hdl_bag.reader import read_workbook
+from hdl_bag.regress.generate import check
 from hdl_bag.template import build_workbook
 from hdl_bag.template.data import SpecData
 from hdl_bag.template.sample_demo_ss import SAMPLE as SAMPLE_SPEC
@@ -559,6 +560,10 @@ CASES: list[tuple[str, list[Edit] | SpecData, list[str]]] = [
      ["Bridges row 5: Window base 0x4000_1000 differs from br_main2per's lowest region 0x4000_0000 (BRIDGE-WINDOW-BASE)"]),
     ("BRIDGE-WINDOW-EMPTY", [("Memory_Map", 16, "Base (hex)", "0x5100_0000"), ("Bridges", 6, "Window base (hex)", "0x5100_0000")],
      ["Memory_Map row 16: br_ahb2aon window 0x5100_0000..0x5100_FFFF reaches no region on aon_apb (BRIDGE-WINDOW-EMPTY)"]),
+    # D129: a 64 KB window behind pass-through N onto a 15-bit fabric (its regions fit).
+    ("BRIDGE-WINDOW-RANGE", [("Bridges", 6, "Pass-through address", "N"), ("Fabrics", 9, "Addr width (bits)", 15)],
+     ["Memory_Map row 16: br_ahb2aon window 0x5000_0000..0x5000_FFFF exceeds the 15-bit address space of aon_apb (offsets from 0x5000_0000): accesses above it would reach its low addresses again. Make the window smaller or aon_apb's address wider (BRIDGE-WINDOW-RANGE)"]),
+    ("BRIDGE-WINDOW-RANGE-fits", [("Bridges", 6, "Pass-through address", "N"), ("Fabrics", 9, "Addr width (bits)", 16)], []),
     ("DEC-UNKNOWN-MASTER", [("Address_Decode", 14, "Master", "ghost"), ("Address_Decode", 14, "Miss response", "DECERR")],
      ["Address_Decode row 14: ghost is not a connected master or bridge (DEC-UNKNOWN-MASTER)"]),
     ("DEC-DUPLICATE", [("Address_Decode", 14, "Master", "dma0"), ("Address_Decode", 14, "Miss response", "DECERR")],
@@ -780,6 +785,23 @@ def test_a_sub_wrapper_that_equals_the_prefix_joined_to_a_pulp_unit_is_legal(
 
 def test_a_normal_module_prefix_is_legal(tmp_path: Path) -> None:
     assert _messages(tmp_path, [("Project", 18, "Value", "demo_ss")]) == []
+
+
+def test_a_pass_through_window_wider_than_the_fabric_behind_it_is_an_error(tmp_path: Path) -> None:
+    """D129, pass-through Y (review of #249): a 2 MB window at 0 onto a 20-bit AXI4-Lite fabric.
+    bag_apb2axi drives the low 20 bits, so an access at 0x10_0000 would reach s0 at 0."""
+    c = Cfg("alias", phase=5)
+    c.domain("D0", "clk_0", "rst_0_n")
+    c.fabric("p", "APB3", 32, 32, "D0").fabric("x", "AXI4-Lite", 32, 20, "D0", "round-robin")
+    c.master("m0", "APB3", 32, 32, "D0").slave("s0", "AXI4-Lite", 32, 12, "D0")
+    c.bridge("b0", 0, template="bag_apb2axi")
+    c.link("m0", "p", 0).link("p", "b0", 0).link("b0", "x", 0).link("x", "s0", 0)
+    c.region("b0", "win", 0, 0x20_0000).region("s0", "r0", 0, 0x1000)
+    c.decode("m0", "PSLVERR").decode("b0", "DECERR")
+    c.option("m0", **APB3_NA).option("b0", **AXIL_NA).option("s0", **AXIL_NA)
+    _, result = check(c, tmp_path)
+    assert [f.message for f in result.errors] == [
+        "Memory_Map row 5: b0 window 0x0000_0000..0x001F_FFFF exceeds the 20-bit address space of x: accesses above it would reach its low addresses again. Make the window smaller or x's address wider (BRIDGE-WINDOW-RANGE)"]  # fmt: skip
 
 
 def test_every_rule_has_a_broken_workbook() -> None:

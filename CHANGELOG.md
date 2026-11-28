@@ -7,8 +7,8 @@ All notable changes to hdl-bag are recorded here. The format follows
 ## [Unreleased]
 
 **Upgrading from 1.0.0:** a workbook that 1.0.0 accepted can now fail `bag check` and
-`bag generate`. Three new rules are errors (`FAB-APB3-SPLIT`, `PORTOPT-PSTRB-SPLIT`,
-`MM-SMALL-AHB`), and `WRAP-FILE-HEADER` refuses a File header outside the workbook's folder.
+`bag generate`. Four new rules are errors (`FAB-APB3-SPLIT`, `PORTOPT-PSTRB-SPLIT`,
+`MM-SMALL-AHB`, `BRIDGE-WINDOW-RANGE`), and `WRAP-FILE-HEADER` refuses a File header outside the workbook's folder.
 The `demo_ss` sample now gives four warnings instead of two (two `PORTOPT-PSTRB-WORD`).
 
 ### Added
@@ -27,6 +27,9 @@ The `demo_ss` sample now gives four warnings instead of two (two `PORTOPT-PSTRB-
     word.
   - `MM-SMALL-AHB` (error): an AHB-Lite region, or alias, smaller than 1 KB.
   - `MM-REGION-WORD` (warning): a region smaller than its slave's data word.
+  - `BRIDGE-WINDOW-RANGE` (error): a bridge window that does not fit in the address width
+    of the fabric behind it. The bridge drives only the low address bits, so an access in
+    the upper part of the window would reach the fabric's low addresses again.
 - The template's Memory_Map status shows "AHB < 1 KB" for a small AHB-Lite region.
 - The manual's install chapter covers installing from PyPI (`pip install hdl-bag`, with the
   `sim` extra for cocotb) and running the release's tools image with it.
