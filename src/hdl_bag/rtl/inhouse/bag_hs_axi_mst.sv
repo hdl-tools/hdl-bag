@@ -223,8 +223,9 @@ module bag_hs_axi_mst #(
 
   logic [InAddrWidth-1:0] axi_addr;
   assign axi_addr = sub_addr;
-  // The AXI address is the low AxiAddrWidth bits; the bits above it are dropped on purpose.
-  if (InAddrWidth > AxiAddrWidth) begin : gen_addr_unused
+  // The AXI address is the low AxiAddrWidth bits: the bridge window, less AddrOffset, must
+  // fit in them, or an access above them aliases (bag check does not refuse that yet).
+  if (InAddrWidth > AxiAddrWidth) begin : gen_addr_msb
     logic unused_addr;
     assign unused_addr = ^axi_addr[InAddrWidth-1:AxiAddrWidth];
   end
